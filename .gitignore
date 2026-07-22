@@ -1,0 +1,61 @@
+# Build outputs
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+*.prof
+coverage.*
+
+# Runtime state
+/data/*
+!/data/.gitkeep
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.log
+*.pid
+*.sock
+
+# Secrets and machine-local configuration
+.env
+.env.*
+!.env.example
+/autozeagent.local.json
+/autozeagent.*.local.json
+/zecrush.local.json
+/zecrush.*.local.json
+*.local.json
+*.private.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+.netrc
+
+# Personal notes and agent workspaces
+/本地执行文档.md
+/.agents/
+/.codex/
+/.claude/
+/.cursor/
+
+# Local tools and editors
+.idea/
+.vscode/
+.fleet/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Existing Crush runtime state
+/.crush/
+
+# Local Go caches
+/.cache/

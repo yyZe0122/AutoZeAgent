@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autozeagent.local/schema/module-manifest-v1.json",
+  "title": "AutoZeAgent Module Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "name", "version", "protocol_version", "entrypoint", "required", "runtime"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "id": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"},
+    "name": {"type": "string", "minLength": 1, "maxLength": 128},
+    "version": {"$ref": "#/$defs/semver"},
+    "protocol_version": {"$ref": "#/$defs/semver"},
+    "entrypoint": {"type": "string", "minLength": 1},
+    "required": {"type": "boolean"},
+    "capabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 3, "maxLength": 128, "pattern": "^[a-z][a-z0-9_-]*(?:\\.[a-z][a-z0-9_-]*)+$"}
+    },
+    "subscriptions": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/subscription"}
+    },
+    "runtime": {"$ref": "#/$defs/runtime"}
+  },
+  "$defs": {
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "startup_timeout_millis": {"type": "integer", "minimum": 0, "maximum": 300000},
+        "rpc_timeout_millis": {"type": "integer", "minimum": 0, "maximum": 60000},
+        "health_interval_millis": {"type": "integer", "minimum": 0, "maximum": 300000},
+        "restart": {"$ref": "#/$defs/restart"}
+      }
+    },
+    "restart": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_restarts": {"type": "integer", "minimum": 0, "maximum": 100},
+        "backoff_millis": {"type": "integer", "minimum": 0, "maximum": 60000}
+      }
+    },
+    "subscription": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "replay"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "maxLength": 64},
+        "event_types": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 128}},
+        "replay": {"enum": ["resume", "current", "from_beginning", "from_sequence"]},
+        "from_sequence": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}

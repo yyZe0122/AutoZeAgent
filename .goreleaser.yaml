@@ -1,0 +1,91 @@
+version: 2
+
+project_name: autozeagent
+
+builds:
+  - id: autozeagent
+    main: ./cmd/autozeagent
+    binary: autozeagent
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - windows
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - >-
+        -s -w
+        -X autozeagent.local/autozeagent/internal/version.Version={{ .Version }}
+        -X autozeagent.local/autozeagent/internal/version.Commit={{ .Commit }}
+        -X autozeagent.local/autozeagent/internal/version.Date={{ .CommitDate }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+  - id: autozeagentd
+    main: ./cmd/autozeagentd
+    binary: autozeagentd
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - windows
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - >-
+        -s -w
+        -X autozeagent.local/autozeagent/internal/version.Version={{ .Version }}
+        -X autozeagent.local/autozeagent/internal/version.Commit={{ .Commit }}
+        -X autozeagent.local/autozeagent/internal/version.Date={{ .CommitDate }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - ids:
+      - autozeagent
+      - autozeagentd
+    name_template: "autozeagent_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - README.md
+      - LICENSE
+      - src: configs/autozeagent.json.example
+        dst: configs
+        strip_parent: true
+      - src: configs/autozeagent.schema.json
+        dst: configs
+        strip_parent: true
+      - src: packaging/systemd/autozeagent.service
+        dst: packaging/systemd
+        strip_parent: true
+      - src: packaging/scripts/*.sh
+        dst: packaging/scripts
+        strip_parent: true
+      - src: packaging/scripts/*.ps1
+        dst: packaging/scripts
+        strip_parent: true
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'

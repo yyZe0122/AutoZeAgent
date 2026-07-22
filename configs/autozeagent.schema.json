@@ -1,0 +1,71 @@
+﻿{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autozeagent.local/schema/autozeagent.json",
+  "title": "AutoZeAgent provider configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["model", "provider"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "model": {"type": "string", "pattern": "^[^/\\s]+/.+$"},
+    "provider": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"$ref": "#/$defs/provider"}
+    }
+  },
+  "$defs": {
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["options"],
+      "properties": {
+        "type": {"$ref": "#/$defs/protocol"},
+        "protocol": {"$ref": "#/$defs/protocol"},
+        "options": {"$ref": "#/$defs/options"},
+        "models": {
+          "type": "object",
+          "additionalProperties": {"$ref": "#/$defs/model"}
+        }
+      }
+    },
+    "protocol": {
+      "type": "string",
+      "enum": [
+        "openai-chat", "openai-chat-completions", "chat-completions", "openai-compatible", "openai-compat",
+        "ollama", "lmstudio", "llamacpp", "vllm", "litellm",
+        "openai-responses", "openai", "responses",
+        "anthropic-messages", "anthropic", "anthropic-compatible", "claude",
+        "gemini-generate-content", "gemini", "google", "google-generative-ai"
+      ]
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["baseURL"],
+      "properties": {
+        "baseURL": {"type": "string", "format": "uri"},
+        "apiKey": {"type": "string"},
+        "completionPath": {"type": "string", "pattern": "^/"},
+        "modelsPath": {"type": "string", "pattern": "^/"},
+        "responseFormat": {"enum": ["auto", "json_schema", "json_object"]},
+        "anthropicVersion": {"type": "string"},
+        "headers": {
+          "type": "object",
+          "additionalProperties": {"type": "string"}
+        }
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string"},
+        "responseFormat": {"enum": ["auto", "json_schema", "json_object"]},
+        "temperature": {"type": "number", "minimum": 0, "maximum": 2},
+        "maxTokens": {"type": "integer", "minimum": 1},
+        "reasoningEffort": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

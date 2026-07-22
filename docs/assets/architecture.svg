@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="820" viewBox="0 0 1280 820" role="img" aria-labelledby="title desc">
+  <title id="title">AutoZeAgent system architecture</title>
+  <desc id="desc">The user communicates through the AutoZeAgent CLI and authenticated local gateway with the daemon. The daemon coordinates the planner and agent, scheduler, policy-gated tool broker, file-based skill catalog, model providers, controlled system effects, and the SQLite source of truth.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07101f"/>
+      <stop offset="1" stop-color="#111a33"/>
+    </linearGradient>
+    <linearGradient id="daemonGradient" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#14213d"/>
+      <stop offset="1" stop-color="#172554"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000814" flood-opacity="0.35"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7dd3fc"/>
+    </marker>
+    <marker id="arrowMuted" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/>
+    </marker>
+    <style>
+      .title { fill: #f8fafc; font: 700 30px "Segoe UI", "Microsoft YaHei", sans-serif; }
+      .subtitle { fill: #94a3b8; font: 400 16px "Segoe UI", "Microsoft YaHei", sans-serif; }
+      .section { fill: #7dd3fc; font: 700 15px "Segoe UI", "Microsoft YaHei", sans-serif; letter-spacing: 1px; }
+      .box-title { fill: #f8fafc; font: 700 18px "Segoe UI", "Microsoft YaHei", sans-serif; }
+      .box-subtitle { fill: #cbd5e1; font: 400 14px "Segoe UI", "Microsoft YaHei", sans-serif; }
+      .small { fill: #94a3b8; font: 400 13px "Segoe UI", "Microsoft YaHei", sans-serif; }
+      .arrow { fill: none; stroke: #7dd3fc; stroke-width: 2.5; marker-end: url(#arrow); }
+      .arrow-muted { fill: none; stroke: #94a3b8; stroke-width: 2; stroke-dasharray: 7 7; marker-end: url(#arrowMuted); }
+    </style>
+  </defs>
+
+  <rect width="1280" height="820" rx="24" fill="url(#background)"/>
+  <circle cx="1130" cy="50" r="180" fill="#2563eb" opacity="0.08"/>
+  <circle cx="90" cy="770" r="220" fill="#06b6d4" opacity="0.06"/>
+
+  <text x="64" y="58" class="title">AutoZeAgent System Architecture / 系统架构</text>
+  <text x="64" y="86" class="subtitle">Local-first, policy-gated, durable agent execution / 本地优先、策略约束、持久化的智能体执行架构</text>
+
+  <text x="64" y="129" class="section">INTERACTION LAYER / 交互层</text>
+
+  <g filter="url(#shadow)">
+    <rect x="64" y="150" width="210" height="82" rx="14" fill="#172033" stroke="#334155"/>
+    <text x="169" y="183" text-anchor="middle" class="box-title">User</text>
+    <text x="169" y="207" text-anchor="middle" class="box-subtitle">用户</text>
+
+    <rect x="374" y="150" width="250" height="82" rx="14" fill="#172033" stroke="#38bdf8"/>
+    <text x="499" y="183" text-anchor="middle" class="box-title">autozeagent CLI</text>
+    <text x="499" y="207" text-anchor="middle" class="box-subtitle">本地命令行客户端</text>
+
+    <rect x="724" y="150" width="492" height="82" rx="14" fill="#172033" stroke="#38bdf8"/>
+    <text x="970" y="183" text-anchor="middle" class="box-title">Authenticated Local Gateway</text>
+    <text x="970" y="207" text-anchor="middle" class="box-subtitle">经过认证的本地网关 · Loopback / Unix Socket</text>
+  </g>
+
+  <path d="M 274 191 H 362" class="arrow"/>
+  <path d="M 624 191 H 712" class="arrow"/>
+
+  <g filter="url(#shadow)">
+    <rect x="64" y="286" width="1152" height="294" rx="20" fill="url(#daemonGradient)" stroke="#3b82f6" stroke-width="2"/>
+    <rect x="64" y="286" width="1152" height="54" rx="20" fill="#1e3a5f"/>
+    <path d="M 64 320 H 1216" stroke="#3b82f6" opacity="0.45"/>
+    <text x="92" y="320" class="box-title">autozeagentd Daemon / 长期运行的守护进程</text>
+    <text x="1186" y="320" text-anchor="end" class="small">Control plane / 控制平面</text>
+
+    <rect x="98" y="382" width="240" height="118" rx="14" fill="#0f1c35" stroke="#60a5fa"/>
+    <text x="218" y="420" text-anchor="middle" class="box-title">Planner &amp; Agent</text>
+    <text x="218" y="446" text-anchor="middle" class="box-subtitle">规划器与智能体</text>
+    <text x="218" y="472" text-anchor="middle" class="small">Bounded execution / 有界执行</text>
+
+    <rect x="379" y="382" width="220" height="118" rx="14" fill="#0f1c35" stroke="#a78bfa"/>
+    <text x="489" y="420" text-anchor="middle" class="box-title">Scheduler</text>
+    <text x="489" y="446" text-anchor="middle" class="box-subtitle">进程内调度器</text>
+    <text x="489" y="472" text-anchor="middle" class="small">Claim · lease · retry</text>
+
+    <rect x="640" y="382" width="250" height="118" rx="14" fill="#0f1c35" stroke="#2dd4bf"/>
+    <text x="765" y="420" text-anchor="middle" class="box-title">Tool Broker</text>
+    <text x="765" y="446" text-anchor="middle" class="box-subtitle">受策略保护的工具代理</text>
+    <text x="765" y="472" text-anchor="middle" class="small">Approval · policy · audit</text>
+
+    <rect x="931" y="382" width="251" height="118" rx="14" fill="#0f1c35" stroke="#f59e0b"/>
+    <text x="1056.5" y="420" text-anchor="middle" class="box-title">Skill Catalog</text>
+    <text x="1056.5" y="446" text-anchor="middle" class="box-subtitle">文件型技能目录</text>
+    <text x="1056.5" y="472" text-anchor="middle" class="small">Versioned snapshots / 版本快照</text>
+  </g>
+
+  <path d="M 970 232 V 270 H 640 V 286" class="arrow"/>
+  <path d="M 379 430 H 350 V 430 H 338" class="arrow-muted"/>
+  <path d="M 338 460 H 628" class="arrow"/>
+  <path d="M 931 442 H 902" class="arrow-muted"/>
+
+  <text x="64" y="627" class="section">DEPENDENCIES &amp; DURABLE STATE / 外部依赖与持久化状态</text>
+
+  <g filter="url(#shadow)">
+    <rect x="64" y="650" width="330" height="104" rx="14" fill="#172033" stroke="#60a5fa"/>
+    <text x="229" y="688" text-anchor="middle" class="box-title">Model Providers</text>
+    <text x="229" y="714" text-anchor="middle" class="box-subtitle">模型提供商 API</text>
+    <text x="229" y="738" text-anchor="middle" class="small">OpenAI · Anthropic · Gemini</text>
+
+    <rect x="475" y="650" width="330" height="104" rx="14" fill="#172033" stroke="#f472b6"/>
+    <text x="640" y="688" text-anchor="middle" class="box-title">core.db · SQLite</text>
+    <text x="640" y="714" text-anchor="middle" class="box-subtitle">持久化事实源</text>
+    <text x="640" y="738" text-anchor="middle" class="small">State · events · audit · recovery</text>
+
+    <rect x="886" y="650" width="330" height="104" rx="14" fill="#172033" stroke="#2dd4bf"/>
+    <text x="1051" y="688" text-anchor="middle" class="box-title">Controlled Effects</text>
+    <text x="1051" y="714" text-anchor="middle" class="box-subtitle">受控系统副作用</text>
+    <text x="1051" y="738" text-anchor="middle" class="small">Filesystem · process · HTTP · Git</text>
+  </g>
+
+  <path d="M 218 500 V 632 H 229 V 638" class="arrow"/>
+  <path d="M 489 500 V 614 H 640 V 638" class="arrow-muted"/>
+  <path d="M 765 500 V 614 H 640 V 638" class="arrow-muted"/>
+  <path d="M 1056 500 V 596 H 640 V 638" class="arrow-muted"/>
+  <path d="M 765 500 V 632 H 1051 V 638" class="arrow"/>
+
+  <text x="64" y="794" class="small">Solid arrows: request or effect flow / 实线：请求或副作用流</text>
+  <text x="430" y="794" class="small">Dashed arrows: coordination or durable state / 虚线：协调或持久化状态</text>
+</svg>

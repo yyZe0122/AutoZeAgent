@@ -1,0 +1,71 @@
+﻿name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows AMD64
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Static check
+        shell: pwsh
+        run: ./scripts/dev.ps1 -Action check
+      - name: Validate PowerShell installer
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path './packaging/scripts/install.ps1'),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | Out-String | Write-Error
+            exit 1
+          }
+      - name: Build commands
+        shell: pwsh
+        run: ./scripts/dev.ps1 -Action build
+
+  ubuntu:
+    name: Ubuntu AMD64
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Static check
+        run: make check
+      - name: Validate packaging shell scripts
+        run: |
+          for script in packaging/scripts/*.sh; do
+            sh -n "$script"
+          done
+      - name: Dependency verification
+        run: |
+          go mod verify
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+      - name: CGo-free native build
+        env:
+          CGO_ENABLED: "0"
+        run: make build

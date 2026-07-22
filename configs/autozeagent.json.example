@@ -1,0 +1,57 @@
+﻿{
+  "$schema": "./configs/autozeagent.schema.json",
+  "model": "deepseek/deepseek-chat",
+  "provider": {
+    "deepseek": {
+      "type": "openai-compatible",
+      "options": {
+        "baseURL": "https://api.deepseek.com",
+        "apiKey": "{env:DEEPSEEK_API_KEY}"
+      },
+      "models": {
+        "deepseek-chat": {
+          "name": "DeepSeek Chat",
+          "temperature": 0.2,
+          "maxTokens": 4096
+        }
+      }
+    },
+    "openai": {
+      "type": "openai",
+      "options": {
+        "baseURL": "https://api.openai.com",
+        "apiKey": "{env:OPENAI_API_KEY}"
+      },
+      "models": {
+        "gpt-model-id": {
+          "name": "OpenAI Responses model",
+          "reasoningEffort": "high"
+        }
+      }
+    },
+    "anthropic": {
+      "type": "anthropic",
+      "options": {
+        "baseURL": "https://api.anthropic.com",
+        "apiKey": "{env:ANTHROPIC_API_KEY}"
+      },
+      "models": {
+        "claude-model-id": {
+          "name": "Claude model"
+        }
+      }
+    },
+    "google": {
+      "type": "gemini",
+      "options": {
+        "baseURL": "https://generativelanguage.googleapis.com",
+        "apiKey": "{env:GEMINI_API_KEY}"
+      },
+      "models": {
+        "gemini-model-id": {
+          "name": "Gemini model"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,37 @@
+[Unit]
+Description=AutoZeAgent local-first agent core
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=autozeagent
+Group=autozeagent
+UMask=0027
+WorkingDirectory=/var/lib/autozeagent
+EnvironmentFile=-/etc/autozeagent/planner.env
+ExecStartPre=/usr/local/bin/autozeagent config validate --mode system
+ExecStart=/usr/local/bin/autozeagentd --mode system
+ExecStartPost=/usr/local/bin/autozeagent health --mode system
+Restart=on-failure
+RestartSec=2s
+TimeoutStartSec=30s
+TimeoutStopSec=30s
+KillMode=control-group
+RuntimeDirectory=autozeagent
+RuntimeDirectoryMode=0750
+StateDirectory=autozeagent
+StateDirectoryMode=0750
+LogsDirectory=autozeagent
+LogsDirectoryMode=0750
+LimitNOFILE=65536
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/autozeagent /run/autozeagent /var/log/autozeagent
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

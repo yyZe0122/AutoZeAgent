@@ -1,0 +1,14 @@
+# Keep repository content deterministic across Windows, Linux, and macOS.
+* text=auto eol=lf
+
+# PowerShell scripts are primarily executed on Windows.
+*.ps1 text eol=crlf
+
+# Binary artifacts must never be line-ending normalized.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
