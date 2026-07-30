@@ -22,7 +22,11 @@ install -d -o root -g autozeagent -m 0750 "$SYSCONFDIR"
 install -d -o autozeagent -g autozeagent -m 0750 "$STATE_DIR" "$LOG_DIR"
 install -m 0755 "$SOURCE_DIR/autozeagent" "$PREFIX/bin/autozeagent"
 install -m 0755 "$SOURCE_DIR/autozeagentd" "$PREFIX/bin/autozeagentd"
-
+if [ -f "$SOURCE_DIR/aze" ]; then
+  install -m 0755 "$SOURCE_DIR/aze" "$PREFIX/bin/aze"
+else
+  ln -sfn autozeagent "$PREFIX/bin/aze"
+fi
 
 install -m 0644 "$SOURCE_DIR/packaging/systemd/autozeagent.service" "$SERVICE_DIR/autozeagent.service"
 if command -v systemctl >/dev/null 2>&1; then

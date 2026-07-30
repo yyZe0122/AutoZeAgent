@@ -44,7 +44,7 @@ func (g *PathGuard) Resolve(value string) (string, error) {
 		return "", errors.New("path is required")
 	}
 	if !filepath.IsAbs(value) {
-		return "", errors.New("tool paths must be absolute")
+		return g.resolveRelative(value)
 	}
 	absolute, err := filepath.Abs(value)
 	if err != nil {
@@ -58,6 +58,31 @@ func (g *PathGuard) Resolve(value string) (string, error) {
 		if pathsecurity.Contains(root, real) {
 			return real, nil
 		}
+	}
+	return "", fmt.Errorf("path escapes configured filesystem roots: %s", value)
+}
+
+func (g *PathGuard) resolveRelative(value string) (string, error) {
+	var lastErr error
+	for _, root := range g.roots {
+		absolute, err := filepath.Abs(filepath.Join(root, value))
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		real, err := pathsecurity.ResolveExisting(absolute)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		for _, r := range g.roots {
+			if pathsecurity.Contains(r, real) {
+				return real, nil
+			}
+		}
+	}
+	if lastErr != nil {
+		return "", fmt.Errorf("resolve relative path: %w", lastErr)
 	}
 	return "", fmt.Errorf("path escapes configured filesystem roots: %s", value)
 }

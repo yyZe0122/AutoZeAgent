@@ -9,9 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"autozeagent.local/autozeagent/internal/app"
@@ -21,6 +23,7 @@ import (
 	"autozeagent.local/autozeagent/internal/corequery"
 	"autozeagent.local/autozeagent/internal/events"
 	"autozeagent.local/autozeagent/internal/kernel"
+	"autozeagent.local/autozeagent/internal/modelstream"
 	"autozeagent.local/autozeagent/internal/runexecution"
 	"autozeagent.local/autozeagent/internal/skillcatalog"
 	"autozeagent.local/autozeagent/internal/tasksubmission"
@@ -34,8 +37,13 @@ const (
 
 type QueryService interface {
 	Check(context.Context) error
+	ListSessions(context.Context, corequery.SessionListOptions) ([]corequery.Session, error)
+	GetSession(context.Context, kernel.SessionID) (corequery.Session, error)
+	SessionTranscript(context.Context, kernel.SessionID, corequery.TranscriptOptions) ([]corequery.TranscriptMessage, error)
+	TaskTranscript(context.Context, kernel.TaskID, corequery.TranscriptOptions) ([]corequery.TranscriptMessage, error)
 	ListTasks(context.Context, corequery.TaskListOptions) ([]corequery.Task, error)
 	GetTask(context.Context, kernel.TaskID) (corequery.Task, error)
+	TaskUsage(context.Context, kernel.TaskID) (corequery.TaskUsage, error)
 	ListPlans(context.Context, corequery.PlanListOptions) ([]corequery.Plan, error)
 	GetPlan(context.Context, kernel.PlanID) (corequery.Plan, error)
 	ListApprovals(context.Context, corequery.ApprovalListOptions) ([]corequery.Approval, error)
@@ -67,6 +75,18 @@ type JobService interface {
 	ChangeState(context.Context, schedulerapi.StateRequest, string) (schedulerapi.Job, error)
 }
 
+// ModelConfig is the model snapshot exposed by GET/PUT /v1/config/model.
+// It must never include API keys or other secrets.
+type ModelConfig struct {
+	Model  string   `json:"model"`
+	Models []string `json:"models"`
+}
+
+// ModelSwitcher applies a provider/model selection at runtime.
+type ModelSwitcher interface {
+	SelectModel(ctx context.Context, ref string) (ModelConfig, error)
+}
+
 type APIConfig struct {
 	Queries           QueryService
 	TaskSubmissions   TaskSubmitter
@@ -77,6 +97,10 @@ type APIConfig struct {
 	Core              interface{ Status() app.Status }
 	Events            *events.Store
 	Skills            *skillcatalog.Catalog
+	ModelConfig       ModelConfig
+	ModelSwitcher     ModelSwitcher
+	// ModelStream is optional; when set, exposes GET /v1/model-stream.
+	ModelStream *modelstream.Hub
 }
 
 type API struct {
@@ -89,15 +113,23 @@ type API struct {
 	core              interface{ Status() app.Status }
 	events            *events.Store
 	skills            *skillcatalog.Catalog
+	modelMu           sync.RWMutex
+	modelConfig       ModelConfig
+	modelSwitcher     ModelSwitcher
+	modelStream       *modelstream.Hub
 }
 
 func NewAPI(config APIConfig) (*API, error) {
 	if config.Queries == nil || config.TaskSubmissions == nil || config.ApprovalDecisions == nil || config.Core == nil || config.Events == nil {
 		return nil, errors.New("gateway queries, task submission service, approval decision service, core, and event store are required")
 	}
+	if config.ModelConfig.Models == nil {
+		config.ModelConfig.Models = []string{}
+	}
 	return &API{
 		queries: config.Queries, taskSubmissions: config.TaskSubmissions,
 		approvalDecisions: config.ApprovalDecisions, runStarts: config.RunStarts, taskControls: config.TaskControls, jobs: config.Jobs, core: config.Core, events: config.Events, skills: config.Skills,
+		modelConfig: config.ModelConfig, modelSwitcher: config.ModelSwitcher, modelStream: config.ModelStream,
 	}, nil
 }
 
@@ -106,12 +138,24 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/v1/health":
 		a.handleHealth(w, r)
+	case r.URL.Path == "/v1/config/model":
+		a.handleConfigModel(w, r)
 	case r.URL.Path == "/v1/skills":
 		a.handleSkills(w, r)
+	case r.URL.Path == "/v1/sessions":
+		a.handleSessions(w, r)
+	case strings.HasSuffix(r.URL.Path, "/messages") && strings.HasPrefix(r.URL.Path, "/v1/sessions/"):
+		a.handleSessionMessages(w, r)
+	case strings.HasPrefix(r.URL.Path, "/v1/sessions/"):
+		a.handleSession(w, r)
 	case r.URL.Path == "/v1/tasks":
 		a.handleTasks(w, r)
 	case strings.HasSuffix(r.URL.Path, "/actions") && strings.HasPrefix(r.URL.Path, "/v1/tasks/"):
 		a.handleTaskAction(w, r)
+	case strings.HasSuffix(r.URL.Path, "/usage") && strings.HasPrefix(r.URL.Path, "/v1/tasks/"):
+		a.handleTaskUsage(w, r)
+	case strings.HasSuffix(r.URL.Path, "/messages") && strings.HasPrefix(r.URL.Path, "/v1/tasks/"):
+		a.handleTaskMessages(w, r)
 	case strings.HasPrefix(r.URL.Path, "/v1/tasks/"):
 		a.handleTask(w, r)
 	case r.URL.Path == "/v1/jobs":
@@ -136,6 +180,8 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.handleEvents(w, r)
 	case r.URL.Path == "/v1/events/stream":
 		a.handleEventStream(w, r)
+	case r.URL.Path == "/v1/model-stream":
+		a.handleModelStream(w, r)
 	default:
 		writeError(w, http.StatusNotFound, "not_found", "endpoint not found")
 	}
@@ -155,6 +201,50 @@ func (a *API) handleHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, healthResponse{OK: true, Core: a.core.Status()})
+}
+
+func (a *API) handleConfigModel(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		a.modelMu.RLock()
+		config := a.modelConfig
+		a.modelMu.RUnlock()
+		models := config.Models
+		if models == nil {
+			models = []string{}
+		}
+		writeJSON(w, http.StatusOK, ModelConfig{Model: config.Model, Models: models})
+	case http.MethodPut:
+		if a.modelSwitcher == nil {
+			writeError(w, http.StatusServiceUnavailable, "model_switch_unavailable", "model switching is not configured")
+			return
+		}
+		var request struct {
+			Model string `json:"model"`
+		}
+		if err := decodeJSON(w, r, &request); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+		config, err := a.modelSwitcher.SelectModel(r.Context(), request.Model)
+		if err != nil {
+			if applicationerror.IsCode(err, applicationerror.CodeUnavailable) {
+				writeApplicationError(w, err)
+				return
+			}
+			writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+		if config.Models == nil {
+			config.Models = []string{}
+		}
+		a.modelMu.Lock()
+		a.modelConfig = config
+		a.modelMu.Unlock()
+		writeJSON(w, http.StatusOK, config)
+	default:
+		methodNotAllowed(w, http.MethodGet+", "+http.MethodPut)
+	}
 }
 
 type skillMetadataResponse struct {
@@ -182,18 +272,118 @@ func (a *API) handleSkills(w http.ResponseWriter, r *http.Request) {
 }
 
 type taskSubmissionRequest struct {
-	TaskID    kernel.TaskID    `json:"task_id"`
-	SessionID kernel.SessionID `json:"session_id"`
-	PlanID    kernel.PlanID    `json:"plan_id"`
-	Title     string           `json:"title"`
-	Objective string           `json:"objective"`
-	SkillIDs  []string         `json:"skill_ids,omitempty"`
+	TaskID        kernel.TaskID        `json:"task_id"`
+	SessionID     kernel.SessionID     `json:"session_id"`
+	PlanID        kernel.PlanID        `json:"plan_id"`
+	Title         string               `json:"title"`
+	Objective     string               `json:"objective"`
+	SkillIDs      []string             `json:"skill_ids,omitempty"`
+	ExecutionMode kernel.ExecutionMode `json:"execution_mode,omitempty"`
 }
 
 type taskSubmissionResponse struct {
 	Task            corequery.Task         `json:"task"`
 	Plan            *approval.PlanDocument `json:"plan,omitempty"`
+	PlanID          kernel.PlanID          `json:"plan_id,omitempty"`
+	RunID           kernel.RunID           `json:"run_id,omitempty"`
 	PlanningPending bool                   `json:"planning_pending,omitempty"`
+}
+
+func (a *API) handleSessions(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	request, ok := parseListRequest(w, r)
+	if !ok {
+		return
+	}
+	items, err := a.queries.ListSessions(r.Context(), corequery.SessionListOptions{
+		Page: request.Page, Sort: request.Sort,
+	})
+	if err != nil {
+		writeInternal(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sessions": items, "page": request.metadata(len(items))})
+}
+
+func (a *API) handleSession(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	id, ok := pathID(w, r.URL.Path, "/v1/sessions/")
+	if !ok {
+		return
+	}
+	item, err := a.queries.GetSession(r.Context(), kernel.SessionID(id))
+	if errors.Is(err, corequery.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "session not found")
+		return
+	}
+	if err != nil {
+		writeInternal(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (a *API) handleSessionMessages(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	// path: /v1/sessions/{id}/messages
+	trimmed := strings.TrimPrefix(r.URL.Path, "/v1/sessions/")
+	id := strings.TrimSuffix(trimmed, "/messages")
+	id = strings.Trim(id, "/")
+	if id == "" || strings.Contains(id, "/") {
+		writeError(w, http.StatusBadRequest, "invalid_request", "session id required")
+		return
+	}
+	request, ok := parseListRequest(w, r)
+	if !ok {
+		return
+	}
+	items, err := a.queries.SessionTranscript(r.Context(), kernel.SessionID(id), corequery.TranscriptOptions{
+		Page: request.Page,
+	})
+	if errors.Is(err, corequery.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "session not found")
+		return
+	}
+	if err != nil {
+		writeInternal(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"messages": items, "page": request.metadata(len(items))})
+}
+
+func (a *API) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	trimmed := strings.TrimPrefix(r.URL.Path, "/v1/tasks/")
+	id := strings.TrimSuffix(trimmed, "/messages")
+	id = strings.Trim(id, "/")
+	if id == "" || strings.Contains(id, "/") {
+		writeError(w, http.StatusBadRequest, "invalid_request", "task id required")
+		return
+	}
+	request, ok := parseListRequest(w, r)
+	if !ok {
+		return
+	}
+	items, err := a.queries.TaskTranscript(r.Context(), kernel.TaskID(id), corequery.TranscriptOptions{
+		Page: request.Page,
+	})
+	if errors.Is(err, corequery.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "task not found")
+		return
+	}
+	if err != nil {
+		writeInternal(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"messages": items, "page": request.metadata(len(items))})
 }
 
 func (a *API) handleTasks(w http.ResponseWriter, r *http.Request) {
@@ -237,9 +427,10 @@ func (a *API) submitTask(w http.ResponseWriter, r *http.Request) {
 	allowExisting := strings.TrimSpace(string(request.TaskID)) != ""
 	result, err := a.taskSubmissions.Submit(r.Context(), tasksubmission.Request{
 		TaskID: request.TaskID, SessionID: request.SessionID, PlanID: request.PlanID,
-		Title: request.Title, Objective: request.Objective, SkillIDs: request.SkillIDs, EnsureSession: true, AllowExisting: allowExisting,
+		Title: request.Title, Objective: request.Objective, SkillIDs: request.SkillIDs,
+		ExecutionMode: request.ExecutionMode, EnsureSession: true, AllowExisting: allowExisting,
 	})
-	response := taskSubmissionResponse{Task: taskViewFromDomain(result.Task), Plan: result.Plan}
+	response := taskSubmissionResponse{Task: taskViewFromDomain(result.Task), Plan: result.Plan, RunID: result.RunID, PlanID: result.PlanID}
 	if applicationerror.IsCode(err, applicationerror.CodePlanningPending) {
 		response.PlanningPending = true
 		writeJSON(w, http.StatusAccepted, response)
@@ -272,6 +463,23 @@ func (a *API) handleTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, item)
+}
+
+func (a *API) handleTaskUsage(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	basePath := strings.TrimSuffix(r.URL.Path, "/usage")
+	id, ok := pathID(w, basePath, "/v1/tasks/")
+	if !ok {
+		return
+	}
+	usage, err := a.queries.TaskUsage(r.Context(), kernel.TaskID(id))
+	if err != nil {
+		writeInternal(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, usage)
 }
 
 func (a *API) handleTaskAction(w http.ResponseWriter, r *http.Request) {
@@ -421,9 +629,13 @@ func taskViewFromDomain(task kernel.Task) corequery.Task {
 		return corequery.Task{}
 	}
 	sessionID := task.SessionID
+	mode := string(task.ExecutionMode)
+	if mode == "" {
+		mode = string(kernel.ExecutionModeAgent)
+	}
 	return corequery.Task{
 		ID: task.ID, SessionID: &sessionID, Title: task.Title, Objective: task.Objective,
-		State: string(task.State), Version: task.Version,
+		State: string(task.State), ExecutionMode: mode, Version: task.Version,
 		CreatedAt: task.CreatedAt.UTC().Format(time.RFC3339Nano), UpdatedAt: task.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
 }
@@ -740,6 +952,62 @@ func (a *API) handleEventStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleModelStream fans out live provider StreamEvents (typewriter).
+// Query: session_id (optional filter), run_id (optional filter).
+func (a *API) handleModelStream(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	if a.modelStream == nil {
+		writeError(w, http.StatusServiceUnavailable, "stream_unavailable", "model stream is not configured")
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "stream_unavailable", "streaming is unavailable")
+		return
+	}
+	sessionID := strings.TrimSpace(r.URL.Query().Get("session_id"))
+	runID := strings.TrimSpace(r.URL.Query().Get("run_id"))
+	ch, cancel := a.modelStream.Subscribe(sessionID, runID, 128)
+	defer cancel()
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	// Initial comment so clients know the stream is open.
+	if _, err := fmt.Fprintf(w, ": model-stream ready\n\n"); err != nil {
+		return
+	}
+	flusher.Flush()
+
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-heartbeat.C:
+			if _, err := fmt.Fprintf(w, ": ping\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		case env, ok := <-ch:
+			if !ok {
+				return
+			}
+			payload, err := json.Marshal(env)
+			if err != nil {
+				return
+			}
+			if _, err := fmt.Fprintf(w, "id: %d\nevent: model\ndata: %s\n\n", env.Seq, payload); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
 type listRequest struct {
 	Page corequery.Page
 	Sort corequery.SortDirection
@@ -879,7 +1147,10 @@ func writeApplicationError(w http.ResponseWriter, err error) bool {
 	return true
 }
 
-func writeInternal(w http.ResponseWriter, _ error) {
+func writeInternal(w http.ResponseWriter, err error) {
+	if err != nil {
+		slog.Error("gateway internal error", "component", "gateway", "operation", "http", "result", "failed", "error", err)
+	}
 	writeError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 }
 func writeError(w http.ResponseWriter, status int, code, message string) {

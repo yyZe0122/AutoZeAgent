@@ -17,7 +17,7 @@ if command -v systemctl >/dev/null 2>&1; then
   systemctl disable --now autozeagent.service 2>/dev/null || true
 fi
 rm -f "$SERVICE_DIR/autozeagent.service"
-rm -f "$PREFIX/bin/autozeagent" "$PREFIX/bin/autozeagentd"
+rm -f "$PREFIX/bin/autozeagent" "$PREFIX/bin/autozeagentd" "$PREFIX/bin/aze"
 # Remove retired module binaries so upgrades clean legacy installations.
 rm -f "$MODULE_DIR/memory/autozeagent-memory" "$MODULE_DIR/autozeagent-memory" "$MODULE_DIR/autozeagent-skills" "$MODULE_DIR/autozeagent-scheduler" "$MODULE_DIR/autozeagent-evolution"
 rmdir "$MODULE_DIR/memory" 2>/dev/null || true

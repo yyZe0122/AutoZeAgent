@@ -27,7 +27,7 @@ func newFileTools(roots []string) ([]Tool, error) {
 	if err != nil {
 		return nil, err
 	}
-	names := []string{"fs.read", "fs.list", "fs.stat", "fs.write", "fs.patch", "fs.mkdir"}
+	names := []string{"fs_read", "fs_list", "fs_stat", "fs_write", "fs_patch", "fs_mkdir"}
 	result := make([]Tool, 0, len(names))
 	for _, name := range names {
 		result = append(result, &fileTool{name: name, guard: guard})
@@ -37,7 +37,7 @@ func newFileTools(roots []string) ([]Tool, error) {
 
 func (t *fileTool) Definition() toolapi.Definition {
 	risk := policy.RiskR0
-	if t.name == "fs.write" || t.name == "fs.patch" || t.name == "fs.mkdir" {
+	if t.name == "fs_write" || t.name == "fs_patch" || t.name == "fs_mkdir" {
 		risk = policy.RiskR1
 	}
 	return toolapi.Definition{
@@ -61,25 +61,25 @@ func (t *fileTool) Authorization(raw json.RawMessage) (Authorization, error) {
 func (t *fileTool) authorizationPath(raw json.RawMessage) (string, error) {
 	var path string
 	switch t.name {
-	case "fs.read":
+	case "fs_read":
 		var input readInput
 		if err := decodeStrict(raw, &input); err != nil {
 			return "", err
 		}
 		path = input.Path
-	case "fs.write":
+	case "fs_write":
 		var input writeInput
 		if err := decodeStrict(raw, &input); err != nil {
 			return "", err
 		}
 		path = input.Path
-	case "fs.patch":
+	case "fs_patch":
 		var input patchInput
 		if err := decodeStrict(raw, &input); err != nil {
 			return "", err
 		}
 		path = input.Path
-	case "fs.list", "fs.stat", "fs.mkdir":
+	case "fs_list", "fs_stat", "fs_mkdir":
 		var input struct {
 			Path string `json:"path"`
 		}
@@ -98,17 +98,17 @@ func (t *fileTool) Execute(ctx context.Context, raw json.RawMessage) (json.RawMe
 		return nil, err
 	}
 	switch t.name {
-	case "fs.read":
+	case "fs_read":
 		return t.read(ctx, raw)
-	case "fs.list":
+	case "fs_list":
 		return t.list(ctx, raw)
-	case "fs.stat":
+	case "fs_stat":
 		return t.stat(ctx, raw)
-	case "fs.write":
+	case "fs_write":
 		return t.write(ctx, raw)
-	case "fs.patch":
+	case "fs_patch":
 		return t.patch(ctx, raw)
-	case "fs.mkdir":
+	case "fs_mkdir":
 		return t.mkdir(ctx, raw)
 	default:
 		return nil, ErrUnknownTool
@@ -363,24 +363,26 @@ func atomicWrite(ctx context.Context, path string, content []byte) error {
 }
 
 func fileDescription(name string) string {
+	const pathHint = " Prefer absolute paths under configured roots; relative paths resolve against the workspace root."
 	return map[string]string{
-		"fs.read":  "Read a file inside configured filesystem roots.",
-		"fs.list":  "List a directory inside configured filesystem roots.",
-		"fs.stat":  "Read file metadata inside configured filesystem roots.",
-		"fs.write": "Atomically write a file inside configured filesystem roots.",
-		"fs.patch": "Replace an exact text occurrence in a file.",
-		"fs.mkdir": "Create a directory inside configured filesystem roots.",
+		"fs_read":  "Read a file inside configured filesystem roots." + pathHint,
+		"fs_list":  "List a directory inside configured filesystem roots." + pathHint,
+		"fs_stat":  "Read file metadata inside configured filesystem roots." + pathHint,
+		"fs_write": "Atomically write a file inside configured filesystem roots." + pathHint,
+		"fs_patch": "Replace an exact text occurrence in a file." + pathHint,
+		"fs_mkdir": "Create a directory inside configured filesystem roots." + pathHint,
 	}[name]
 }
 
 func fileSchema(name string) string {
+	pathProp := `{"type":"string","description":"Prefer absolute path under configured roots; relative paths resolve against the workspace root."}`
 	schemas := map[string]string{
-		"fs.read":  `{"type":"object","additionalProperties":false,"required":["path"],"properties":{"path":{"type":"string"},"max_bytes":{"type":"integer","minimum":1}}}`,
-		"fs.list":  `{"type":"object","additionalProperties":false,"required":["path"],"properties":{"path":{"type":"string"}}}`,
-		"fs.stat":  `{"type":"object","additionalProperties":false,"required":["path"],"properties":{"path":{"type":"string"}}}`,
-		"fs.write": `{"type":"object","additionalProperties":false,"required":["path","content"],"properties":{"path":{"type":"string"},"content":{"type":"string"}}}`,
-		"fs.patch": `{"type":"object","additionalProperties":false,"required":["path","old","new"],"properties":{"path":{"type":"string"},"old":{"type":"string"},"new":{"type":"string"},"replace_all":{"type":"boolean"}}}`,
-		"fs.mkdir": `{"type":"object","additionalProperties":false,"required":["path"],"properties":{"path":{"type":"string"}}}`,
+		"fs_read":  `{"type":"object","additionalProperties":false,"required":["path"],"properties":{"path":` + pathProp + `,"max_bytes":{"type":"integer","minimum":1}}}`,
+		"fs_list":  `{"type":"object","additionalProperties":false,"required":["path"],"properties":{"path":` + pathProp + `}}`,
+		"fs_stat":  `{"type":"object","additionalProperties":false,"required":["path"],"properties":{"path":` + pathProp + `}}`,
+		"fs_write": `{"type":"object","additionalProperties":false,"required":["path","content"],"properties":{"path":` + pathProp + `,"content":{"type":"string"}}}`,
+		"fs_patch": `{"type":"object","additionalProperties":false,"required":["path","old","new"],"properties":{"path":` + pathProp + `,"old":{"type":"string"},"new":{"type":"string"},"replace_all":{"type":"boolean"}}}`,
+		"fs_mkdir": `{"type":"object","additionalProperties":false,"required":["path"],"properties":{"path":` + pathProp + `}}`,
 	}
 	return schemas[name]
 }

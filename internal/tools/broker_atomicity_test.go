@@ -20,7 +20,7 @@ type atomicityTestTool struct {
 
 func (t *atomicityTestTool) Definition() toolapi.Definition {
 	return toolapi.Definition{
-		Name:                 "test.write",
+		Name:                 "test_write",
 		Description:          "test write tool",
 		InputSchema:          json.RawMessage(`{"type":"object","properties":{}}`),
 		Risk:                 string(policy.RiskR1),
@@ -29,7 +29,7 @@ func (t *atomicityTestTool) Definition() toolapi.Definition {
 }
 
 func (t *atomicityTestTool) Authorization(json.RawMessage) (Authorization, error) {
-	return Authorization{Capability: "test.write"}, nil
+	return Authorization{Capability: "test_write"}, nil
 }
 
 func (t *atomicityTestTool) Execute(context.Context, json.RawMessage) (json.RawMessage, error) {
@@ -61,7 +61,7 @@ func TestExecuteRollsBackGrantWhenToolCallStartFails(t *testing.T) {
 			grant_id, approval_id, task_id, plan_id, step_id, capability, resource_scope,
 			issued_at, expires_at, plan_hash, paths_json, command_name, command_args_json,
 			network_domains_json, max_duration_ms, max_calls, used_calls, one_time, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, '[]', '', '[]', '[]', 1000, 1, 0, 1, ?)`, []any{"grant-1", "approval-1", "task-1", "plan-1", "step-1", "test.write", stamp, expires, "hash-1", stamp}},
+		) VALUES (?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, '[]', '', '[]', '[]', 1000, 1, 0, 1, ?)`, []any{"grant-1", "approval-1", "task-1", "plan-1", "step-1", "test_write", stamp, expires, "hash-1", stamp}},
 		{"INSERT INTO runs (run_id, task_id, plan_id, state, started_at, updated_at, step_id) VALUES (?, ?, ?, 'running', ?, ?, ?)", []any{"run-1", "task-1", "plan-1", stamp, stamp, "step-1"}},
 		{"INSERT INTO tool_calls (tool_call_id, run_id, step_id, tool_name, state, request, started_at) VALUES (?, ?, ?, ?, 'running', '{}', ?)", []any{"call-1", "run-1", "step-1", "existing", stamp}},
 	}
@@ -94,7 +94,7 @@ func TestExecuteRollsBackGrantWhenToolCallStartFails(t *testing.T) {
 	_, err = broker.Execute(ctx, toolapi.Request{
 		CallID: "call-1", RunID: "run-1", TaskID: "task-1", PlanID: "plan-1",
 		PlanHash: "hash-1", StepID: "step-1", CapabilityGrantID: "grant-1",
-		Actor: "agent", Tool: "test.write", Arguments: json.RawMessage(`{}`),
+		Actor: "agent", Tool: "test_write", Arguments: json.RawMessage(`{}`),
 	})
 	if err == nil || !strings.Contains(err.Error(), "insert tool call") {
 		t.Fatalf("Execute error = %v; want insert tool call failure", err)
@@ -121,7 +121,7 @@ func TestExecuteRollsBackGrantWhenToolCallStartFails(t *testing.T) {
 	response, err := broker.Execute(ctx, toolapi.Request{
 		CallID: "call-2", RunID: "run-1", TaskID: "task-1", PlanID: "plan-1",
 		PlanHash: "hash-1", StepID: "step-1", CapabilityGrantID: "grant-1",
-		Actor: "agent", Tool: "test.write", Arguments: json.RawMessage(`{}`),
+		Actor: "agent", Tool: "test_write", Arguments: json.RawMessage(`{}`),
 	})
 	if err != nil {
 		t.Fatalf("Execute after rollback returned error: %v", err)

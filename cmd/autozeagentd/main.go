@@ -10,16 +10,22 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"autozeagent.local/autozeagent/internal/agent"
+	"autozeagent.local/autozeagent/internal/agentautostart"
 	"autozeagent.local/autozeagent/internal/app"
+	"autozeagent.local/autozeagent/internal/applicationerror"
 	"autozeagent.local/autozeagent/internal/approval"
 	"autozeagent.local/autozeagent/internal/approvalsubmission"
 	"autozeagent.local/autozeagent/internal/artifacts"
+	"autozeagent.local/autozeagent/internal/chatsession"
 	"autozeagent.local/autozeagent/internal/corequery"
+	"autozeagent.local/autozeagent/internal/daemonctl"
 	"autozeagent.local/autozeagent/internal/events"
 	"autozeagent.local/autozeagent/internal/gateway"
 	"autozeagent.local/autozeagent/internal/kernel"
+	"autozeagent.local/autozeagent/internal/modelstream"
 	"autozeagent.local/autozeagent/internal/planner"
 	"autozeagent.local/autozeagent/internal/planningrecovery"
 	"autozeagent.local/autozeagent/internal/platform/paths"
@@ -122,7 +128,26 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	providerRuntime, err := providerRuntimeFromConfig(layout.ConfigDir, workingDirectory, kernelRepository, allowedCapabilities)
+	migrateFrom := []string{workingDirectory, layout.DataDir}
+	if clientCWD := strings.TrimSpace(os.Getenv("AUTOZEAGENT_CLIENT_CWD")); clientCWD != "" {
+		migrateFrom = append([]string{clientCWD}, migrateFrom...)
+	}
+	ensureResult, err := providerconfig.EnsureConfig(layout.ConfigDir, migrateFrom...)
+	if err != nil {
+		return fmt.Errorf("ensure provider config: %w", err)
+	}
+	switch {
+	case ensureResult.Migrated:
+		slog.Info("provider config migrated", "component", "daemon", "operation", "ensure_config", "result", "succeeded",
+			"config_path", ensureResult.Path, "source", ensureResult.Source)
+	case ensureResult.Created:
+		slog.Info("provider config template created", "component", "daemon", "operation", "ensure_config", "result", "succeeded",
+			"config_path", ensureResult.Path)
+	default:
+		slog.Info("provider config ready", "component", "daemon", "operation", "ensure_config", "result", "succeeded",
+			"config_path", ensureResult.Path)
+	}
+	providerRuntime, err := providerRuntimeFromConfig(layout.ConfigDir, kernelRepository, allowedCapabilities)
 	if err != nil {
 		return err
 	}
@@ -130,15 +155,13 @@ func run(args []string) error {
 	if providerRuntime != nil {
 		planningService = providerRuntime.planning
 	}
-	taskSubmissionConfig := tasksubmission.Config{Repository: kernelRepository, Skills: skillCatalog}
-	if planningService != nil {
-		taskSubmissionConfig.Planner = planningService
-	}
-	taskSubmissionService, err := tasksubmission.New(taskSubmissionConfig)
+	queries, err := corequery.New(database.SQL())
 	if err != nil {
 		return err
 	}
-	queries, err := corequery.New(database.SQL())
+	approvalDecisionService, err := approvalsubmission.New(approvalsubmission.Config{
+		Plans: queries, Repository: approvalRepository,
+	})
 	if err != nil {
 		return err
 	}
@@ -146,10 +169,12 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	modelHub := modelstream.NewHub()
 	var agentRunner *agent.Runner
 	if providerRuntime != nil {
 		agentRunner, err = agent.New(agent.Config{
-			Provider: providerRuntime.provider, Broker: toolBroker, Records: recordStore, Model: providerRuntime.model,
+			Provider: providerRuntime.provider, Broker: toolBroker, Records: recordStore,
+			Model: providerRuntime.model, Stream: modelHub,
 		})
 		if err != nil {
 			return err
@@ -166,6 +191,42 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
+	}
+	// plan mode: after plan lands, human approves (agentautostart only for plan recovery paths).
+	// agent mode chat skips Planner via chatsession.
+	var planningSurface agentautostart.Planner
+	if planningService != nil {
+		// Keep auto-start wrapper for any residual agent-mode plans; new agent submits use chat.
+		if runService != nil {
+			planningSurface = agentautostart.Wrap(planningService, approvalDecisionService, runService)
+		} else {
+			planningSurface = planningService
+		}
+	}
+	var chatService *chatsession.Service
+	if agentRunner != nil {
+		chatService, err = chatsession.New(chatsession.Config{
+			DB: database.SQL(), Repository: kernelRepository, Approvals: approvalRepository,
+			Agent: agentRunner, Transcript: queries, WorkspaceRoots: []string{workingDirectory},
+			AllowWrite: true,
+			OnError: func(err error) {
+				slog.Error("chat session failure", "component", "chatsession", "operation", "execute", "result", "failed", "error", err)
+			},
+		})
+		if err != nil {
+			return err
+		}
+	}
+	taskSubmissionConfig := tasksubmission.Config{Repository: kernelRepository, Skills: skillCatalog}
+	if planningSurface != nil {
+		taskSubmissionConfig.Planner = planningSurface
+	}
+	if chatService != nil {
+		taskSubmissionConfig.Chat = chatsession.AsTaskChat(chatService)
+	}
+	taskSubmissionService, err := tasksubmission.New(taskSubmissionConfig)
+	if err != nil {
+		return err
 	}
 	hostname, _ := os.Hostname()
 	if hostname == "" {
@@ -189,10 +250,10 @@ func run(args []string) error {
 	if runService != nil {
 		backgroundRunners = append(backgroundRunners, runService)
 	}
-	if planningService != nil {
+	if planningSurface != nil {
 		planningRecoveryRunner, err := planningrecovery.New(planningrecovery.Config{
 			Repository: kernelRepository,
-			Planner:    planningService,
+			Planner:    planningSurface,
 			OnError: func(err error) {
 				slog.Error("planning recovery failure", "component", "planner", "operation", "recover", "result", "failed", "error", err)
 			},
@@ -227,20 +288,24 @@ func run(args []string) error {
 		return nil
 	}
 
-	approvalDecisionService, err := approvalsubmission.New(approvalsubmission.Config{
-		Plans: queries, Repository: approvalRepository,
-	})
-	if err != nil {
-		return err
-	}
 	var runStarter gateway.RunStarter
 	if runService != nil {
 		runStarter = runService
 	}
+	modelConfig, err := gatewayModelConfig(layout.ConfigDir, providerRuntime)
+	if err != nil {
+		return err
+	}
+	var modelSwitcher gateway.ModelSwitcher
+	if providerRuntime != nil {
+		providerRuntime.agent = agentRunner
+		modelSwitcher = providerRuntime
+	}
 	gatewayAPI, err := gateway.NewAPI(gateway.APIConfig{
 		Queries: queries, TaskSubmissions: taskSubmissionService,
 		ApprovalDecisions: approvalDecisionService, RunStarts: runStarter, TaskControls: runService, Jobs: schedulerStore,
-		Core: core, Events: eventStore, Skills: skillCatalog,
+		Core: core, Events: eventStore, Skills: skillCatalog, ModelConfig: modelConfig, ModelSwitcher: modelSwitcher,
+		ModelStream: modelHub,
 	})
 	if err != nil {
 		return err
@@ -256,6 +321,14 @@ func run(args []string) error {
 		return err
 	}
 	defer gatewayRunner.Close()
+	if err := daemonctl.WritePID(layout.RuntimeDir); err != nil {
+		return err
+	}
+	defer func() {
+		if err := daemonctl.RemovePID(layout.RuntimeDir); err != nil {
+			slog.Warn("remove daemon pid file", "component", "daemon", "operation", "stop", "result", "warning", "error", err)
+		}
+	}()
 	if err := core.AddBackgroundRunner(gatewayRunner); err != nil {
 		return err
 	}
@@ -283,9 +356,14 @@ func discoverSkillCatalog(layout paths.Layout, workingDirectory string) (*skillc
 }
 
 type configuredProviderRuntime struct {
-	provider providerapi.Provider
-	model    string
-	planning *planner.Service
+	mu                  sync.Mutex
+	configDir           string
+	provider            providerapi.Provider
+	model               string
+	selectedRef         string
+	planning            *planner.Service
+	agent               *agent.Runner
+	allowedCapabilities map[string]policy.RiskLevel
 }
 
 func plannerCapabilities(broker *tools.Broker) (map[string]policy.RiskLevel, error) {
@@ -302,10 +380,45 @@ func plannerCapabilities(broker *tools.Broker) (map[string]policy.RiskLevel, err
 	}
 	return capabilities, nil
 }
-func providerRuntimeFromConfig(configDir, workingDirectory string, repository planner.TaskRepository, capabilities map[string]policy.RiskLevel) (*configuredProviderRuntime, error) {
-	configured, err := providerconfig.Load(configDir, workingDirectory)
+func gatewayModelConfig(configDir string, runtime *configuredProviderRuntime) (gateway.ModelConfig, error) {
+	selected, refs, err := providerconfig.ListModelRefs(configDir)
 	if err != nil {
-		return nil, err
+		return gateway.ModelConfig{}, err
+	}
+	if runtime != nil && strings.TrimSpace(runtime.selectedRef) != "" {
+		selected = runtime.selectedRef
+	} else if configured, loadErr := providerconfig.Load(configDir); loadErr == nil && configured != nil {
+		selected = configured.ProviderID + "/" + configured.ModelID
+	} else if runtime != nil && strings.TrimSpace(runtime.model) != "" {
+		selected = runtime.model
+	}
+	models := make([]string, 0, len(refs)+1)
+	seen := map[string]struct{}{}
+	add := func(id string) {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		models = append(models, id)
+	}
+	add(selected)
+	for _, ref := range refs {
+		add(ref.ID)
+	}
+	return gateway.ModelConfig{Model: selected, Models: models}, nil
+}
+
+func providerRuntimeFromConfig(configDir string, repository planner.TaskRepository, capabilities map[string]policy.RiskLevel) (*configuredProviderRuntime, error) {
+	configured, err := providerconfig.Load(configDir)
+	if err != nil {
+		// Incomplete template (e.g. missing {env:…}) must not block gateway; model switch stays unavailable.
+		slog.Warn("provider config not loaded", "component", "daemon", "operation", "load_config", "result", "warning",
+			"config_dir", configDir, "error", err)
+		return nil, nil
 	}
 	if configured == nil {
 		return nil, nil
@@ -322,5 +435,61 @@ func providerRuntimeFromConfig(configDir, workingDirectory string, repository pl
 	if err != nil {
 		return nil, fmt.Errorf("configure planning service: %w", err)
 	}
-	return &configuredProviderRuntime{provider: provider, model: configured.ModelID, planning: service}, nil
+	selected := configured.ProviderID + "/" + configured.ModelID
+	return &configuredProviderRuntime{
+		configDir: configDir,
+		provider:  provider, model: configured.ModelID, selectedRef: selected,
+		planning: service, allowedCapabilities: capabilities,
+	}, nil
+}
+
+func (r *configuredProviderRuntime) SelectModel(_ context.Context, ref string) (gateway.ModelConfig, error) {
+	if r == nil {
+		return gateway.ModelConfig{}, applicationerror.Wrap(applicationerror.CodeUnavailable, false, errors.New("provider runtime is not configured"))
+	}
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return gateway.ModelConfig{}, errors.New("model is required")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if ref == r.selectedRef {
+		return gatewayModelConfig(r.configDir, r)
+	}
+	resolved, err := providerconfig.ResolveModel(r.configDir, ref)
+	if err != nil {
+		return gateway.ModelConfig{}, err
+	}
+	provider, err := providers.NewConfigured(*resolved)
+	if err != nil {
+		return gateway.ModelConfig{}, err
+	}
+	writtenPath, err := providerconfig.WriteSelectedModel(r.configDir, ref)
+	if err != nil {
+		return gateway.ModelConfig{}, err
+	}
+	if r.planning != nil {
+		if plannerEngine := r.planning.Planner(); plannerEngine != nil {
+			if err := plannerEngine.SetProvider(provider); err != nil {
+				return gateway.ModelConfig{}, err
+			}
+			if err := plannerEngine.SetModel(resolved.ModelID); err != nil {
+				return gateway.ModelConfig{}, err
+			}
+		}
+	}
+	if r.agent != nil {
+		if err := r.agent.SetProvider(provider); err != nil {
+			return gateway.ModelConfig{}, err
+		}
+		if err := r.agent.SetModel(resolved.ModelID); err != nil {
+			return gateway.ModelConfig{}, err
+		}
+	}
+	r.provider = provider
+	r.model = resolved.ModelID
+	r.selectedRef = resolved.ProviderID + "/" + resolved.ModelID
+	slog.Info("model switched", "component", "daemon", "operation", "select_model", "result", "succeeded",
+		"model", r.selectedRef, "config_path", writtenPath)
+	return gatewayModelConfig(r.configDir, r)
 }

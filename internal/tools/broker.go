@@ -26,7 +26,7 @@ var (
 	ErrUnknownTool        = errors.New("unknown tool")
 	ErrDuplicateTool      = errors.New("duplicate tool")
 	ErrInvalidTool        = errors.New("invalid tool")
-	ErrToolDenied         = errors.New("tool call denied")
+	ErrToolDenied         = toolapi.ErrDenied
 	ErrToolTimeout        = errors.New("tool call timed out")
 	ErrToolOutputTooLarge = errors.New("tool output too large")
 )
@@ -101,6 +101,9 @@ func (b *Broker) Register(tool Tool) error {
 	definition.Name = strings.TrimSpace(definition.Name)
 	if definition.Name == "" || strings.TrimSpace(definition.Description) == "" {
 		return fmt.Errorf("%w: name and description are required", ErrInvalidTool)
+	}
+	if !toolapi.ValidName(definition.Name) {
+		return fmt.Errorf("%w: name %q must match ^[a-zA-Z0-9_-]+$", ErrInvalidTool, definition.Name)
 	}
 	if definition.DefaultTimeoutMillis <= 0 {
 		return fmt.Errorf("%w: default timeout must be positive", ErrInvalidTool)
@@ -272,7 +275,10 @@ func (b *Broker) Execute(ctx context.Context, request toolapi.Request) (toolapi.
 }
 
 func (b *Broker) authorize(ctx context.Context, tx *sql.Tx, request toolapi.Request, definition toolapi.Definition, scope Authorization, timeout time.Duration) (string, error) {
-	result := b.policy.Evaluate(policy.RiskLevel(definition.Risk))
+	risk := policy.RiskLevel(definition.Risk)
+	// Authority is Policy + Capability Grant, not task execution_mode.
+	// Plan mode only changes when Start is allowed (after human approval); grants still fail closed.
+	result := b.policy.Evaluate(risk)
 	if result.Action == policy.ActionDeny {
 		return "", fmt.Errorf("%w: %s", ErrToolDenied, result.Reason)
 	}

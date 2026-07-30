@@ -31,7 +31,7 @@ func TestLoadResolvesSelectedModelOptions(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, LocalFilename), []byte(config), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	resolved, err := Load(root, root)
+	resolved, err := Load(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestLoadRejectsInvalidSelectedModelOptions(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(root, LocalFilename), []byte(config), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			_, err := Load(root, root)
+			_, err := Load(root)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want %q", err, test.want)
 			}

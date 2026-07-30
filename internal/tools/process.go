@@ -36,7 +36,7 @@ func newProcessTool(roots []string, runner *executor.Runner) (Tool, error) {
 
 func (t *processTool) Definition() toolapi.Definition {
 	return toolapi.Definition{
-		Name: "process.exec", Description: "Execute an approved command in an approved working directory.",
+		Name: "process_exec", Description: "Execute an approved command in an approved working directory. directory must be an absolute path under an approved grant path; command and arguments must match the approved grant exactly.",
 		Risk: string(policy.RiskR2), DefaultTimeoutMillis: 30000,
 		InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false,"required":["command","directory"],"properties":{"command":{"type":"string"},"arguments":{"type":"array","items":{"type":"string"}},"directory":{"type":"string"},"environment":{"type":"object","additionalProperties":{"type":"string"}}}}`),
 	}
@@ -55,7 +55,7 @@ func (t *processTool) Authorization(raw json.RawMessage) (Authorization, error) 
 	if err != nil {
 		return Authorization{}, err
 	}
-	return Authorization{Capability: "process.exec", Path: directory, Command: input.Command, Arguments: append([]string(nil), input.Arguments...)}, nil
+	return Authorization{Capability: "process_exec", Path: directory, Command: input.Command, Arguments: append([]string(nil), input.Arguments...)}, nil
 }
 
 func (t *processTool) Execute(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {

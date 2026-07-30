@@ -122,6 +122,22 @@ func (p *Provider) Complete(ctx context.Context, request providerapi.CompletionR
 					result.Content += content.Text
 				}
 			}
+		case "reasoning":
+			// Best-effort: some Responses API builds emit reasoning summaries.
+			for _, content := range item.Content {
+				if text := strings.TrimSpace(content.Text); text != "" {
+					if result.Thinking != "" {
+						result.Thinking += "\n"
+					}
+					result.Thinking += text
+				}
+			}
+			if summary := strings.TrimSpace(item.Summary); summary != "" {
+				if result.Thinking != "" {
+					result.Thinking += "\n"
+				}
+				result.Thinking += summary
+			}
 		case "function_call":
 			id := strings.TrimSpace(item.CallID)
 			if id == "" {
@@ -320,6 +336,7 @@ type responsesResponse struct {
 		CallID    string `json:"call_id"`
 		Name      string `json:"name"`
 		Arguments string `json:"arguments"`
+		Summary   string `json:"summary,omitempty"`
 		Content   []struct {
 			Type string `json:"type"`
 			Text string `json:"text"`

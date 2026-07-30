@@ -76,12 +76,22 @@ func TestRunnerPersistsScheduledTaskAndRetriesWithoutDuplicate(t *testing.T) {
 	request := client.claimed[0]
 	wantTaskID := taskIDFor(request.IdempotencyKey)
 	assertTaskCount(t, database.SQL(), wantTaskID, 1)
-	task, err := repository.GetTask(ctx, wantTaskID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if task.State != kernel.TaskWaitingApproval {
-		t.Fatalf("task state = %q, want %q", task.State, kernel.TaskWaitingApproval)
+	// Submit returns while planning is async; wait for plan to land.
+	deadline := time.Now().Add(3 * time.Second)
+	var task kernel.Task
+	for {
+		var err error
+		task, err = repository.GetTask(ctx, wantTaskID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if task.State == kernel.TaskWaitingApproval {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("task state = %q, want %q", task.State, kernel.TaskWaitingApproval)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 
 	// Retry the same delivery after Core persisted the Task but before Scheduler
@@ -97,8 +107,10 @@ func TestRunnerPersistsScheduledTaskAndRetriesWithoutDuplicate(t *testing.T) {
 	).Scan(&status, &coreTaskID); err != nil {
 		t.Fatal(err)
 	}
-	if status != "waiting_approval" || coreTaskID != string(wantTaskID) {
-		t.Fatalf("job run status/core task = %q/%q, want waiting_approval/%q", status, coreTaskID, wantTaskID)
+	// After plan completes, retrying Submit on waiting_approval returns nil with
+	// the task still waiting_approval; ack status reflects that.
+	if (status != "waiting_approval" && status != "planning") || coreTaskID != string(wantTaskID) {
+		t.Fatalf("job run status/core task = %q/%q, want waiting_approval|planning/%q", status, coreTaskID, wantTaskID)
 	}
 	var leases int
 	if err := database.SQL().QueryRowContext(ctx,
@@ -163,9 +175,9 @@ func assertTaskCount(t *testing.T, db *sql.DB, taskID kernel.TaskID, want int) {
 const scheduledPlanJSON = `{
 	"objective": "Inspect progress",
 	"budget": {
-		"max_tokens": 100,
+		"max_tokens": 4096,
 		"max_cost_micros": 0,
-		"max_duration_ms": 30000
+		"max_duration_ms": 120000
 	},
 	"steps": [
 		{
@@ -173,7 +185,7 @@ const scheduledPlanJSON = `{
 			"risk": "R0",
 			"expected_side_effects": [],
 			"rollback": "No changes were made",
-			"timeout_ms": 5000,
+			"timeout_ms": 30000,
 			"capabilities": []
 		}
 	]

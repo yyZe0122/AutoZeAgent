@@ -108,7 +108,7 @@ func TestGenerateDoesNotRetryProviderError(t *testing.T) {
 
 func TestGenerateDoesNotRetryToolCall(t *testing.T) {
 	provider := &scriptedProvider{responses: []providerapi.CompletionResponse{{
-		ToolCalls: []providerapi.ToolCall{{ID: "call-1", Name: "fs.read", Arguments: `{}`}},
+		ToolCalls: []providerapi.ToolCall{{ID: "call-1", Name: "fs_read", Arguments: `{}`}},
 	}}}
 	planner, err := New(Config{Provider: provider, Model: "test-model"})
 	if err != nil {
@@ -154,9 +154,9 @@ func structuredGenerateRequest() GenerateRequest {
 const structuredValidPlanJSON = `{
 	"objective": "Inspect workspace",
 	"budget": {
-		"max_tokens": 100,
+		"max_tokens": 4096,
 		"max_cost_micros": 0,
-		"max_duration_ms": 1000
+		"max_duration_ms": 120000
 	},
 	"steps": [
 		{
@@ -164,7 +164,7 @@ const structuredValidPlanJSON = `{
 			"risk": "R0",
 			"expected_side_effects": [],
 			"rollback": "No changes were made",
-			"timeout_ms": 1000,
+			"timeout_ms": 30000,
 			"capabilities": []
 		}
 	]

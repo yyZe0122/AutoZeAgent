@@ -43,6 +43,15 @@ type RunListOptions struct {
 	State string
 }
 
+type SessionListOptions struct {
+	Page Page
+	Sort SortDirection
+}
+
+type TranscriptOptions struct {
+	Page Page
+}
+
 func validateListOptions(page Page, sort SortDirection) error {
 	if page.Limit <= 0 || page.Limit > MaxPageSize {
 		return fmt.Errorf("core query limit must be between 1 and %d", MaxPageSize)

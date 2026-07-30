@@ -73,9 +73,15 @@ tar -xzf "$TMP_DIR/$ASSET" -C "$TMP_DIR"
 mkdir -p "$INSTALL_DIR"
 cp "$TMP_DIR/autozeagent" "$INSTALL_DIR/autozeagent"
 cp "$TMP_DIR/autozeagentd" "$INSTALL_DIR/autozeagentd"
-chmod 0755 "$INSTALL_DIR/autozeagent" "$INSTALL_DIR/autozeagentd"
+if [ -f "$TMP_DIR/aze" ]; then
+  cp "$TMP_DIR/aze" "$INSTALL_DIR/aze"
+else
+  ln -sfn autozeagent "$INSTALL_DIR/aze"
+fi
+chmod 0755 "$INSTALL_DIR/autozeagent" "$INSTALL_DIR/autozeagentd" "$INSTALL_DIR/aze"
 
 echo "AutoZeAgent installed to $INSTALL_DIR."
+echo "Interactive TUI: aze  (or autozeagent with no arguments)"
 case ":$PATH:" in
   *":$INSTALL_DIR:"*) ;;
   *)

@@ -3,21 +3,16 @@ package main
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
-	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/approval"
 	"autozeagent.local/autozeagent/internal/approvalsubmission"
 	"autozeagent.local/autozeagent/internal/corequery"
-	"autozeagent.local/autozeagent/internal/gateway"
+	"autozeagent.local/autozeagent/internal/gatewayclient"
 	"autozeagent.local/autozeagent/internal/kernel"
 	"autozeagent.local/autozeagent/internal/platform/paths"
 	"autozeagent.local/autozeagent/internal/runexecution"
@@ -28,35 +23,6 @@ const (
 	workflowTimeout = 30 * time.Minute
 	pollInterval    = 500 * time.Millisecond
 )
-
-type taskSubmissionRequest struct {
-	PlanID    kernel.PlanID `json:"plan_id"`
-	Title     string        `json:"title"`
-	Objective string        `json:"objective"`
-}
-
-type taskSubmissionResponse struct {
-	Task            corequery.Task         `json:"task"`
-	Plan            *approval.PlanDocument `json:"plan,omitempty"`
-	PlanningPending bool                   `json:"planning_pending,omitempty"`
-}
-
-type approvalDecisionRequest struct {
-	PlanID       kernel.PlanID             `json:"plan_id"`
-	PlanRevision uint64                    `json:"plan_revision"`
-	PlanHash     string                    `json:"plan_hash"`
-	StepID       kernel.StepID             `json:"step_id,omitempty"`
-	Action       approvalsubmission.Action `json:"action"`
-	DecidedBy    string                    `json:"decided_by"`
-	Reason       string                    `json:"reason"`
-}
-
-type runStartRequest struct {
-	TaskID       kernel.TaskID `json:"task_id"`
-	PlanID       kernel.PlanID `json:"plan_id"`
-	PlanRevision uint64        `json:"plan_revision"`
-	PlanHash     string        `json:"plan_hash"`
-}
 
 func runWorkflow(args []string) error {
 	flags := flag.NewFlagSet("run", flag.ContinueOnError)
@@ -72,7 +38,10 @@ func runWorkflow(args []string) error {
 	if err != nil {
 		return err
 	}
-	client, err := newWorkflowClient(mode)
+	if err := ensureDaemon(mode); err != nil {
+		return err
+	}
+	client, err := gatewayclient.New(mode)
 	if err != nil {
 		return err
 	}
@@ -80,15 +49,11 @@ func runWorkflow(args []string) error {
 	defer cancel()
 
 	objective := strings.TrimSpace(flags.Arg(0))
-	planID, err := randomWorkflowID("plan-")
+	submitted, err := client.SubmitTask(ctx, gatewayclient.TaskSubmissionRequest{
+		Title: gatewayclient.TaskTitle(objective), Objective: objective,
+	})
 	if err != nil {
 		return err
-	}
-	var submitted taskSubmissionResponse
-	if err := client.DoJSON(ctx, http.MethodPost, "/v1/tasks", taskSubmissionRequest{
-		PlanID: kernel.PlanID(planID), Title: taskTitle(objective), Objective: objective,
-	}, &submitted); err != nil {
-		return fmt.Errorf("create task: %w", err)
 	}
 	if submitted.Task.ID == "" {
 		return errors.New("gateway returned an empty task ID")
@@ -99,11 +64,11 @@ func runWorkflow(args []string) error {
 		if !submitted.PlanningPending && submitted.Task.State == string(kernel.TaskCreated) {
 			return errors.New("planner is not configured in autozeagentd")
 		}
-		if err := waitForPlanning(ctx, client, submitted.Task.ID, kernel.PlanID(planID)); err != nil {
+		if err := waitForPlanning(ctx, client, submitted.Task.ID, submitted.PlanID); err != nil {
 			return err
 		}
 	}
-	prompt, err := loadApprovalPrompt(ctx, client, kernel.PlanID(planID), "")
+	prompt, err := client.ApprovalPrompt(ctx, submitted.PlanID, "")
 	if err != nil {
 		return err
 	}
@@ -117,7 +82,7 @@ func runWorkflow(args []string) error {
 	if allowed {
 		action = approvalsubmission.ActionAllowPlan
 	}
-	decision, err := decideApproval(ctx, client, prompt, "", action, "local-user", "")
+	decision, err := client.DecideApproval(ctx, prompt, "", action, "local-user", "")
 	if err != nil {
 		return err
 	}
@@ -127,11 +92,11 @@ func runWorkflow(args []string) error {
 		return nil
 	}
 
-	var started runexecution.StartResult
-	if err := client.DoJSON(ctx, http.MethodPost, "/v1/runs", runStartRequest{
+	started, err := client.StartRuns(ctx, gatewayclient.RunStartRequest{
 		TaskID: prompt.TaskID, PlanID: prompt.PlanID, PlanRevision: prompt.Revision, PlanHash: prompt.PlanHash,
-	}, &started); err != nil {
-		return fmt.Errorf("start run: %w", err)
+	})
+	if err != nil {
+		return err
 	}
 	if len(started.RunIDs) == 0 {
 		return errors.New("gateway accepted the plan but returned no Run IDs")
@@ -163,15 +128,15 @@ func runTaskStatus(args []string) error {
 	if err != nil {
 		return err
 	}
-	client, err := newWorkflowClient(mode)
+	client, err := gatewayclient.New(mode)
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
-	var task corequery.Task
-	if err := client.DoJSON(ctx, http.MethodGet, "/v1/tasks/"+url.PathEscape(taskID), nil, &task); err != nil {
-		return fmt.Errorf("get task: %w", err)
+	task, err := client.GetTask(ctx, kernel.TaskID(taskID))
+	if err != nil {
+		return err
 	}
 	return writeJSON(task)
 }
@@ -195,24 +160,19 @@ func runTaskAction(action string, args []string) error {
 	if err != nil {
 		return err
 	}
-	client, err := newWorkflowClient(mode)
+	client, err := gatewayclient.New(mode)
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
-	var current corequery.Task
-	path := "/v1/tasks/" + url.PathEscape(taskID)
-	if err := client.DoJSON(ctx, http.MethodGet, path, nil, &current); err != nil {
+	current, err := client.GetTask(ctx, kernel.TaskID(taskID))
+	if err != nil {
 		return fmt.Errorf("get task before %s: %w", action, err)
 	}
-	var updated corequery.Task
-	if err := client.DoJSON(ctx, http.MethodPost, path+"/actions", runexecution.TaskActionRequest{
-		ExpectedVersion: current.Version,
-		Action:          runexecution.TaskAction(action),
-		Reason:          strings.TrimSpace(*reason),
-	}, &updated); err != nil {
-		return fmt.Errorf("%s task: %w", action, err)
+	updated, err := client.ControlTask(ctx, kernel.TaskID(taskID), runexecution.TaskAction(action), current.Version, strings.TrimSpace(*reason))
+	if err != nil {
+		return err
 	}
 	return writeJSON(updated)
 }
@@ -226,13 +186,13 @@ func runApprovalShow(args []string) error {
 	if err != nil {
 		return err
 	}
-	client, err := newWorkflowClient(mode)
+	client, err := gatewayclient.New(mode)
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
-	prompt, err := loadApprovalPrompt(ctx, client, kernel.PlanID(planID), kernel.StepID(flags.stepID))
+	prompt, err := client.ApprovalPrompt(ctx, kernel.PlanID(planID), kernel.StepID(flags.stepID))
 	if err != nil {
 		return err
 	}
@@ -246,27 +206,27 @@ func runApprovalDecide(args []string) error {
 		return err
 	}
 	action := approvalsubmission.Action(values.action)
-	if !validApprovalAction(action) {
+	if !gatewayclient.ValidApprovalAction(action) {
 		return fmt.Errorf("invalid approval action %q", values.action)
 	}
 	mode, err := paths.ParseMode(values.mode)
 	if err != nil {
 		return err
 	}
-	client, err := newWorkflowClient(mode)
+	client, err := gatewayclient.New(mode)
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
-	prompt, err := loadApprovalPrompt(ctx, client, kernel.PlanID(planID), kernel.StepID(values.stepID))
+	prompt, err := client.ApprovalPrompt(ctx, kernel.PlanID(planID), kernel.StepID(values.stepID))
 	if err != nil {
 		return err
 	}
-	if !promptAllows(prompt, action, kernel.StepID(values.stepID)) {
+	if !gatewayclient.PromptAllows(prompt, action, kernel.StepID(values.stepID)) {
 		return fmt.Errorf("action %q is not available for the selected approval scope", action)
 	}
-	decision, err := decideApproval(ctx, client, prompt, kernel.StepID(values.stepID), action, values.decidedBy, values.reason)
+	decision, err := client.DecideApproval(ctx, prompt, kernel.StepID(values.stepID), action, values.decidedBy, values.reason)
 	if err != nil {
 		return err
 	}
@@ -304,23 +264,11 @@ func parseApprovalFlags(command string, args []string, requireAction bool) (stri
 	return strings.TrimSpace(args[0]), values, nil
 }
 
-func newWorkflowClient(mode paths.Mode) (*gateway.Client, error) {
-	layout, err := paths.Resolve(mode)
-	if err != nil {
-		return nil, err
-	}
-	client, err := gateway.NewLocalClient(layout.RuntimeDir)
-	if err != nil {
-		return nil, fmt.Errorf("connect to local gateway: %w", err)
-	}
-	return client, nil
-}
-
-func waitForPlanning(ctx context.Context, client *gateway.Client, taskID kernel.TaskID, planID kernel.PlanID) error {
+func waitForPlanning(ctx context.Context, client *gatewayclient.Client, taskID kernel.TaskID, planID kernel.PlanID) error {
 	lastState := ""
 	for {
-		var task corequery.Task
-		if err := client.DoJSON(ctx, http.MethodGet, "/v1/tasks/"+url.PathEscape(string(taskID)), nil, &task); err != nil {
+		task, err := client.GetTask(ctx, taskID)
+		if err != nil {
 			return fmt.Errorf("poll task planning: %w", err)
 		}
 		if task.State != lastState {
@@ -329,8 +277,7 @@ func waitForPlanning(ctx context.Context, client *gateway.Client, taskID kernel.
 		}
 		switch task.State {
 		case string(kernel.TaskWaitingApproval):
-			var plan corequery.Plan
-			if err := client.DoJSON(ctx, http.MethodGet, "/v1/plans/"+url.PathEscape(string(planID)), nil, &plan); err != nil {
+			if _, err := client.GetPlan(ctx, planID); err != nil {
 				return fmt.Errorf("load planned task: %w", err)
 			}
 			return nil
@@ -345,30 +292,7 @@ func waitForPlanning(ctx context.Context, client *gateway.Client, taskID kernel.
 	}
 }
 
-func loadApprovalPrompt(ctx context.Context, client *gateway.Client, planID kernel.PlanID, stepID kernel.StepID) (approvalsubmission.Prompt, error) {
-	path := "/v1/approvals/prompt?plan_id=" + url.QueryEscape(string(planID))
-	if stepID != "" {
-		path += "&step_id=" + url.QueryEscape(string(stepID))
-	}
-	var prompt approvalsubmission.Prompt
-	if err := client.DoJSON(ctx, http.MethodGet, path, nil, &prompt); err != nil {
-		return approvalsubmission.Prompt{}, fmt.Errorf("load approval prompt: %w", err)
-	}
-	return prompt, nil
-}
-
-func decideApproval(ctx context.Context, client *gateway.Client, prompt approvalsubmission.Prompt, stepID kernel.StepID, action approvalsubmission.Action, decidedBy, reason string) (corequery.Approval, error) {
-	var decision corequery.Approval
-	if err := client.DoJSON(ctx, http.MethodPost, "/v1/approvals", approvalDecisionRequest{
-		PlanID: prompt.PlanID, PlanRevision: prompt.Revision, PlanHash: prompt.PlanHash,
-		StepID: stepID, Action: action, DecidedBy: strings.TrimSpace(decidedBy), Reason: strings.TrimSpace(reason),
-	}, &decision); err != nil {
-		return corequery.Approval{}, fmt.Errorf("submit approval decision: %w", err)
-	}
-	return decision, nil
-}
-
-func waitForRuns(ctx context.Context, client *gateway.Client, runIDs []kernel.RunID) ([]corequery.Run, error) {
+func waitForRuns(ctx context.Context, client *gatewayclient.Client, runIDs []kernel.RunID) ([]corequery.Run, error) {
 	results := make([]corequery.Run, len(runIDs))
 	states := make(map[kernel.RunID]string, len(runIDs))
 	remaining := len(runIDs)
@@ -377,8 +301,8 @@ func waitForRuns(ctx context.Context, client *gateway.Client, runIDs []kernel.Ru
 			if results[index].State == string(kernel.RunCompleted) {
 				continue
 			}
-			var run corequery.Run
-			if err := client.DoJSON(ctx, http.MethodGet, "/v1/runs/"+url.PathEscape(string(runID)), nil, &run); err != nil {
+			run, err := client.GetRun(ctx, runID)
+			if err != nil {
 				return nil, fmt.Errorf("poll run %s: %w", runID, err)
 			}
 			if states[runID] != run.State {
@@ -452,25 +376,6 @@ func confirmApproval() (bool, error) {
 	return answer == "y" || answer == "yes", nil
 }
 
-func promptAllows(prompt approvalsubmission.Prompt, action approvalsubmission.Action, stepID kernel.StepID) bool {
-	for _, option := range prompt.Actions {
-		if option.Action == action && option.StepID == stepID {
-			return true
-		}
-	}
-	return false
-}
-
-func validApprovalAction(action approvalsubmission.Action) bool {
-	switch action {
-	case approvalsubmission.ActionAllowOnce, approvalsubmission.ActionAllowLimited,
-		approvalsubmission.ActionAllowPlan, approvalsubmission.ActionReject, approvalsubmission.ActionRequestChanges:
-		return true
-	default:
-		return false
-	}
-}
-
 func printRunResults(runs []corequery.Run) {
 	fmt.Println()
 	fmt.Println("Results:")
@@ -493,22 +398,6 @@ func displayList(values []string) string {
 		return "none"
 	}
 	return strings.Join(values, "; ")
-}
-
-func taskTitle(objective string) string {
-	runes := []rune(strings.TrimSpace(objective))
-	if len(runes) <= 80 {
-		return string(runes)
-	}
-	return string(runes[:80]) + "…"
-}
-
-func randomWorkflowID(prefix string) (string, error) {
-	value := make([]byte, 16)
-	if _, err := rand.Read(value); err != nil {
-		return "", fmt.Errorf("generate workflow ID: %w", err)
-	}
-	return prefix + hex.EncodeToString(value), nil
 }
 
 func sleepContext(ctx context.Context, duration time.Duration) error {

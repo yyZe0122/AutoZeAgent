@@ -16,76 +16,77 @@ func main() {
 }
 
 func run(args []string) error {
-	if len(args) == 0 {
-		printUsage()
-		return nil
-	}
-	switch args[0] {
+	command, rest := commandFromArgs(args)
+	switch command {
+	case "tui":
+		return runTUI(rest)
 	case "version":
-		if len(args) != 1 {
+		if len(rest) != 0 {
 			return errors.New("version does not accept arguments")
 		}
 		fmt.Printf("autozeagent %s commit=%s date=%s\n", version.Version, version.Commit, version.Date)
 		return nil
 	case "paths":
-		return runPaths(args[1:])
+		return runPaths(rest)
 	case "config":
-		if len(args) < 2 || args[1] != "validate" {
+		if len(rest) < 1 || rest[0] != "validate" {
 			return errors.New("use autozeagent config validate [--mode user|system]")
 		}
-		return runConfigValidate(args[2:])
+		return runConfigValidate(rest[1:])
 	case "health":
-		return runHealth(args[1:])
+		return runHealth(rest)
 	case "logs":
-		return runLogs(args[1:])
+		return runLogs(rest)
+	case "daemon":
+		return runDaemon(rest)
 	case "run":
-		return runWorkflow(args[1:])
+		return runWorkflow(rest)
 	case "task":
-		if len(args) < 2 {
+		if len(rest) < 1 {
 			return errors.New("use autozeagent task status|pause|resume|cancel ...")
 		}
-		switch args[1] {
+		switch rest[0] {
 		case "status":
-			return runTaskStatus(args[2:])
+			return runTaskStatus(rest[1:])
 		case "pause", "resume", "cancel":
-			return runTaskAction(args[1], args[2:])
+			return runTaskAction(rest[0], rest[1:])
 		default:
 			return errors.New("use autozeagent task status|pause|resume|cancel ...")
 		}
 	case "job":
-		if len(args) < 2 {
+		if len(rest) < 1 {
 			return errors.New("use autozeagent job create|list|status|pause|resume|cancel ...")
 		}
-		switch args[1] {
+		switch rest[0] {
 		case "create":
-			return runJobCreate(args[2:])
+			return runJobCreate(rest[1:])
 		case "list":
-			return runJobList(args[2:])
+			return runJobList(rest[1:])
 		case "status":
-			return runJobStatus(args[2:])
+			return runJobStatus(rest[1:])
 		case "pause", "resume", "cancel":
-			return runJobAction(args[1], args[2:])
+			return runJobAction(rest[0], rest[1:])
 		default:
 			return errors.New("use autozeagent job create|list|status|pause|resume|cancel ...")
 		}
 	case "approval":
-		if len(args) < 2 {
+		if len(rest) < 1 {
 			return errors.New("use autozeagent approval show|decide ...")
 		}
-		switch args[1] {
+		switch rest[0] {
 		case "show":
-			return runApprovalShow(args[2:])
+			return runApprovalShow(rest[1:])
 		case "decide":
-			return runApprovalDecide(args[2:])
+			return runApprovalDecide(rest[1:])
 		default:
 			return errors.New("use autozeagent approval show|decide ...")
 		}
 	case "db":
-		if len(args) < 2 || args[1] != "check" {
+		if len(rest) < 1 || rest[0] != "check" {
 			return errors.New("use autozeagent db check [--mode user|system]")
 		}
-		return runDBCheck(args[2:])
-	case "help", "--help", "-h":
+		return runDBCheck(rest[1:])
+	case "help":
 		printUsage()
 		return nil
 	default:
@@ -93,16 +94,38 @@ func run(args []string) error {
 	}
 }
 
+// commandFromArgs maps CLI argv to a command name and remaining args.
+// Empty argv defaults to the interactive TUI (same as opencode/crush).
+func commandFromArgs(args []string) (command string, rest []string) {
+	if len(args) == 0 {
+		return "tui", nil
+	}
+	switch args[0] {
+	case "help", "--help", "-h":
+		return "help", args[1:]
+	default:
+		return args[0], args[1:]
+	}
+}
+
 func printUsage() {
 	fmt.Println("AutoZeAgent local client")
 	fmt.Println()
+	fmt.Println("With no arguments, starts the interactive TUI (also available as aze).")
+	fmt.Println("TUI and run auto-start the unique local daemon; use daemon stop to shut it down.")
+
+	fmt.Println()
 	fmt.Println("Usage:")
+	fmt.Println("  autozeagent | aze")
+	fmt.Println("  autozeagent tui [--mode user|system]")
+	fmt.Println("  autozeagent daemon start|stop|status [--mode user|system]")
 	fmt.Println("  autozeagent version")
 	fmt.Println("  autozeagent paths [user|system]")
 	fmt.Println("  autozeagent config validate [--mode user|system]")
 	fmt.Println("  autozeagent health [--mode user|system]")
 	fmt.Println("  autozeagent logs [--mode user|system] [--tail 200] [--level error] [--component agent] [--run run-id]")
 	fmt.Println("  autozeagent run [--mode user|system] \"task objective\"")
+
 	fmt.Println("  autozeagent task status <task-id> [--mode user|system]")
 	fmt.Println("  autozeagent task pause|resume|cancel <task-id> [--reason <text>] [--mode user|system]")
 	fmt.Println("  autozeagent job create --session <id> --name <name> --every <duration> [options] \"objective\"")
@@ -110,4 +133,5 @@ func printUsage() {
 	fmt.Println("  autozeagent approval show <plan-id> [--step <step-id>] [--mode user|system]")
 	fmt.Println("  autozeagent approval decide <plan-id> --action <action> [--step <step-id>] [--reason <text>] [--mode user|system]")
 	fmt.Println("  autozeagent db check [--mode user|system]")
+	fmt.Println("  autozeagent help")
 }

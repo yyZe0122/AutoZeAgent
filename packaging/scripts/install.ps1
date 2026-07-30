@@ -68,6 +68,12 @@ try {
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
     Copy-Item -LiteralPath (Join-Path $tempDir 'autozeagent.exe') -Destination (Join-Path $InstallDir 'autozeagent.exe') -Force
     Copy-Item -LiteralPath (Join-Path $tempDir 'autozeagentd.exe') -Destination (Join-Path $InstallDir 'autozeagentd.exe') -Force
+    $azeSource = Join-Path $tempDir 'aze.exe'
+    if (Test-Path -LiteralPath $azeSource) {
+        Copy-Item -LiteralPath $azeSource -Destination (Join-Path $InstallDir 'aze.exe') -Force
+    } else {
+        Copy-Item -LiteralPath (Join-Path $tempDir 'autozeagent.exe') -Destination (Join-Path $InstallDir 'aze.exe') -Force
+    }
 
     if ($env:AUTOZEAGENT_NO_PATH_UPDATE -ne '1') {
         $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
@@ -86,6 +92,7 @@ try {
 
     Write-Host "AutoZeAgent installed to $InstallDir."
     Write-Host 'Run: autozeagent version'
+    Write-Host 'Interactive TUI: aze  (or autozeagent with no arguments)'
     Write-Host 'Open a new terminal if the command is not yet available.'
 } finally {
     if (Test-Path -LiteralPath $tempDir) {

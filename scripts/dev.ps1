@@ -1,7 +1,9 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('format', 'check', 'build', 'all')]
-    [string]$Action = 'all'
+    [ValidateSet('format', 'check', 'build', 'install', 'uninstall', 'all')]
+    [string]$Action = 'all',
+
+    [string]$InstallDir = $env:AUTOZEAGENT_INSTALL_DIR
 )
 
 $ErrorActionPreference = 'Stop'
@@ -98,6 +100,44 @@ function Invoke-Build {
     foreach ($command in $Commands) {
         Invoke-Go -Arguments @('build', '-o', (Join-Path $binDirectory "$command.exe"), "./cmd/$command")
     }
+    Copy-Item -LiteralPath (Join-Path $binDirectory 'autozeagent.exe') -Destination (Join-Path $binDirectory 'aze.exe') -Force
+}
+
+function Get-InstallDirectory {
+    if (-not [string]::IsNullOrWhiteSpace($InstallDir)) {
+        return $InstallDir
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+        return (Join-Path $env:LOCALAPPDATA 'Programs\AutoZeAgent\bin')
+    }
+    return (Join-Path $env:USERPROFILE 'AutoZeAgent\bin')
+}
+
+function Invoke-Install {
+    Invoke-Build
+    $destination = Get-InstallDirectory
+    New-Item -ItemType Directory -Force -Path $destination | Out-Null
+    $binDirectory = Join-Path $Root 'bin'
+    foreach ($name in @('autozeagent.exe', 'autozeagentd.exe', 'aze.exe')) {
+        Copy-Item -LiteralPath (Join-Path $binDirectory $name) -Destination (Join-Path $destination $name) -Force
+    }
+    Write-Host "Installed to $destination : autozeagent aze autozeagentd"
+    $pathEntries = $env:PATH -split ';'
+    if ($pathEntries -notcontains $destination) {
+        Write-Host "Add to PATH (or open a new terminal after user install.ps1 PATH update):"
+        Write-Host "  $destination"
+    }
+}
+
+function Invoke-Uninstall {
+    $destination = Get-InstallDirectory
+    foreach ($name in @('autozeagent.exe', 'autozeagentd.exe', 'aze.exe')) {
+        $path = Join-Path $destination $name
+        if (Test-Path -LiteralPath $path) {
+            Remove-Item -LiteralPath $path -Force
+        }
+    }
+    Write-Host "Removed from $destination : autozeagent aze autozeagentd"
 }
 
 function Invoke-RuntimeCheck {
@@ -137,6 +177,12 @@ try {
         }
         'build' {
             Invoke-Build
+        }
+        'install' {
+            Invoke-Install
+        }
+        'uninstall' {
+            Invoke-Uninstall
         }
         'all' {
             Invoke-Check

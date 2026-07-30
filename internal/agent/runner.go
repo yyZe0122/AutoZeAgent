@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"autozeagent.local/autozeagent/pkg/providerapi"
@@ -35,25 +36,35 @@ type ToolBroker interface {
 	Execute(context.Context, toolapi.Request) (toolapi.Response, error)
 }
 
+// StreamObserver receives provider stream events for UI fan-out (optional).
+type StreamObserver interface {
+	Publish(sessionID, taskID, runID string, event providerapi.StreamEvent)
+}
+
 type Config struct {
 	Provider      StreamingProvider
 	Broker        ToolBroker
 	Records       *RecordStore
 	Model         string
 	MaxIterations int
+	// Stream is optional; when set, CollectStream events are teed for local UI.
+	Stream StreamObserver
 }
 
 type Runner struct {
+	mu            sync.RWMutex
 	provider      StreamingProvider
 	broker        ToolBroker
 	records       *RecordStore
 	model         string
 	maxIterations int
+	stream        StreamObserver
 }
 
 type RunRequest struct {
 	RunID              string
 	TaskID             string
+	SessionID          string
 	PlanID             string
 	PlanHash           string
 	StepID             string
@@ -61,13 +72,16 @@ type RunRequest struct {
 	CapabilityGrantIDs map[string][]string
 	Actor              string
 	TraceID            string
-	Messages           []providerapi.Message
-	AllowedTools       []string
-	MaxOutputTokens    int64
-	MaxTotalTokens     int64
-	MaxCostMicros      int64
-	Temperature        *float64
-	ToolTimeoutMillis  int64
+	// Messages are persisted as this run's input_message prefix (Prepare).
+	Messages []providerapi.Message
+	// History is prior session turns for the provider only — not written to records.
+	History           []providerapi.Message
+	AllowedTools      []string
+	MaxOutputTokens   int64
+	MaxTotalTokens    int64
+	MaxCostMicros     int64
+	Temperature       *float64
+	ToolTimeoutMillis int64
 }
 
 type Result struct {
@@ -94,8 +108,44 @@ func New(config Config) (*Runner, error) {
 	}
 	return &Runner{
 		provider: config.Provider, broker: config.Broker, records: config.Records,
-		model: model, maxIterations: maxIterations,
+		model: model, maxIterations: maxIterations, stream: config.Stream,
 	}, nil
+}
+
+// SetProvider replaces the streaming provider used by subsequent runs.
+func (r *Runner) SetProvider(provider StreamingProvider) error {
+	if provider == nil {
+		return errors.New("agent provider is required")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.provider = provider
+	return nil
+}
+
+// SetModel replaces the model id used by subsequent provider requests.
+func (r *Runner) SetModel(model string) error {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return errors.New("agent model is required")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.model = model
+	return nil
+}
+
+// Model returns the currently selected model id.
+func (r *Runner) Model() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.model
+}
+
+func (r *Runner) snapshot() (StreamingProvider, string) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.provider, r.model
 }
 
 func (r *Runner) Run(ctx context.Context, request RunRequest) (Result, error) {
@@ -124,12 +174,17 @@ func (r *Runner) Run(ctx context.Context, request RunRequest) (Result, error) {
 		slog.Error("agent history recovery failed", "component", "agent", "operation", "restore", "result", "failed", "run_id", request.RunID, "task_id", request.TaskID, "plan_id", request.PlanID, "step_id", request.StepID, "trace_id", request.TraceID, "record_count", len(records), "error", err)
 		return result, err
 	}
+	// Prefix prior session turns for the provider; they are not part of this run's records.
+	if len(request.History) > 0 {
+		messages = append(append([]providerapi.Message(nil), request.History...), messages...)
+	}
 	slog.Info("agent history restored", "component", "agent", "operation", "restore", "result", "succeeded", "run_id", request.RunID, "task_id", request.TaskID, "plan_id", request.PlanID, "step_id", request.StepID, "trace_id", request.TraceID, "record_count", len(records), "completed", completed)
 	if completed {
 		slog.Info("agent run completed from recovery", "component", "agent", "operation", "run", "result", "succeeded", "run_id", request.RunID, "task_id", request.TaskID, "plan_id", request.PlanID, "step_id", request.StepID, "trace_id", request.TraceID, "iterations", result.Iterations, "tool_calls", len(result.ToolCalls), "duration_ms", time.Since(startedAt).Milliseconds())
 		return result, nil
 	}
 
+	provider, model := r.snapshot()
 	for result.Iterations < r.maxIterations {
 		if err := ctx.Err(); err != nil {
 			return result, err
@@ -145,21 +200,21 @@ func (r *Runner) Run(ctx context.Context, request RunRequest) (Result, error) {
 			}
 		}
 		providerStartedAt := time.Now()
-		response, attempts, err := r.collectProviderResponse(ctx, providerapi.CompletionRequest{
-			Model:           r.model,
+		response, attempts, err := r.collectProviderResponse(ctx, provider, providerapi.CompletionRequest{
+			Model:           model,
 			Messages:        messages,
 			Tools:           definitions,
 			MaxOutputTokens: maxOutputTokens,
 			Temperature:     request.Temperature,
-		})
+		}, request)
 		result.Iterations++
 		addUsage(&result.Usage, response.Usage)
 		durationMillis := time.Since(providerStartedAt).Milliseconds()
 		if err != nil {
 			logArgs := []any{
-				"component", "provider", "operation", "stream", "result", "failed",
-				"run_id", request.RunID, "task_id", request.TaskID, "plan_id", request.PlanID, "step_id", request.StepID, "trace_id", request.TraceID,
-				"iteration", result.Iterations, "provider_attempts", attempts, "model", r.model, "duration_ms", durationMillis,
+				"component", "provider", "operation", "stream", "result",
+				"failed", "run_id", request.RunID, "task_id", request.TaskID, "plan_id", request.PlanID, "step_id", request.StepID, "trace_id", request.TraceID,
+				"iteration", result.Iterations, "provider_attempts", attempts, "model", model, "duration_ms", durationMillis,
 			}
 			var providerErr *providerapi.ProviderError
 			if errors.As(err, &providerErr) {
@@ -175,18 +230,24 @@ func (r *Runner) Run(ctx context.Context, request RunRequest) (Result, error) {
 		slog.Info("provider iteration completed",
 			"component", "provider", "operation", "stream", "result", "succeeded",
 			"run_id", request.RunID, "task_id", request.TaskID, "plan_id", request.PlanID, "step_id", request.StepID, "trace_id", request.TraceID,
-			"iteration", result.Iterations, "provider_attempts", attempts, "model", r.model, "duration_ms", durationMillis,
+			"iteration", result.Iterations, "provider_attempts", attempts, "model", model, "duration_ms", durationMillis,
 			"input_tokens", response.Usage.InputTokens, "output_tokens", response.Usage.OutputTokens, "total_tokens", response.Usage.TotalTokens,
 			"tool_calls", len(response.ToolCalls), "finish_reason", response.FinishReason,
 		)
 
 		assistant := providerapi.Message{
 			Role: providerapi.RoleAssistant, Content: response.Content,
+			Thinking:  response.Thinking,
 			ToolCalls: append([]providerapi.ToolCall(nil), response.ToolCalls...),
 		}
 		if len(response.ToolCalls) == 0 {
+			if strings.TrimSpace(response.Content) == "" && strings.TrimSpace(response.Thinking) == "" {
+				slog.Warn("provider returned empty final response", "component", "provider", "operation", "stream", "result", "failed", "run_id", request.RunID, "task_id", request.TaskID, "plan_id", request.PlanID, "step_id", request.StepID, "trace_id", request.TraceID, "iteration", result.Iterations, "model", model, "error", ErrEmptyResponse)
+				return result, ErrEmptyResponse
+			}
 			if strings.TrimSpace(response.Content) == "" {
-				slog.Warn("provider returned empty final response", "component", "provider", "operation", "stream", "result", "failed", "run_id", request.RunID, "task_id", request.TaskID, "plan_id", request.PlanID, "step_id", request.StepID, "trace_id", request.TraceID, "iteration", result.Iterations, "model", r.model, "error", ErrEmptyResponse)
+				// Thinking-only is not a user-visible final answer.
+				slog.Warn("provider returned empty final response", "component", "provider", "operation", "stream", "result", "failed", "run_id", request.RunID, "task_id", request.TaskID, "plan_id", request.PlanID, "step_id", request.StepID, "trace_id", request.TraceID, "iteration", result.Iterations, "model", model, "error", ErrEmptyResponse)
 				return result, ErrEmptyResponse
 			}
 			if _, err := r.records.AppendAssistant(ctx, request.RunID, assistant, response.Usage, response.FinishReason); err != nil {
@@ -218,10 +279,29 @@ func (r *Runner) Run(ctx context.Context, request RunRequest) (Result, error) {
 				Actor: request.Actor, TraceID: request.TraceID,
 				Tool: call.Name, Arguments: json.RawMessage(call.Arguments), TimeoutMillis: request.ToolTimeoutMillis,
 			})
-			result.ToolCalls = append(result.ToolCalls, toolResponse)
 			if err != nil {
-				return result, err
+				if !errors.Is(err, toolapi.ErrDenied) {
+					return result, err
+				}
+				content := toolDeniedContent(call, err)
+				toolResponse = toolapi.Response{
+					CallID: call.ID, Tool: call.Name, Output: json.RawMessage(content),
+				}
+				result.ToolCalls = append(result.ToolCalls, toolResponse)
+				toolMessage := providerapi.Message{Role: providerapi.RoleTool, ToolCallID: call.ID, Content: content}
+				if _, err := r.records.AppendToolResult(ctx, request.RunID, toolMessage); err != nil {
+					return result, err
+				}
+				messages = append(messages, toolMessage)
+				slog.Info("tool call denied; feeding result back to provider",
+					"component", "agent", "operation", "tool_denied", "result", "continued",
+					"run_id", request.RunID, "task_id", request.TaskID, "plan_id", request.PlanID,
+					"step_id", request.StepID, "trace_id", request.TraceID,
+					"tool", call.Name, "tool_call_id", call.ID, "error", err,
+				)
+				continue
 			}
+			result.ToolCalls = append(result.ToolCalls, toolResponse)
 			content, err := toolResultContent(toolResponse)
 			if err != nil {
 				return result, err
@@ -303,14 +383,22 @@ func (r *Runner) restore(
 			}
 			response, err := loadToolCall(record.Message.ToolCallID)
 			if err != nil {
-				return nil, nil, result, false, err
-			}
-			matches, err := toolResultMatches(response, record.Message.Content)
-			if err != nil {
-				return nil, nil, result, false, err
-			}
-			if !matches {
-				return nil, nil, result, false, fmt.Errorf("%w: tool result %s differs from execution record", ErrCorruptHistory, record.Message.ToolCallID)
+				if !errors.Is(err, ErrRecoveryBlocked) || !isDeniedToolResult(record.Message.Content) {
+					return nil, nil, result, false, err
+				}
+				// Recoverable deny: history is authoritative; no succeeded tool_calls row.
+				response = toolapi.Response{
+					CallID: record.Message.ToolCallID, Tool: pending[0].Name,
+					Output: json.RawMessage(record.Message.Content),
+				}
+			} else {
+				matches, matchErr := toolResultMatches(response, record.Message.Content)
+				if matchErr != nil {
+					return nil, nil, result, false, matchErr
+				}
+				if !matches {
+					return nil, nil, result, false, fmt.Errorf("%w: tool result %s differs from execution record", ErrCorruptHistory, record.Message.ToolCallID)
+				}
 			}
 			result.ToolCalls = append(result.ToolCalls, response)
 			messages = append(messages, cloneMessage(record.Message))
@@ -423,6 +511,30 @@ func toolResultContent(response toolapi.Response) (string, error) {
 	return `{}`, nil
 }
 
+func toolDeniedContent(call providerapi.ToolCall, err error) string {
+	payload := map[string]any{
+		"error":   "tool_denied",
+		"tool":    call.Name,
+		"message": err.Error(),
+		"hint":    "Do not retry the same arguments. Fix the tool input: prefer absolute paths under configured workspace roots; relative paths are resolved against the workspace root; keep duration within the approved grant; use only allowed tools and paths.",
+	}
+	encoded, marshalErr := json.Marshal(payload)
+	if marshalErr != nil {
+		return `{"error":"tool_denied","message":"tool call denied"}`
+	}
+	return string(encoded)
+}
+
+func isDeniedToolResult(content string) bool {
+	var payload struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(content), &payload); err != nil {
+		return false
+	}
+	return payload.Error == "tool_denied"
+}
+
 func addUsage(total *providerapi.Usage, next providerapi.Usage) {
 	total.InputTokens += next.InputTokens
 	total.OutputTokens += next.OutputTokens
@@ -440,9 +552,9 @@ const (
 	maxProviderRetryWait = 5 * time.Second
 )
 
-func (r *Runner) collectProviderResponse(ctx context.Context, request providerapi.CompletionRequest) (providerapi.CompletionResponse, int, error) {
+func (r *Runner) collectProviderResponse(ctx context.Context, provider StreamingProvider, req providerapi.CompletionRequest, runReq RunRequest) (providerapi.CompletionResponse, int, error) {
 	for attempt := 1; attempt <= maxProviderAttempts; attempt++ {
-		response, err := providerapi.CollectStream(ctx, r.provider, request)
+		response, err := r.collectOnce(ctx, provider, req, runReq)
 		if err == nil {
 			return response, attempt, nil
 		}
@@ -464,6 +576,22 @@ func (r *Runner) collectProviderResponse(ctx context.Context, request providerap
 		}
 	}
 	return providerapi.CompletionResponse{}, maxProviderAttempts, errors.New("provider retry loop exhausted")
+}
+
+func (r *Runner) collectOnce(ctx context.Context, provider StreamingProvider, req providerapi.CompletionRequest, runReq RunRequest) (providerapi.CompletionResponse, error) {
+	if r.stream == nil {
+		return providerapi.CollectStream(ctx, provider, req)
+	}
+	var accumulator providerapi.StreamAccumulator
+	side := func(event providerapi.StreamEvent) error {
+		r.stream.Publish(runReq.SessionID, runReq.TaskID, runReq.RunID, event)
+		return nil
+	}
+	handler := providerapi.TeeStreamHandler(accumulator.Add, side)
+	if err := provider.Stream(ctx, req, handler); err != nil {
+		return providerapi.CompletionResponse{}, err
+	}
+	return accumulator.Response()
 }
 
 func providerRetryDelay(err error, attempt int) (time.Duration, bool) {

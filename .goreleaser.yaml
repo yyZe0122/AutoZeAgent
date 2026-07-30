@@ -25,6 +25,28 @@ builds:
         -X autozeagent.local/autozeagent/internal/version.Date={{ .CommitDate }}
     mod_timestamp: "{{ .CommitTimestamp }}"
 
+  - id: aze
+    main: ./cmd/autozeagent
+    binary: aze
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - windows
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - >-
+        -s -w
+        -X autozeagent.local/autozeagent/internal/version.Version={{ .Version }}
+        -X autozeagent.local/autozeagent/internal/version.Commit={{ .Commit }}
+        -X autozeagent.local/autozeagent/internal/version.Date={{ .CommitDate }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
   - id: autozeagentd
     main: ./cmd/autozeagentd
     binary: autozeagentd
@@ -50,6 +72,7 @@ builds:
 archives:
   - ids:
       - autozeagent
+      - aze
       - autozeagentd
     name_template: "autozeagent_{{ .Os }}_{{ .Arch }}"
     formats:

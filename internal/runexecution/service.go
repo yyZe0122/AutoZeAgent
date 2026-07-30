@@ -97,6 +97,7 @@ type StartResult struct {
 type execution struct {
 	RunID         kernel.RunID
 	TaskID        kernel.TaskID
+	SessionID     kernel.SessionID
 	PlanID        kernel.PlanID
 	StepID        kernel.StepID
 	RunState      kernel.RunState
@@ -185,6 +186,7 @@ func (s *Service) Start(ctx context.Context, request StartRequest) (StartResult,
 	if request.TaskID == "" || request.PlanID == "" || request.PlanRevision == 0 || request.PlanHash == "" {
 		return StartResult{}, applicationerror.Wrap(applicationerror.CodeInvalidRequest, false, fmt.Errorf("%w: task, plan, revision, and hash are required", ErrInvalidRequest))
 	}
+	// Plan mode means "plan first, human approve, then Start"; grants + Broker still fail-closed.
 	stored, err := s.plans.LoadPlanDocument(ctx, request.PlanID)
 	if err != nil {
 		return StartResult{}, classifyStartError(err)
@@ -311,7 +313,8 @@ func (s *Service) RunOnce(ctx context.Context) error {
 	if err != nil {
 		return s.fail(ctx, item, err)
 	}
-	executionTimeout, err := s.executionTimeout(ctx, item.PlanID, plan, step)
+	// Plan remaining wall-clock only. Step timeout_ms is tool grant wall time, not provider stream budget.
+	executionTimeout, err := s.executionTimeout(ctx, item.PlanID, plan)
 	if err != nil {
 		return s.fail(ctx, item, err)
 	}
@@ -319,15 +322,25 @@ func (s *Service) RunOnce(ctx context.Context) error {
 	if err != nil {
 		return s.fail(ctx, item, err)
 	}
+	toolTimeoutMS := toolTimeoutMillis(step)
 	messages := executionMessages(item.TaskObjective, plan, step)
 	executionContext, cancel := context.WithTimeout(ctx, executionTimeout)
 	s.setActive(item.TaskID, cancel)
+	slog.Info("run execution started",
+		"component", "run", "operation", "execute", "result", "started",
+		"run_id", item.RunID, "task_id", item.TaskID, "plan_id", item.PlanID, "step_id", item.StepID, "trace_id", item.RunID,
+		"execution_timeout_ms", executionTimeout.Milliseconds(),
+		"tool_timeout_ms", toolTimeoutMS,
+		"allowed_tools", allowedTools(step),
+		"max_tokens", maxTokens,
+	)
 	result, err := s.agent.Run(executionContext, agent.RunRequest{
-		RunID: string(item.RunID), TaskID: string(item.TaskID), PlanID: string(item.PlanID), PlanHash: item.PlanHash,
+		RunID: string(item.RunID), TaskID: string(item.TaskID), SessionID: string(item.SessionID),
+		PlanID: string(item.PlanID), PlanHash: item.PlanHash,
 		StepID: string(item.StepID), Actor: "agent", TraceID: string(item.RunID), Messages: messages,
 		AllowedTools: allowedTools(step), CapabilityGrantIDs: grantIDs,
 		MaxOutputTokens: maxTokens, MaxTotalTokens: maxTokens,
-		MaxCostMicros: maxCostMicros, ToolTimeoutMillis: step.TimeoutMillis,
+		MaxCostMicros: maxCostMicros, ToolTimeoutMillis: toolTimeoutMS,
 	})
 	s.clearActive(item.TaskID)
 	cancel()
@@ -345,6 +358,10 @@ func (s *Service) RunOnce(ctx context.Context) error {
 			if stateErr != nil {
 				return s.fail(ctx, item, errors.Join(err, stateErr))
 			}
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			err = fmt.Errorf("plan execution budget exceeded (execution_timeout_ms=%d tool_timeout_ms=%d): %w",
+				executionTimeout.Milliseconds(), toolTimeoutMS, err)
 		}
 		return s.fail(ctx, item, err)
 	}
@@ -379,7 +396,9 @@ func (s *Service) remainingPlanBudget(ctx context.Context, item execution, plan 
 	return maxTokens, maxCostMicros, nil
 }
 
-func (s *Service) executionTimeout(ctx context.Context, planID kernel.PlanID, plan approval.PlanDocument, step approval.StepScope) (time.Duration, error) {
+// executionTimeout is remaining plan wall-clock for the full agent loop (provider + tools).
+// Step timeout_ms is not applied here; it bounds each tool call via ToolTimeoutMillis / grants.
+func (s *Service) executionTimeout(ctx context.Context, planID kernel.PlanID, plan approval.PlanDocument) (time.Duration, error) {
 	var startedAt string
 	if err := s.db.QueryRowContext(ctx, "SELECT MIN(started_at) FROM runs WHERE plan_id = ?", planID).Scan(&startedAt); err != nil {
 		return 0, fmt.Errorf("load plan start time: %w", err)
@@ -390,11 +409,7 @@ func (s *Service) executionTimeout(ctx context.Context, planID kernel.PlanID, pl
 	}
 	remaining := time.Duration(plan.Budget.MaxDurationMillis)*time.Millisecond - s.now().UTC().Sub(started.UTC())
 	if remaining <= 0 {
-		return 0, context.DeadlineExceeded
-	}
-	stepTimeout := time.Duration(step.TimeoutMillis) * time.Millisecond
-	if stepTimeout < remaining {
-		return stepTimeout, nil
+		return 0, fmt.Errorf("plan duration budget exhausted: %w", context.DeadlineExceeded)
 	}
 	return remaining, nil
 }
@@ -402,15 +417,20 @@ func (s *Service) executionTimeout(ctx context.Context, planID kernel.PlanID, pl
 func (s *Service) nextExecution(ctx context.Context) (execution, error) {
 	var item execution
 	var runID, taskID, planID, stepID, state, document string
-	err := s.db.QueryRowContext(ctx, "SELECT r.run_id, r.task_id, r.plan_id, r.step_id, r.state, t.objective, p.scope_hash, p.document "+
+	var sessionID sql.NullString
+	// Skip session-chat runs (step_id chat-step / chat-step-*); chatsession owns those.
+	// Also skip agent-mode tasks: agent execution is StartChat only, not this worker.
+	err := s.db.QueryRowContext(ctx, "SELECT r.run_id, r.task_id, r.plan_id, r.step_id, r.state, t.objective, t.session_id, p.scope_hash, p.document "+
 		"FROM runs r JOIN tasks t ON t.task_id = r.task_id JOIN plans p ON p.plan_id = r.plan_id "+
 		"JOIN plan_steps s ON s.step_id = r.step_id "+
-		"WHERE r.state IN (?, ?) AND t.state = ? AND NOT EXISTS ("+
+		"WHERE r.state IN (?, ?) AND t.state = ? AND t.execution_mode = ? "+
+		"AND r.step_id NOT LIKE ? AND NOT EXISTS ("+
 		"SELECT 1 FROM runs earlier JOIN plan_steps es ON es.step_id = earlier.step_id "+
 		"WHERE earlier.plan_id = r.plan_id AND es.position < s.position AND earlier.state <> ?) "+
 		"ORDER BY r.started_at, s.position, r.run_id LIMIT 1",
-		kernel.RunCreated, kernel.RunRunning, kernel.TaskRunning, kernel.RunCompleted,
-	).Scan(&runID, &taskID, &planID, &stepID, &state, &item.TaskObjective, &item.PlanHash, &document)
+		kernel.RunCreated, kernel.RunRunning, kernel.TaskRunning, kernel.ExecutionModePlan,
+		"chat-step%", kernel.RunCompleted,
+	).Scan(&runID, &taskID, &planID, &stepID, &state, &item.TaskObjective, &sessionID, &item.PlanHash, &document)
 	if err != nil {
 		return execution{}, err
 	}
@@ -420,6 +440,9 @@ func (s *Service) nextExecution(ctx context.Context) (execution, error) {
 	item.StepID = kernel.StepID(stepID)
 	item.RunState = kernel.RunState(state)
 	item.PlanDocument = []byte(document)
+	if sessionID.Valid {
+		item.SessionID = kernel.SessionID(sessionID.String)
+	}
 	return item, nil
 }
 
@@ -613,6 +636,18 @@ func (s *Service) interrupt(taskID kernel.TaskID) {
 	}
 }
 
+func (s *Service) taskExecutionMode(ctx context.Context, taskID kernel.TaskID) (kernel.ExecutionMode, error) {
+	var mode string
+	err := s.db.QueryRowContext(ctx, "SELECT execution_mode FROM tasks WHERE task_id = ?", taskID).Scan(&mode)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("%w: task %s", kernel.ErrNotFound, taskID)
+	}
+	if err != nil {
+		return "", fmt.Errorf("load task execution mode: %w", err)
+	}
+	return kernel.NormalizeExecutionMode(mode), nil
+}
+
 func (s *Service) taskState(ctx context.Context, taskID kernel.TaskID) (kernel.TaskState, error) {
 	var state string
 	if err := s.db.QueryRowContext(ctx, "SELECT state FROM tasks WHERE task_id = ?", taskID).Scan(&state); err != nil {
@@ -673,6 +708,21 @@ func executionMessages(taskObjective string, plan approval.PlanDocument, step ap
 		{Role: providerapi.RoleSystem, Content: "Execute exactly one approved plan step. Use only the advertised tools and approved capability scopes. Do not execute other steps, broaden paths or commands, or claim success without evidence. Return a concise final result for this step."},
 		{Role: providerapi.RoleUser, Content: fmt.Sprintf("Task objective: %s\nApproved plan objective: %s\nCurrent step: %s\nExpected side effects: %s\nRollback: %s\nApproved capabilities: %s", strings.TrimSpace(taskObjective), plan.Objective, step.Title, strings.Join(step.ExpectedSideEffects, "; "), step.Rollback, capabilityJSON)},
 	}
+}
+
+// toolTimeoutMillis returns a timeout that cannot exceed any capability grant
+// MaxDurationMillis on the step, so broker Duration checks stay within grants.
+func toolTimeoutMillis(step approval.StepScope) int64 {
+	timeout := step.TimeoutMillis
+	if timeout <= 0 {
+		return timeout
+	}
+	for _, capability := range step.Capabilities {
+		if capability.MaxDurationMillis > 0 && capability.MaxDurationMillis < timeout {
+			timeout = capability.MaxDurationMillis
+		}
+	}
+	return timeout
 }
 
 func allowedTools(step approval.StepScope) []string {

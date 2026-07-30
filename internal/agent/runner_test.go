@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -88,12 +90,12 @@ func TestRunnerEnforcesPersistedTokenBudget(t *testing.T) {
 func TestRunnerStopsBeforeToolsWhenCostBudgetIsExceeded(t *testing.T) {
 	store, db, _ := openAgentFixture(t)
 	provider := &sequenceProvider{responses: []providerapi.CompletionResponse{{
-		ToolCalls: []providerapi.ToolCall{{ID: "call-budget", Name: "test.read", Arguments: `{}`}},
+		ToolCalls: []providerapi.ToolCall{{ID: "call-budget", Name: "test_read", Arguments: `{}`}},
 		Usage:     providerapi.Usage{TotalTokens: 2, Cost: providerapi.Cost{Currency: "USD", Micros: 101}},
 	}}}
 	broker := &recordingBroker{db: db, definitions: testDefinitions()}
 	request := testRunRequest()
-	request.AllowedTools = []string{"test.read"}
+	request.AllowedTools = []string{"test_read"}
 	request.MaxCostMicros = 100
 	runner := newTestRunner(t, provider, broker, store)
 
@@ -106,18 +108,138 @@ func TestRunnerStopsBeforeToolsWhenCostBudgetIsExceeded(t *testing.T) {
 	}
 }
 
+func TestRunnerFeedsDeniedToolResultAndContinues(t *testing.T) {
+	store, _, _ := openAgentFixture(t)
+	provider := &sequenceProvider{responses: []providerapi.CompletionResponse{
+		{
+			ToolCalls: []providerapi.ToolCall{{ID: "call-deny", Name: "test_read", Arguments: `{"path":"rel"}`}},
+			Usage:     providerapi.Usage{TotalTokens: 2},
+		},
+		{
+			Content: "recovered after deny", Usage: providerapi.Usage{TotalTokens: 3},
+		},
+	}}
+	broker := &recordingBroker{
+		definitions: testDefinitions(),
+		executeErr:  fmt.Errorf("%w: paths must be absolute", toolapi.ErrDenied),
+	}
+	request := testRunRequest()
+	request.AllowedTools = []string{"test_read"}
+	runner := newTestRunner(t, provider, broker, store)
+
+	result, err := runner.Run(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != "recovered after deny" || result.Iterations != 2 {
+		t.Fatalf("result = %+v", result)
+	}
+	if broker.calls != 1 {
+		t.Fatalf("tool calls = %d, want 1", broker.calls)
+	}
+	if provider.calls != 2 {
+		t.Fatalf("provider calls = %d, want 2", provider.calls)
+	}
+	if len(provider.requests) < 2 {
+		t.Fatalf("provider requests = %d", len(provider.requests))
+	}
+	msgs := provider.requests[1].Messages
+	if len(msgs) < 1 {
+		t.Fatal("second provider request has no messages")
+	}
+	toolMsg := msgs[len(msgs)-1]
+	if toolMsg.Role != providerapi.RoleTool || toolMsg.ToolCallID != "call-deny" {
+		t.Fatalf("tool message = %+v", toolMsg)
+	}
+	if !strings.Contains(toolMsg.Content, "tool_denied") {
+		t.Fatalf("tool content = %q, want tool_denied", toolMsg.Content)
+	}
+	if len(result.ToolCalls) != 1 || string(result.ToolCalls[0].Output) != toolMsg.Content {
+		t.Fatalf("result tool calls = %+v", result.ToolCalls)
+	}
+}
+
+func TestRunnerRestoresDeniedToolResultAfterRestart(t *testing.T) {
+	store, _, _ := openAgentFixture(t)
+	firstProvider := &sequenceProvider{
+		responses: []providerapi.CompletionResponse{{
+			ToolCalls: []providerapi.ToolCall{{ID: "call-deny", Name: "test_read", Arguments: `{}`}},
+			Usage:     providerapi.Usage{TotalTokens: 2},
+		}},
+		errors: []error{nil, context.Canceled},
+	}
+	broker := &recordingBroker{
+		definitions: testDefinitions(),
+		executeErr:  fmt.Errorf("%w: duration exceeds grant", toolapi.ErrDenied),
+	}
+	request := testRunRequest()
+	request.AllowedTools = []string{"test_read"}
+	firstRunner := newTestRunner(t, firstProvider, broker, store)
+
+	_, err := firstRunner.Run(context.Background(), request)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("first Run() error = %v, want context.Canceled", err)
+	}
+	if broker.calls != 1 {
+		t.Fatalf("tool calls before restart = %d, want 1", broker.calls)
+	}
+
+	secondProvider := &sequenceProvider{responses: []providerapi.CompletionResponse{{
+		Content: "after deny restore", Usage: providerapi.Usage{TotalTokens: 3},
+	}}}
+	secondRunner := newTestRunner(t, secondProvider, broker, store)
+	result, err := secondRunner.Run(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != "after deny restore" || result.Iterations != 2 {
+		t.Fatalf("recovered result = %+v", result)
+	}
+	if broker.calls != 1 {
+		t.Fatalf("tool calls after restart = %d, want still 1", broker.calls)
+	}
+	if secondProvider.calls != 1 {
+		t.Fatalf("second provider calls = %d, want 1", secondProvider.calls)
+	}
+	toolMsg := secondProvider.requests[0].Messages[len(secondProvider.requests[0].Messages)-1]
+	if toolMsg.Role != providerapi.RoleTool || !strings.Contains(toolMsg.Content, "tool_denied") {
+		t.Fatalf("restored tool message = %+v", toolMsg)
+	}
+}
+
+func TestRunnerStillFailsOnNonDeniedToolError(t *testing.T) {
+	store, _, _ := openAgentFixture(t)
+	provider := &sequenceProvider{responses: []providerapi.CompletionResponse{{
+		ToolCalls: []providerapi.ToolCall{{ID: "call-fail", Name: "test_read", Arguments: `{}`}},
+		Usage:     providerapi.Usage{TotalTokens: 2},
+	}}}
+	want := errors.New("broker internal failure")
+	broker := &recordingBroker{definitions: testDefinitions(), executeErr: want}
+	request := testRunRequest()
+	request.AllowedTools = []string{"test_read"}
+	runner := newTestRunner(t, provider, broker, store)
+
+	_, err := runner.Run(context.Background(), request)
+	if !errors.Is(err, want) {
+		t.Fatalf("Run() error = %v, want %v", err, want)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("provider calls = %d, want 1", provider.calls)
+	}
+}
+
 func TestRunnerRestoresDurableToolTurnAfterRestart(t *testing.T) {
 	store, db, _ := openAgentFixture(t)
 	firstProvider := &sequenceProvider{
 		responses: []providerapi.CompletionResponse{{
-			ToolCalls: []providerapi.ToolCall{{ID: "call-1", Name: "test.read", Arguments: `{}`}},
+			ToolCalls: []providerapi.ToolCall{{ID: "call-1", Name: "test_read", Arguments: `{}`}},
 			Usage:     providerapi.Usage{TotalTokens: 4},
 		}},
 		errors: []error{nil, context.Canceled},
 	}
 	broker := &recordingBroker{db: db, definitions: testDefinitions()}
 	request := testRunRequest()
-	request.AllowedTools = []string{"test.read"}
+	request.AllowedTools = []string{"test_read"}
 	request.MaxTotalTokens = 20
 	firstRunner := newTestRunner(t, firstProvider, broker, store)
 
@@ -175,6 +297,7 @@ type recordingBroker struct {
 	db          *sql.DB
 	definitions []toolapi.Definition
 	calls       int
+	executeErr  error
 }
 
 func (b *recordingBroker) Definitions() []toolapi.Definition {
@@ -183,6 +306,9 @@ func (b *recordingBroker) Definitions() []toolapi.Definition {
 
 func (b *recordingBroker) Execute(_ context.Context, request toolapi.Request) (toolapi.Response, error) {
 	b.calls++
+	if b.executeErr != nil {
+		return toolapi.Response{}, b.executeErr
+	}
 	now := time.Now().UTC()
 	response := toolapi.Response{
 		CallID: request.CallID, Tool: request.Tool, Output: json.RawMessage(`{"ok":true}`),
@@ -228,7 +354,7 @@ func testRunRequest() RunRequest {
 
 func testDefinitions() []toolapi.Definition {
 	return []toolapi.Definition{{
-		Name: "test.read", Description: "Read test state", InputSchema: json.RawMessage(`{"type":"object"}`),
+		Name: "test_read", Description: "Read test state", InputSchema: json.RawMessage(`{"type":"object"}`),
 	}}
 }
 

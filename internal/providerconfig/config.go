@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -69,11 +70,196 @@ type Resolved struct {
 	Headers          map[string]string
 }
 
-// Load uses project-local configuration first, then project configuration, then user configuration.
-func Load(configDir, workingDirectory string) (*Resolved, error) {
+// ModelRef is a configured model identifier in provider/model form (no secrets).
+type ModelRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name,omitempty"`
+}
+
+// ListModelRefs returns the selected model plus every provider/model key from the
+// first resolvable file under configDir. API keys and other secrets are never included.
+func ListModelRefs(configDir string) (selected string, models []ModelRef, err error) {
+	path, err := findConfigPath(configDir)
+	if err != nil {
+		return "", nil, err
+	}
+	if path == "" {
+		return "", nil, nil
+	}
+	return listModelRefsFromFile(path)
+}
+
+func listModelRefsFromFile(path string) (string, []ModelRef, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", nil, fmt.Errorf("open provider config %s: %w", path, err)
+	}
+	defer file.Close()
+	decoder := json.NewDecoder(io.LimitReader(file, 1<<20))
+	decoder.DisallowUnknownFields()
+	var config File
+	if err := decoder.Decode(&config); err != nil {
+		return "", nil, fmt.Errorf("decode provider config %s: %w", path, err)
+	}
+	if err := requireEOF(decoder); err != nil {
+		return "", nil, fmt.Errorf("decode provider config %s: %w", path, err)
+	}
+	selected := strings.TrimSpace(config.Model)
+	seen := make(map[string]struct{})
+	var models []ModelRef
+	add := func(id, name string) {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		models = append(models, ModelRef{ID: id, Name: strings.TrimSpace(name)})
+	}
+	if selected != "" {
+		add(selected, "")
+	}
+	providerIDs := make([]string, 0, len(config.Provider))
+	for providerID := range config.Provider {
+		providerIDs = append(providerIDs, providerID)
+	}
+	sort.Strings(providerIDs)
+	for _, providerID := range providerIDs {
+		provider := config.Provider[providerID]
+		modelIDs := make([]string, 0, len(provider.Models))
+		for modelID := range provider.Models {
+			modelIDs = append(modelIDs, modelID)
+		}
+		sort.Strings(modelIDs)
+		for _, modelID := range modelIDs {
+			ref := providerID + "/" + modelID
+			add(ref, provider.Models[modelID].Name)
+		}
+	}
+	return selected, models, nil
+}
+
+// Load reads provider configuration only from configDir
+// (autozeagent.local.json, then autozeagent.json). Project directories are not searched.
+func Load(configDir string) (*Resolved, error) {
+	path, err := findConfigPath(configDir)
+	if err != nil {
+		return nil, err
+	}
+	if path == "" {
+		return nil, nil
+	}
+	resolved, err := loadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return &resolved, nil
+}
+
+// ResolveModel loads configuration and resolves provider/model for the given ref.
+// ref must be provider/model. The selected top-level model field is overridden.
+func ResolveModel(configDir, ref string) (*Resolved, error) {
+	ref = strings.TrimSpace(ref)
+	providerID, modelID, ok := strings.Cut(ref, "/")
+	providerID, modelID = strings.TrimSpace(providerID), strings.TrimSpace(modelID)
+	if !ok || providerID == "" || modelID == "" {
+		return nil, errors.New("model must use provider/model format")
+	}
+	path, err := findConfigPath(configDir)
+	if err != nil {
+		return nil, err
+	}
+	if path == "" {
+		return nil, errors.New("provider config not found")
+	}
+	resolved, err := loadFileWithModel(path, providerID, modelID)
+	if err != nil {
+		return nil, err
+	}
+	return &resolved, nil
+}
+
+// WriteSelectedModel updates the top-level model field in the first resolvable
+// config file under configDir. Other fields and secrets are preserved.
+func WriteSelectedModel(configDir, ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	providerID, modelID, ok := strings.Cut(ref, "/")
+	providerID, modelID = strings.TrimSpace(providerID), strings.TrimSpace(modelID)
+	if !ok || providerID == "" || modelID == "" {
+		return "", errors.New("model must use provider/model format")
+	}
+	selected := providerID + "/" + modelID
+	path, err := findConfigPath(configDir)
+	if err != nil {
+		return "", err
+	}
+	if path == "" {
+		return "", errors.New("provider config not found")
+	}
+	if err := validateModelInFile(path, providerID, modelID); err != nil {
+		return "", err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read provider config %s: %w", path, err)
+	}
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &document); err != nil {
+		return "", fmt.Errorf("decode provider config %s: %w", path, err)
+	}
+	encoded, err := json.Marshal(selected)
+	if err != nil {
+		return "", err
+	}
+	document["model"] = encoded
+	updated, err := json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	updated = append(updated, '\n')
+	info, err := os.Stat(path)
+	mode := os.FileMode(0o600)
+	if err == nil {
+		mode = info.Mode().Perm()
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".autozeagent-model-*.tmp")
+	if err != nil {
+		return "", fmt.Errorf("create temp config: %w", err)
+	}
+	tmpName := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err := tmp.Write(updated); err != nil {
+		_ = tmp.Close()
+		return "", fmt.Errorf("write temp config: %w", err)
+	}
+	if err := tmp.Chmod(mode); err != nil {
+		_ = tmp.Close()
+		return "", fmt.Errorf("chmod temp config: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return "", fmt.Errorf("close temp config: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return "", fmt.Errorf("replace provider config %s: %w", path, err)
+	}
+	cleanup = false
+	return path, nil
+}
+
+func findConfigPath(configDir string) (string, error) {
+	configDir = strings.TrimSpace(configDir)
+	if configDir == "" {
+		return "", errors.New("config directory is required")
+	}
 	candidates := []string{
-		filepath.Join(workingDirectory, LocalFilename),
-		filepath.Join(workingDirectory, Filename),
+		filepath.Join(configDir, LocalFilename),
 		filepath.Join(configDir, Filename),
 	}
 	for _, candidate := range candidates {
@@ -82,19 +268,130 @@ func Load(configDir, workingDirectory string) (*Resolved, error) {
 			continue
 		}
 		if err != nil {
-			return nil, fmt.Errorf("inspect provider config %s: %w", candidate, err)
+			return "", fmt.Errorf("inspect provider config %s: %w", candidate, err)
 		}
 		if !info.Mode().IsRegular() {
-			return nil, fmt.Errorf("provider config is not a regular file: %s", candidate)
+			return "", fmt.Errorf("provider config is not a regular file: %s", candidate)
 		}
-		resolved, err := loadFile(candidate)
-		if err != nil {
-			return nil, err
-		}
-		return &resolved, nil
+		return candidate, nil
 	}
-	return nil, nil
+	return "", nil
 }
+
+// EnsureResult describes how provider config was made available under configDir.
+type EnsureResult struct {
+	Path     string // active config path under configDir (may be empty only on error)
+	Created  bool   // wrote the default template
+	Migrated bool   // copied from a project/legacy path
+	Source   string // migration source path when Migrated
+}
+
+// EnsureConfig prepares configDir for provider loading:
+//  1. MkdirAll configDir
+//  2. If ConfigDir already has a config file, use it
+//  3. Else copy the first existing file from migrateFromDirs (each dir checked for
+//     autozeagent.local.json then autozeagent.json) into ConfigDir as LocalFilename
+//  4. Else write a default template (env-based keys, no secrets) as Filename
+func EnsureConfig(configDir string, migrateFromDirs ...string) (EnsureResult, error) {
+	configDir = strings.TrimSpace(configDir)
+	if configDir == "" {
+		return EnsureResult{}, errors.New("config directory is required")
+	}
+	if err := os.MkdirAll(configDir, 0o750); err != nil {
+		return EnsureResult{}, fmt.Errorf("create config directory %s: %w", configDir, err)
+	}
+	existing, err := findConfigPath(configDir)
+	if err != nil {
+		return EnsureResult{}, err
+	}
+	if existing != "" {
+		return EnsureResult{Path: existing}, nil
+	}
+	for _, dir := range migrateFromDirs {
+		dir = strings.TrimSpace(dir)
+		if dir == "" {
+			continue
+		}
+		for _, name := range []string{LocalFilename, Filename} {
+			src := filepath.Join(dir, name)
+			info, statErr := os.Stat(src)
+			if errors.Is(statErr, os.ErrNotExist) {
+				continue
+			}
+			if statErr != nil {
+				return EnsureResult{}, fmt.Errorf("inspect migrate source %s: %w", src, statErr)
+			}
+			if !info.Mode().IsRegular() {
+				continue
+			}
+			dst := filepath.Join(configDir, LocalFilename)
+			if err := copyFile(src, dst, 0o600); err != nil {
+				return EnsureResult{}, fmt.Errorf("migrate provider config %s → %s: %w", src, dst, err)
+			}
+			return EnsureResult{Path: dst, Migrated: true, Source: src}, nil
+		}
+	}
+	dst := filepath.Join(configDir, Filename)
+	if err := os.WriteFile(dst, []byte(defaultConfigTemplate), 0o600); err != nil {
+		return EnsureResult{}, fmt.Errorf("write default provider config %s: %w", dst, err)
+	}
+	return EnsureResult{Path: dst, Created: true}, nil
+}
+
+func copyFile(src, dst string, mode os.FileMode) error {
+	raw, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".autozeagent-config-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err := tmp.Write(raw); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(mode); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, dst); err != nil {
+		return err
+	}
+	cleanup = false
+	return nil
+}
+
+// defaultConfigTemplate is written when ConfigDir has no config and nothing to migrate.
+// Keys use {env:…}; no literal secrets.
+const defaultConfigTemplate = `{
+  "model": "deepseek/deepseek-chat",
+  "provider": {
+    "deepseek": {
+      "type": "openai-compatible",
+      "options": {
+        "baseURL": "https://api.deepseek.com",
+        "apiKey": "{env:DEEPSEEK_API_KEY}"
+      },
+      "models": {
+        "deepseek-chat": {
+          "name": "DeepSeek Chat"
+        }
+      }
+    }
+  }
+}
+`
 
 func loadFile(path string) (Resolved, error) {
 	file, err := os.Open(path)
@@ -114,6 +411,56 @@ func loadFile(path string) (Resolved, error) {
 	providerID, modelID, ok := strings.Cut(strings.TrimSpace(config.Model), "/")
 	providerID, modelID = strings.TrimSpace(providerID), strings.TrimSpace(modelID)
 	if !ok || providerID == "" || modelID == "" {
+		return Resolved{}, errors.New("provider config model must use provider/model format")
+	}
+	return resolveFromFile(path, config, providerID, modelID)
+}
+
+func loadFileWithModel(path, providerID, modelID string) (Resolved, error) {
+	config, err := decodeConfigFile(path)
+	if err != nil {
+		return Resolved{}, err
+	}
+	return resolveFromFile(path, config, providerID, modelID)
+}
+
+func validateModelInFile(path, providerID, modelID string) error {
+	config, err := decodeConfigFile(path)
+	if err != nil {
+		return err
+	}
+	provider, ok := config.Provider[providerID]
+	if !ok {
+		return fmt.Errorf("selected provider %q is not configured", providerID)
+	}
+	if len(provider.Models) > 0 {
+		if _, modelConfigured := provider.Models[modelID]; !modelConfigured {
+			return fmt.Errorf("model %q is not configured for provider %q", modelID, providerID)
+		}
+	}
+	return nil
+}
+
+func decodeConfigFile(path string) (File, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return File{}, fmt.Errorf("open provider config %s: %w", path, err)
+	}
+	defer file.Close()
+	decoder := json.NewDecoder(io.LimitReader(file, 1<<20))
+	decoder.DisallowUnknownFields()
+	var config File
+	if err := decoder.Decode(&config); err != nil {
+		return File{}, fmt.Errorf("decode provider config %s: %w", path, err)
+	}
+	if err := requireEOF(decoder); err != nil {
+		return File{}, fmt.Errorf("decode provider config %s: %w", path, err)
+	}
+	return config, nil
+}
+
+func resolveFromFile(path string, config File, providerID, modelID string) (Resolved, error) {
+	if providerID == "" || modelID == "" {
 		return Resolved{}, errors.New("provider config model must use provider/model format")
 	}
 	provider, ok := config.Provider[providerID]

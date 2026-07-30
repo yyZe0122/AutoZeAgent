@@ -1,0 +1,203 @@
+package corequery
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"testing"
+	"time"
+
+	"autozeagent.local/autozeagent/internal/coreidentity"
+	coresqlite "autozeagent.local/autozeagent/internal/store/sqlite"
+)
+
+func TestSessionTranscriptIncludesUserAndAssistant(t *testing.T) {
+	ctx := context.Background()
+	db, err := coresqlite.Open(ctx, t.TempDir()+"/core.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	sqlDB := db.SQL()
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{"INSERT INTO sessions(session_id,state,version,created_at,updated_at) VALUES(?,?,?,?,?)",
+			[]any{"session-1", "active", 1, stamp, stamp}},
+		{"INSERT INTO tasks(task_id,session_id,title,objective,state,execution_mode,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+			[]any{"task-1", "session-1", "Hello", "Hello world", "completed", "agent", 1, stamp, stamp}},
+		{"INSERT INTO plans(plan_id,task_id,revision,state,scope_hash,document,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+			[]any{"plan-1", "task-1", 1, "approved", "h", "{}", 1, stamp, stamp}},
+		{"INSERT INTO runs(run_id,task_id,plan_id,state,started_at,updated_at,version) VALUES(?,?,?,?,?,?,?)",
+			[]any{"run-1", "task-1", "plan-1", "completed", stamp, stamp, 1}},
+		{"INSERT INTO agent_run_records(run_id,position,record_type,message,usage,finish_reason,tool_call_id,created_at) VALUES(?,?,?,?,?,?,?,?)",
+			[]any{"run-1", 0, "assistant_message",
+				`{"role":"assistant","content":"Hi there"}`, `{}`, "stop", "", stamp}},
+		{"INSERT INTO agent_run_records(run_id,position,record_type,message,usage,finish_reason,tool_call_id,created_at) VALUES(?,?,?,?,?,?,?,?)",
+			[]any{"run-1", 1, "assistant_message",
+				`{"role":"assistant","content":"","tool_calls":[{"id":"c1","name":"read","arguments":"{\"path\":\"x\"}"}]}`,
+				`{}`, "tool_calls", "", stamp}},
+		{"INSERT INTO agent_run_records(run_id,position,record_type,message,usage,finish_reason,tool_call_id,created_at) VALUES(?,?,?,?,?,?,?,?)",
+			[]any{"run-1", 2, "tool_result",
+				`{"role":"tool","content":"file contents","tool_call_id":"c1"}`, `{}`, "", "c1", stamp}},
+	} {
+		if _, err := sqlDB.ExecContext(ctx, q.sql, q.args...); err != nil {
+			t.Fatalf("%s: %v", q.sql, err)
+		}
+	}
+
+	store, err := New(sqlDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := store.ListSessions(ctx, SessionListOptions{Page: Page{Limit: 10}, Sort: SortDescending})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 || sessions[0].ID != "session-1" || sessions[0].Title != "Hello" {
+		t.Fatalf("sessions = %#v", sessions)
+	}
+
+	msgs, err := store.SessionTranscript(ctx, coreidentity.SessionID("session-1"), TranscriptOptions{Page: Page{Limit: 50}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var roles []string
+	var sawTool, sawAssistant bool
+	for _, m := range msgs {
+		roles = append(roles, m.Role)
+		if m.Role == "assistant" && m.Content == "Hi there" {
+			sawAssistant = true
+		}
+		if m.Role == "tool" && m.Content == "file contents" {
+			sawTool = true
+		}
+		if m.Role == "assistant" && len(m.ToolCalls) > 0 && m.ToolCalls[0].Name == "read" {
+			// ok
+		}
+	}
+	if !sawAssistant {
+		t.Fatalf("missing assistant content: %#v", msgs)
+	}
+	if !sawTool {
+		t.Fatalf("missing tool result: %#v", msgs)
+	}
+	// user objective synthetic + assistant + tool_call assistant + tool
+	if len(msgs) < 3 {
+		t.Fatalf("roles=%v msgs=%#v", roles, msgs)
+	}
+}
+
+func TestSessionTranscriptFiltersInternalStepPrompt(t *testing.T) {
+	ctx := context.Background()
+	db, err := coresqlite.Open(ctx, t.TempDir()+"/core.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	sqlDB := db.SQL()
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+
+	stepPrompt := "Task objective: 你好\nApproved plan objective: greet user\nCurrent step: list workspace\nApproved capabilities: []"
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{"INSERT INTO sessions(session_id,state,version,created_at,updated_at) VALUES(?,?,?,?,?)",
+			[]any{"session-ghost", "active", 1, stamp, stamp}},
+		{"INSERT INTO tasks(task_id,session_id,title,objective,state,execution_mode,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+			[]any{"task-ghost", "session-ghost", "你好", "你好", "completed", "agent", 1, stamp, stamp}},
+		{"INSERT INTO plans(plan_id,task_id,revision,state,scope_hash,document,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+			[]any{"plan-ghost", "task-ghost", 1, "approved", "h", "{}", 1, stamp, stamp}},
+		{"INSERT INTO runs(run_id,task_id,plan_id,state,started_at,updated_at,version) VALUES(?,?,?,?,?,?,?)",
+			[]any{"run-ghost", "task-ghost", "plan-ghost", "completed", stamp, stamp, 1}},
+		{"INSERT INTO agent_run_records(run_id,position,record_type,message,usage,finish_reason,tool_call_id,created_at) VALUES(?,?,?,?,?,?,?,?)",
+			[]any{"run-ghost", 0, "input_message",
+				fmt.Sprintf(`{"role":"user","content":%q}`, stepPrompt), `{}`, "", "", stamp}},
+		{"INSERT INTO agent_run_records(run_id,position,record_type,message,usage,finish_reason,tool_call_id,created_at) VALUES(?,?,?,?,?,?,?,?)",
+			[]any{"run-ghost", 1, "assistant_message",
+				`{"role":"assistant","content":"你好！有什么可以帮忙的？"}`, `{}`, "stop", "", stamp}},
+	} {
+		if _, err := sqlDB.ExecContext(ctx, q.sql, q.args...); err != nil {
+			t.Fatalf("%s: %v", q.sql, err)
+		}
+	}
+
+	store, err := New(sqlDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgs, err := store.SessionTranscript(ctx, coreidentity.SessionID("session-ghost"), TranscriptOptions{Page: Page{Limit: 50}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var users, assistants int
+	for _, m := range msgs {
+		if m.Role == "user" {
+			users++
+			if strings.Contains(m.Content, "Current step:") || strings.Contains(m.Content, "Approved capabilities:") {
+				t.Fatalf("internal step prompt leaked into transcript: %#v", m)
+			}
+			if m.Content != "你好" {
+				t.Fatalf("user bubble = %q want 你好", m.Content)
+			}
+			if !strings.HasPrefix(m.ID, "task-user:") {
+				t.Fatalf("expected task-user anchor, got %q", m.ID)
+			}
+		}
+		if m.Role == "assistant" && m.Content == "你好！有什么可以帮忙的？" {
+			assistants++
+		}
+	}
+	if users != 1 {
+		t.Fatalf("user bubbles = %d want 1; msgs=%#v", users, msgs)
+	}
+	if assistants != 1 {
+		t.Fatalf("assistant bubbles = %d want 1; msgs=%#v", assistants, msgs)
+	}
+
+	taskMsgs, err := store.TaskTranscript(ctx, coreidentity.TaskID("task-ghost"), TranscriptOptions{Page: Page{Limit: 50}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range taskMsgs {
+		if m.Role == "user" && (strings.Contains(m.Content, "Current step:") || strings.Contains(m.Content, "Task objective:")) {
+			t.Fatalf("TaskTranscript leaked step prompt: %#v", m)
+		}
+	}
+}
+
+func TestIsInternalStepPrompt(t *testing.T) {
+	if !isInternalStepPrompt("Task objective: x\nCurrent step: y") {
+		t.Fatal("expected step prompt")
+	}
+	if isInternalStepPrompt("你好") {
+		t.Fatal("plain user text must not filter")
+	}
+	if isInternalStepPrompt("Task objective alone without markers") {
+		t.Fatal("objective marker alone is not enough")
+	}
+}
+
+func TestListSessionsEmpty(t *testing.T) {
+	ctx := context.Background()
+	db, err := coresqlite.Open(ctx, t.TempDir()+"/core.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	store, err := New(db.SQL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := store.ListSessions(ctx, SessionListOptions{Page: Page{Limit: 10}, Sort: SortDescending})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("got %#v", items)
+	}
+}

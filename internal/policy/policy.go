@@ -39,6 +39,14 @@ func AtLeast(actual, required RiskLevel) bool {
 	return actualOK && requiredOK && actualOrder >= requiredOrder
 }
 
+// AtMost reports whether actual is no more severe than max.
+// Unknown levels fail closed.
+func AtMost(actual, max RiskLevel) bool {
+	actualOrder, actualOK := riskOrder[actual]
+	maxOrder, maxOK := riskOrder[max]
+	return actualOK && maxOK && actualOrder <= maxOrder
+}
+
 func (r RiskLevel) Description() string {
 	switch r {
 	case RiskR0:

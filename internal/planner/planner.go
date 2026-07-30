@@ -11,6 +11,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"autozeagent.local/autozeagent/internal/approval"
@@ -38,6 +39,7 @@ type Config struct {
 }
 
 type Planner struct {
+	mu              sync.RWMutex
 	provider        providerapi.Provider
 	model           string
 	capabilities    map[string]policy.RiskLevel
@@ -101,13 +103,49 @@ func New(config Config) (*Planner, error) {
 	}, nil
 }
 
+// SetProvider replaces the provider used by subsequent planning calls.
+func (p *Planner) SetProvider(provider providerapi.Provider) error {
+	if provider == nil {
+		return errors.New("planner provider is required")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.provider = provider
+	return nil
+}
+
+// SetModel replaces the model id used by subsequent planning calls.
+func (p *Planner) SetModel(model string) error {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return errors.New("planner model is required")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.model = model
+	return nil
+}
+
+// Model returns the currently selected model id.
+func (p *Planner) Model() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.model
+}
+
+func (p *Planner) snapshot() (providerapi.Provider, string) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.provider, p.model
+}
+
 func DefaultReadOnlyCapabilities() map[string]policy.RiskLevel {
 	return map[string]policy.RiskLevel{
-		"fs.read":    policy.RiskR0,
-		"fs.list":    policy.RiskR0,
-		"fs.stat":    policy.RiskR0,
-		"git.status": policy.RiskR0,
-		"git.diff":   policy.RiskR0,
+		"fs_read":    policy.RiskR0,
+		"fs_list":    policy.RiskR0,
+		"fs_stat":    policy.RiskR0,
+		"git_status": policy.RiskR0,
+		"git_diff":   policy.RiskR0,
 	}
 }
 
@@ -168,8 +206,9 @@ func (p *Planner) Generate(ctx context.Context, request GenerateRequest) (approv
 }
 
 func (p *Planner) generateOnce(ctx context.Context, request GenerateRequest, messages []providerapi.Message) (approval.PlanDocument, string, error) {
-	response, err := providerapi.CollectStream(ctx, p.provider, providerapi.CompletionRequest{
-		Model:    p.model,
+	provider, model := p.snapshot()
+	response, err := providerapi.CollectStream(ctx, provider, providerapi.CompletionRequest{
+		Model:    model,
 		Messages: messages,
 		ResponseSchema: &providerapi.JSONSchema{
 			Name: "autozeagent_plan", Description: "A bounded plan proposal; it never executes tools.", Strict: true, Schema: p.schema,
@@ -327,13 +366,20 @@ func requireKeys(object map[string]json.RawMessage, required, optional []string)
 	return nil
 }
 
+// Plan budget floors: plan max_duration bounds the full agent loop (provider + tools).
+// Step timeout_ms bounds tool grants only (see runexecution.executionTimeout).
+const (
+	minPlanMaxTokens     int64 = 2_048
+	minPlanMaxDurationMS int64 = 60_000
+)
+
 func (p *Planner) toPlan(request GenerateRequest, output planOutput) (approval.PlanDocument, error) {
 	output.Objective = strings.TrimSpace(output.Objective)
 	if output.Objective == "" || len(output.Steps) == 0 {
 		return approval.PlanDocument{}, fmt.Errorf("%w: objective and at least one step are required", ErrInvalidOutput)
 	}
-	if output.Budget.MaxTokens <= 0 || output.Budget.MaxCostMicros < 0 || output.Budget.MaxDurationMillis <= 0 {
-		return approval.PlanDocument{}, fmt.Errorf("%w: invalid plan budget", ErrInvalidOutput)
+	if output.Budget.MaxTokens < minPlanMaxTokens || output.Budget.MaxCostMicros < 0 || output.Budget.MaxDurationMillis < minPlanMaxDurationMS {
+		return approval.PlanDocument{}, fmt.Errorf("%w: invalid plan budget (max_tokens>=%d, max_duration_ms>=%d)", ErrInvalidOutput, minPlanMaxTokens, minPlanMaxDurationMS)
 	}
 	plan := approval.PlanDocument{
 		PlanID: request.PlanID, TaskID: request.TaskID, Revision: request.Revision, Objective: output.Objective,
@@ -357,7 +403,7 @@ func (p *Planner) toPlan(request GenerateRequest, output planOutput) (approval.P
 		if len(step.ExpectedSideEffects) > 0 && !policy.AtLeast(step.Risk, policy.RiskR1) {
 			return approval.PlanDocument{}, fmt.Errorf("%w: step %d understates side-effect risk", ErrInvalidOutput, i)
 		}
-		for _, capability := range step.Capabilities {
+		for j, capability := range step.Capabilities {
 			required, exists := p.capabilities[capability.Capability]
 			if !exists {
 				return approval.PlanDocument{}, fmt.Errorf("%w: capability %q is not allowed", ErrInvalidOutput, capability.Capability)
@@ -368,6 +414,12 @@ func (p *Planner) toPlan(request GenerateRequest, output planOutput) (approval.P
 			if capability.MaxDurationMillis > step.TimeoutMillis {
 				return approval.PlanDocument{}, fmt.Errorf("%w: capability %q exceeds step timeout", ErrInvalidOutput, capability.Capability)
 			}
+			// Normalize early so process_exec path/command rules fail closed at plan time.
+			normalized, err := approval.NormalizeCapabilityForPlan(capability)
+			if err != nil {
+				return approval.PlanDocument{}, fmt.Errorf("%w: step %d capability %d: %v", ErrInvalidOutput, i, j, err)
+			}
+			step.Capabilities[j] = normalized
 		}
 		plan.Steps[i] = approval.StepScope{
 			StepID: kernel.StepID(fmt.Sprintf("%s-step-%d", request.PlanID, i+1)), Position: i,
@@ -417,7 +469,7 @@ func buildPlanSchema(capabilities map[string]policy.RiskLevel) (json.RawMessage,
 			"title":                 map[string]any{"type": "string", "minLength": 1},
 			"risk":                  map[string]any{"type": "string", "enum": []string{"R0", "R1", "R2", "R3", "R4"}},
 			"expected_side_effects": stringArray, "rollback": map[string]any{"type": "string", "minLength": 1},
-			"timeout_ms":   map[string]any{"type": "integer", "minimum": 1},
+			"timeout_ms":   map[string]any{"type": "integer", "minimum": 1, "description": "Per-tool grant wall time (ms); does not bound provider streaming"},
 			"capabilities": map[string]any{"type": "array", "items": capability},
 		},
 	}
@@ -430,9 +482,9 @@ func buildPlanSchema(capabilities map[string]policy.RiskLevel) (json.RawMessage,
 				"type": "object", "additionalProperties": false,
 				"required": []string{"max_tokens", "max_cost_micros", "max_duration_ms"},
 				"properties": map[string]any{
-					"max_tokens":      map[string]any{"type": "integer", "minimum": 1},
+					"max_tokens":      map[string]any{"type": "integer", "minimum": minPlanMaxTokens},
 					"max_cost_micros": map[string]any{"type": "integer", "minimum": 0},
-					"max_duration_ms": map[string]any{"type": "integer", "minimum": 1},
+					"max_duration_ms": map[string]any{"type": "integer", "minimum": minPlanMaxDurationMS, "description": "Wall clock for entire plan execution (provider + tools)"},
 				},
 			},
 			"steps": map[string]any{"type": "array", "minItems": 1, "items": step},

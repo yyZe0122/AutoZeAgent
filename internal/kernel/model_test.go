@@ -73,11 +73,26 @@ func TestTaskRejectsIllegalTransitionWithoutMutation(t *testing.T) {
 		t.Fatalf("NewTask() error = %v", err)
 	}
 	before := task
-	if err := task.Transition(TaskRunning, testTime.Add(time.Minute)); !errors.Is(err, ErrInvalidTransition) {
+	// created → completed remains illegal (created → running is allowed for agent chat).
+	if err := task.Transition(TaskCompleted, testTime.Add(time.Minute)); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("Transition() error = %v, want ErrInvalidTransition", err)
 	}
 	if task != before {
 		t.Fatalf("illegal transition mutated task: before=%+v after=%+v", before, task)
+	}
+}
+
+func TestTaskCreatedToRunningForAgentChat(t *testing.T) {
+	t.Parallel()
+	task, err := NewTask("task-chat", "session-1", "Hi", "你好", testTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := task.Transition(TaskRunning, testTime.Add(time.Minute)); err != nil {
+		t.Fatalf("created→running: %v", err)
+	}
+	if task.State != TaskRunning {
+		t.Fatalf("state = %s", task.State)
 	}
 }
 

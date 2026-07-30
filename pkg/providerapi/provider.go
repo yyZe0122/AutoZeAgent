@@ -21,8 +21,11 @@ const (
 )
 
 type Message struct {
-	Role       Role       `json:"role"`
-	Content    string     `json:"content"`
+	Role    Role   `json:"role"`
+	Content string `json:"content"`
+	// Thinking is optional model reasoning/scratchpad (not sent back as user-visible
+	// content unless the UI chooses to show it). Provider-neutral; may be empty.
+	Thinking   string     `json:"thinking,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 }
@@ -72,6 +75,7 @@ type ToolCall struct {
 
 type CompletionResponse struct {
 	Content      string     `json:"content"`
+	Thinking     string     `json:"thinking,omitempty"`
 	FinishReason string     `json:"finish_reason,omitempty"`
 	ToolCalls    []ToolCall `json:"tool_calls,omitempty"`
 	Usage        Usage      `json:"usage"`
@@ -81,16 +85,18 @@ type StreamEventType string
 
 const (
 	StreamDelta    StreamEventType = "delta"
+	StreamThinking StreamEventType = "thinking_delta"
 	StreamToolCall StreamEventType = "tool_call"
 	StreamComplete StreamEventType = "complete"
 )
 
 type StreamEvent struct {
-	Type         StreamEventType `json:"type"`
-	ContentDelta string          `json:"content_delta,omitempty"`
-	ToolCall     *ToolCall       `json:"tool_call,omitempty"`
-	Usage        *Usage          `json:"usage,omitempty"`
-	FinishReason string          `json:"finish_reason,omitempty"`
+	Type          StreamEventType `json:"type"`
+	ContentDelta  string          `json:"content_delta,omitempty"`
+	ThinkingDelta string          `json:"thinking_delta,omitempty"`
+	ToolCall      *ToolCall       `json:"tool_call,omitempty"`
+	Usage         *Usage          `json:"usage,omitempty"`
+	FinishReason  string          `json:"finish_reason,omitempty"`
 }
 
 type StreamHandler func(StreamEvent) error
@@ -112,19 +118,27 @@ func (a *StreamAccumulator) Add(event StreamEvent) error {
 	}
 	switch event.Type {
 	case StreamDelta:
-		if event.ContentDelta == "" || event.ToolCall != nil || event.Usage != nil || event.FinishReason != "" {
+		if event.ContentDelta == "" || event.ThinkingDelta != "" || event.ToolCall != nil ||
+			event.Usage != nil || event.FinishReason != "" {
 			return fmt.Errorf("%w: invalid content delta", ErrInvalidStream)
 		}
 		a.response.Content += event.ContentDelta
+	case StreamThinking:
+		if event.ThinkingDelta == "" || event.ContentDelta != "" || event.ToolCall != nil ||
+			event.Usage != nil || event.FinishReason != "" {
+			return fmt.Errorf("%w: invalid thinking delta", ErrInvalidStream)
+		}
+		a.response.Thinking += event.ThinkingDelta
 	case StreamToolCall:
 		if event.ToolCall == nil || strings.TrimSpace(event.ToolCall.ID) == "" ||
 			strings.TrimSpace(event.ToolCall.Name) == "" ||
-			event.ContentDelta != "" || event.Usage != nil || event.FinishReason != "" {
+			event.ContentDelta != "" || event.ThinkingDelta != "" ||
+			event.Usage != nil || event.FinishReason != "" {
 			return fmt.Errorf("%w: invalid tool call", ErrInvalidStream)
 		}
 		a.response.ToolCalls = append(a.response.ToolCalls, *event.ToolCall)
 	case StreamComplete:
-		if event.ContentDelta != "" || event.ToolCall != nil || event.Usage == nil {
+		if event.ContentDelta != "" || event.ThinkingDelta != "" || event.ToolCall != nil || event.Usage == nil {
 			return fmt.Errorf("%w: invalid completion", ErrInvalidStream)
 		}
 		a.response.Usage = *event.Usage
@@ -160,6 +174,11 @@ func EmitResponse(response CompletionResponse, handler StreamHandler) error {
 	if handler == nil {
 		return errors.New("stream handler is required")
 	}
+	if response.Thinking != "" {
+		if err := handler(StreamEvent{Type: StreamThinking, ThinkingDelta: response.Thinking}); err != nil {
+			return err
+		}
+	}
 	if response.Content != "" {
 		if err := handler(StreamEvent{Type: StreamDelta, ContentDelta: response.Content}); err != nil {
 			return err
@@ -173,6 +192,25 @@ func EmitResponse(response CompletionResponse, handler StreamHandler) error {
 	}
 	usage := response.Usage
 	return handler(StreamEvent{Type: StreamComplete, Usage: &usage, FinishReason: response.FinishReason})
+}
+
+// TeeStreamHandler calls primary then optional side-effect handlers (UI fan-out).
+// Side-effect errors are ignored so model collection is not aborted by a lagging UI.
+func TeeStreamHandler(primary StreamHandler, side ...StreamHandler) StreamHandler {
+	return func(event StreamEvent) error {
+		if primary != nil {
+			if err := primary(event); err != nil {
+				return err
+			}
+		}
+		for _, h := range side {
+			if h == nil {
+				continue
+			}
+			_ = h(event)
+		}
+		return nil
+	}
 }
 
 type HealthStatus struct {

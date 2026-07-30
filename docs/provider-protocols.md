@@ -2,11 +2,17 @@
 
 AutoZeAgent selects a wire protocol from each provider's JSON configuration. The provider ID and URL do not imply a protocol, so the same gateway URL can expose different adapters by changing only `type` or `protocol`.
 
-Configuration lookup order:
+Configuration is loaded **only** from the OS config directory (`paths.Layout.ConfigDir`):
 
-1. `<working-directory>/autozeagent.local.json`
-2. `<working-directory>/autozeagent.json`
-3. `<user-config-directory>/autozeagent.json`
+1. `<config-dir>/autozeagent.local.json` (machine-local; preferred)
+2. `<config-dir>/autozeagent.json`
+
+| Mode | Linux | Windows | macOS |
+| --- | --- | --- | --- |
+| user | `~/.config/autozeagent` (`XDG_CONFIG_HOME`) | `%APPDATA%\AutoZeAgent` | Application Support path from `paths` |
+| system | `/etc/autozeagent` | `ProgramData\AutoZeAgent\config` | system path from `paths` |
+
+On first start, if ConfigDir has no file, the daemon may **migrate** once from the process working directory or data dir (legacy project `autozeagent.local.json`), otherwise it writes a default template with `{env:…}` placeholders (no secrets). Project directories are **not** searched for ongoing loads.
 
 The top-level `model` must use `provider-id/model-id` format.
 

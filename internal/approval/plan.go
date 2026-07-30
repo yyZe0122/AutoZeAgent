@@ -152,12 +152,24 @@ func normalizeStep(step StepScope) (StepScope, error) {
 	return normalized, nil
 }
 
+// NormalizeCapabilityForPlan normalizes and validates one capability scope for plan documents.
+func NormalizeCapabilityForPlan(scope CapabilityScope) (CapabilityScope, error) {
+	return normalizeCapability(scope)
+}
+
 func normalizeCapability(scope CapabilityScope) (CapabilityScope, error) {
+	args := scope.Arguments
+	if args == nil {
+		args = []string{}
+	}
+	// Always non-nil so grant command matching (slices.Equal) treats null JSON as [].
+	copiedArgs := make([]string, len(args))
+	copy(copiedArgs, args)
 	normalized := CapabilityScope{
 		Capability:        strings.TrimSpace(scope.Capability),
 		Paths:             normalizePaths(scope.Paths),
 		Command:           strings.TrimSpace(scope.Command),
-		Arguments:         append([]string(nil), scope.Arguments...),
+		Arguments:         copiedArgs,
 		NetworkDomains:    normalizeDomains(scope.NetworkDomains),
 		MaxDurationMillis: scope.MaxDurationMillis,
 		MaxCalls:          scope.MaxCalls,
@@ -176,7 +188,33 @@ func normalizeCapability(scope CapabilityScope) (CapabilityScope, error) {
 	} else if normalized.MaxCalls == 0 {
 		return CapabilityScope{}, fmt.Errorf("%w: maximum calls must be positive", ErrInvalidPlan)
 	}
+	if normalized.Capability == "process_exec" {
+		if normalized.Command == "" {
+			return CapabilityScope{}, fmt.Errorf("%w: process_exec requires command", ErrInvalidPlan)
+		}
+		if len(normalized.Paths) == 0 {
+			return CapabilityScope{}, fmt.Errorf("%w: process_exec requires at least one absolute working-directory path", ErrInvalidPlan)
+		}
+		for _, p := range normalized.Paths {
+			if !isAbsoluteCapabilityPath(p) {
+				return CapabilityScope{}, fmt.Errorf("%w: process_exec path %q must be absolute", ErrInvalidPlan, p)
+			}
+		}
+	}
 	return normalized, nil
+}
+
+func isAbsoluteCapabilityPath(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	// Canonical plan paths use slash form after normalizePaths.
+	if path.IsAbs(value) || strings.HasPrefix(value, "/") {
+		return true
+	}
+	// Windows drive path retained as C:/... after slash normalization.
+	return len(value) >= 3 && value[1] == ':' && (value[2] == '/' || value[2] == '\\')
 }
 
 func normalizeTextList(values []string) []string {

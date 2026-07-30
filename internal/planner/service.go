@@ -28,6 +28,11 @@ func NewService(repository TaskRepository, planner *Planner) (*Service, error) {
 	return &Service{repository: repository, planner: planner, now: func() time.Time { return time.Now().UTC() }}, nil
 }
 
+// Planner returns the underlying planner engine for runtime reconfiguration.
+func (s *Service) Planner() *Planner {
+	return s.planner
+}
+
 // PlanTask leaves provider failures in TaskPlanning. That state is deliberately
 // recoverable after a restart; no plan, grant, or tool execution is created.
 func (s *Service) PlanTask(ctx context.Context, task kernel.Task, planID kernel.PlanID, revision uint64) (kernel.Task, approval.PlanDocument, error) {

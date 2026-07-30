@@ -127,11 +127,13 @@ func (r *Runner) accept(ctx context.Context, request schedulerapi.TaskRequest) e
 	result, err := r.submissions.Submit(ctx, tasksubmission.Request{
 		TaskID: taskID, SessionID: kernel.SessionID(request.SessionID), PlanID: planIDFor(taskID, 1),
 		Title: request.Title, Objective: request.Objective, EnsureSession: false, AllowExisting: true,
+		// Scheduler jobs are durable plan workflows, not multi-turn chat.
+		ExecutionMode: kernel.ExecutionModePlan,
 	})
-	if err != nil {
-		if errors.Is(err, tasksubmission.ErrPlanning) {
-			return fmt.Errorf("plan scheduled Core task %s: %w", result.Task.ID, err)
-		}
+	// ErrPlanning means the Core task is created and planning is in flight (or
+	// still pending). That is success for the scheduler hand-off; recovery /
+	// SSE drives the rest. Other errors fail the job run.
+	if err != nil && !errors.Is(err, tasksubmission.ErrPlanning) {
 		ackErr := r.client.AcknowledgeScheduledTask(ctx, schedulerapi.AcknowledgeRequest{
 			RunID: request.RunID, LeaseID: request.LeaseID, Status: "failed", Error: err.Error(),
 		})
@@ -139,8 +141,11 @@ func (r *Runner) accept(ctx context.Context, request schedulerapi.TaskRequest) e
 	}
 	task := result.Task
 	status := "task_created"
-	if task.State == kernel.TaskWaitingApproval {
+	switch task.State {
+	case kernel.TaskWaitingApproval:
 		status = "waiting_approval"
+	case kernel.TaskPlanning:
+		status = "planning"
 	}
 	if err := r.client.AcknowledgeScheduledTask(ctx, schedulerapi.AcknowledgeRequest{
 		RunID: request.RunID, LeaseID: request.LeaseID, CoreTaskID: string(task.ID), Status: status,

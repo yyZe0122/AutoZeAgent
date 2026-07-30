@@ -51,7 +51,7 @@ func TestRunOnceStopsWhenClaimIsLost(t *testing.T) {
 		query string
 		args  []any
 	}{
-		{"INSERT INTO tasks (task_id, title, objective, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)", []any{"task-1", "test", "test", kernel.TaskRunning, stamp, stamp}},
+		{"INSERT INTO tasks (task_id, title, objective, state, execution_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)", []any{"task-1", "test", "test", kernel.TaskRunning, kernel.ExecutionModePlan, stamp, stamp}},
 		{"INSERT INTO plans (plan_id, task_id, revision, state, scope_hash, created_at, updated_at, document) VALUES (?, ?, 1, ?, ?, ?, ?, '{}')", []any{"plan-1", "task-1", kernel.PlanApproved, "hash-1", stamp, stamp}},
 		{"INSERT INTO plan_steps (step_id, plan_id, position, title, state, effect_level, created_at, updated_at) VALUES (?, ?, 0, ?, ?, ?, ?, ?)", []any{"step-1", "plan-1", "test", kernel.StepApproved, "R0", stamp, stamp}},
 		{"INSERT INTO runs (run_id, task_id, plan_id, state, started_at, updated_at, step_id) VALUES (?, ?, ?, ?, ?, ?, ?)", []any{"run-1", "task-1", "plan-1", kernel.RunCreated, stamp, stamp, "step-1"}},
@@ -112,7 +112,7 @@ func TestControlTaskPauseResumeCancel(t *testing.T) {
 	if _, err := db.ExecContext(ctx, "INSERT INTO sessions (session_id, state, created_at, updated_at) VALUES (?, ?, ?, ?)", "session-1", kernel.SessionActive, stamp, stamp); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, "INSERT INTO tasks (task_id, session_id, title, objective, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)", "task-1", "session-1", "test", "test", kernel.TaskRunning, stamp, stamp); err != nil {
+	if _, err := db.ExecContext(ctx, "INSERT INTO tasks (task_id, session_id, title, objective, state, execution_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", "task-1", "session-1", "test", "test", kernel.TaskRunning, kernel.ExecutionModePlan, stamp, stamp); err != nil {
 		t.Fatal(err)
 	}
 	repository, err := kernel.NewRepository(db)
@@ -202,7 +202,7 @@ func TestPauseInterruptsRunAndLeavesItRecoverable(t *testing.T) {
 		args  []any
 	}{
 		{"INSERT INTO sessions (session_id, state, created_at, updated_at) VALUES (?, ?, ?, ?)", []any{"session-1", kernel.SessionActive, stamp, stamp}},
-		{"INSERT INTO tasks (task_id, session_id, title, objective, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)", []any{"task-1", "session-1", "test", "test", kernel.TaskRunning, stamp, stamp}},
+		{"INSERT INTO tasks (task_id, session_id, title, objective, state, execution_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", []any{"task-1", "session-1", "test", "test", kernel.TaskRunning, kernel.ExecutionModePlan, stamp, stamp}},
 		{"INSERT INTO plans (plan_id, task_id, revision, state, scope_hash, created_at, updated_at, document) VALUES (?, ?, 1, ?, ?, ?, ?, ?)", []any{"plan-1", "task-1", kernel.PlanApproved, hash, stamp, stamp, string(document)}},
 		{"INSERT INTO plan_steps (step_id, plan_id, position, title, state, effect_level, created_at, updated_at) VALUES (?, ?, 0, ?, ?, ?, ?, ?)", []any{"step-1", "plan-1", "wait", kernel.StepRunning, policy.RiskR0, stamp, stamp}},
 		{"INSERT INTO runs (run_id, task_id, plan_id, state, started_at, updated_at, step_id) VALUES (?, ?, ?, ?, ?, ?, ?)", []any{"run-1", "task-1", "plan-1", kernel.RunRunning, stamp, stamp, "step-1"}},
@@ -260,6 +260,23 @@ func TestPauseInterruptsRunAndLeavesItRecoverable(t *testing.T) {
 	}
 }
 
+func TestToolTimeoutMillisCappedByCapabilityGrant(t *testing.T) {
+	step := approval.StepScope{
+		TimeoutMillis: 60_000,
+		Capabilities: []approval.CapabilityScope{
+			{Capability: "fs_read", MaxDurationMillis: 5_000},
+			{Capability: "fs_list", MaxDurationMillis: 10_000},
+		},
+	}
+	if got := toolTimeoutMillis(step); got != 5_000 {
+		t.Fatalf("toolTimeoutMillis = %d, want 5000", got)
+	}
+	step.Capabilities = nil
+	if got := toolTimeoutMillis(step); got != 60_000 {
+		t.Fatalf("toolTimeoutMillis without capabilities = %d, want 60000", got)
+	}
+}
+
 func TestExecutionTimeoutUsesRemainingPlanDuration(t *testing.T) {
 	ctx := context.Background()
 	database, err := storesqlite.Open(ctx, t.TempDir()+"/core.db")
@@ -275,7 +292,7 @@ func TestExecutionTimeoutUsesRemainingPlanDuration(t *testing.T) {
 		query string
 		args  []any
 	}{
-		{"INSERT INTO tasks (task_id, title, objective, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)", []any{"task-timeout", "test", "test", kernel.TaskRunning, stamp, stamp}},
+		{"INSERT INTO tasks (task_id, title, objective, state, execution_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)", []any{"task-timeout", "test", "test", kernel.TaskRunning, kernel.ExecutionModePlan, stamp, stamp}},
 		{"INSERT INTO plans (plan_id, task_id, revision, state, scope_hash, created_at, updated_at, document) VALUES (?, ?, 1, ?, ?, ?, ?, '{}')", []any{"plan-timeout", "task-timeout", kernel.PlanApproved, "hash", stamp, stamp}},
 		{"INSERT INTO plan_steps (step_id, plan_id, position, title, state, effect_level, created_at, updated_at) VALUES (?, ?, 0, ?, ?, ?, ?, ?)", []any{"step-timeout", "plan-timeout", "test", kernel.StepRunning, "R0", stamp, stamp}},
 		{"INSERT INTO runs (run_id, task_id, plan_id, state, started_at, updated_at, step_id) VALUES (?, ?, ?, ?, ?, ?, ?)", []any{"run-timeout", "task-timeout", "plan-timeout", kernel.RunRunning, started, stamp, "step-timeout"}},
@@ -286,18 +303,19 @@ func TestExecutionTimeoutUsesRemainingPlanDuration(t *testing.T) {
 	}
 	service := &Service{db: db, now: func() time.Time { return now }}
 	plan := approval.PlanDocument{Budget: approval.PlanBudget{MaxDurationMillis: int64(time.Hour / time.Millisecond)}}
-	step := approval.StepScope{TimeoutMillis: int64(30 * time.Minute / time.Millisecond)}
+	// Short step tool timeout must not shrink the provider/agent execution context.
+	step := approval.StepScope{TimeoutMillis: 1_000}
 
-	timeout, err := service.executionTimeout(ctx, "plan-timeout", plan, step)
+	timeout, err := service.executionTimeout(ctx, "plan-timeout", plan)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if timeout != time.Minute {
-		t.Fatalf("execution timeout = %s, want 1m", timeout)
+		t.Fatalf("execution timeout = %s, want 1m (plan remaining, not step %dms)", timeout, step.TimeoutMillis)
 	}
 
 	service.now = func() time.Time { return now.Add(time.Minute) }
-	_, err = service.executionTimeout(ctx, "plan-timeout", plan, step)
+	_, err = service.executionTimeout(ctx, "plan-timeout", plan)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expired execution error = %v, want context.DeadlineExceeded", err)
 	}
@@ -316,7 +334,7 @@ func TestRemainingPlanBudgetSubtractsCompletedRuns(t *testing.T) {
 		query string
 		args  []any
 	}{
-		{"INSERT INTO tasks (task_id, title, objective, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)", []any{"task-budget", "test", "test", kernel.TaskRunning, stamp, stamp}},
+		{"INSERT INTO tasks (task_id, title, objective, state, execution_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)", []any{"task-budget", "test", "test", kernel.TaskRunning, kernel.ExecutionModePlan, stamp, stamp}},
 		{"INSERT INTO plans (plan_id, task_id, revision, state, scope_hash, created_at, updated_at, document) VALUES (?, ?, 1, ?, ?, ?, ?, '{}')", []any{"plan-budget", "task-budget", kernel.PlanApproved, "hash", stamp, stamp}},
 		{"INSERT INTO plan_steps (step_id, plan_id, position, title, state, effect_level, created_at, updated_at) VALUES (?, ?, 0, ?, ?, ?, ?, ?)", []any{"step-budget-1", "plan-budget", "first", kernel.StepCompleted, "R0", stamp, stamp}},
 		{"INSERT INTO plan_steps (step_id, plan_id, position, title, state, effect_level, created_at, updated_at) VALUES (?, ?, 1, ?, ?, ?, ?, ?)", []any{"step-budget-2", "plan-budget", "second", kernel.StepRunning, "R0", stamp, stamp}},

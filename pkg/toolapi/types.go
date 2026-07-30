@@ -4,8 +4,23 @@ package toolapi
 
 import (
 	"encoding/json"
+	"errors"
+	"regexp"
 	"time"
 )
+
+// ErrDenied is returned when a tool call is rejected before or instead of
+// producing side effects (policy, args, path, grant). Agent runners treat this
+// as a recoverable tool result that can be fed back to the model.
+var ErrDenied = errors.New("tool call denied")
+
+var validNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
+// ValidName reports whether name is safe for outbound provider tool protocols
+// (OpenAI-compatible function names and similar).
+func ValidName(name string) bool {
+	return name != "" && validNamePattern.MatchString(name)
+}
 
 type Definition struct {
 	Name                 string          `json:"name"`

@@ -26,16 +26,16 @@ A user submits a persistent **Task**, the planner produces a reviewable **Plan**
 
 用户提交一个持久化的 **Task（任务）**，规划器生成可审查的 **Plan（计划）**，审批授权具体操作，一个或多个可恢复的 **Run（运行）** 持续推进工作。
 
-The production system intentionally contains only one long-running daemon, one local CLI, and one SQLite source of truth.
+The production system intentionally contains only one long-running daemon, one local CLI (including the interactive TUI), and one SQLite source of truth. CLI subcommands and the TUI are peers that talk only to the local Gateway.
 
-生产系统刻意只保留一个长期运行的守护进程、一个本地命令行客户端和一个 SQLite 事实源。
+生产系统刻意只保留一个长期运行的守护进程、一个本地命令行客户端（含交互式 TUI）和一个 SQLite 事实源。CLI 子命令与 TUI 并列，仅访问本地 Gateway。
 
 ```text
 autozeagentd   one long-running daemon
            一个长期运行的守护进程
 
-autozeagent    one local command-line client
-           一个本地命令行客户端
+autozeagent    one local CLI (+ TUI; peers via gatewayclient)
+           一个本地 CLI（含 TUI；经 gatewayclient 并列访问 Gateway）
 
 core.db    one SQLite source of truth
            一个 SQLite 持久化事实源
@@ -149,9 +149,9 @@ GitHub Releases are the primary distribution channel: every version tag produces
 
 GitHub Releases 是主要分发渠道：每个版本标签都会生成 Windows、Linux 和 macOS 的可运行安装包，并附带 SHA-256 校验文件。
 
-The release contains both `autozeagent` and `autozeagentd`; npm is not required because AutoZeAgent is compiled into native standalone executables.
+The release contains `autozeagent`, the short TUI launcher `aze`, and `autozeagentd`; npm is not required because AutoZeAgent is compiled into native standalone executables.
 
-Release 同时包含 `autozeagent` 和 `autozeagentd`；由于 AutoZeAgent 会编译为原生独立可执行文件，因此不需要 npm。
+Release 同时包含 `autozeagent`、短命令 `aze` 和 `autozeagentd`；由于 AutoZeAgent 会编译为原生独立可执行文件，因此不需要 npm。
 
 ### Private-first publication workflow / 私密仓库优先发布流程
 
@@ -192,9 +192,9 @@ Open the [latest release](https://github.com/yyZe0122/AutoZeAgent/releases/lates
 | Linux | `autozeagent_linux_amd64.tar.gz` | `autozeagent_linux_arm64.tar.gz` |
 | macOS | `autozeagent_darwin_amd64.tar.gz` | `autozeagent_darwin_arm64.tar.gz` |
 
-Extract the archive and place both executables in a directory on `PATH`.
+Extract the archive and place the executables (`autozeagent`, `aze`, `autozeagentd`) in a directory on `PATH`.
 
-解压安装包，并将两个可执行文件放入 `PATH` 中的目录。
+解压安装包，并将可执行文件（`autozeagent`、`aze`、`autozeagentd`）放入 `PATH` 中的目录。
 
 ### Windows one-line installation / Windows 一键安装
 
@@ -206,9 +206,9 @@ Run the installer directly in PowerShell without administrator privileges.
 irm "https://raw.githubusercontent.com/yyZe0122/AutoZeAgent/main/packaging/scripts/install.ps1" | iex
 ```
 
-The installer detects AMD64 or ARM64, downloads the latest ZIP, verifies its SHA-256 checksum, installs both commands under the current user profile, and adds the directory to the user `PATH`.
+The installer detects AMD64 or ARM64, downloads the latest ZIP, verifies its SHA-256 checksum, installs `autozeagent`, `aze`, and `autozeagentd` under the current user profile, and adds the directory to the user `PATH`.
 
-安装脚本会检测 AMD64 或 ARM64，下载最新 ZIP，验证 SHA-256 校验值，将两个命令安装到当前用户目录，并把该目录加入用户 `PATH`。
+安装脚本会检测 AMD64 或 ARM64，下载最新 ZIP，验证 SHA-256 校验值，将 `autozeagent`、`aze` 和 `autozeagentd` 安装到当前用户目录，并把该目录加入用户 `PATH`。
 
 To install a specific release or use another directory, set `AUTOZEAGENT_VERSION` or `AUTOZEAGENT_INSTALL_DIR` before running the same command.
 
@@ -229,9 +229,9 @@ Run the POSIX shell installer directly.
 curl -fsSL "https://raw.githubusercontent.com/yyZe0122/AutoZeAgent/main/packaging/scripts/install-user.sh" | sh
 ```
 
-The installer detects the operating system and architecture, verifies the SHA-256 checksum, and installs both commands to `$HOME/.local/bin` by default.
+The installer detects the operating system and architecture, verifies the SHA-256 checksum, and installs `autozeagent`, `aze`, and `autozeagentd` to `$HOME/.local/bin` by default.
 
-安装脚本会检测操作系统和架构，验证 SHA-256 校验值，并默认将两个命令安装到 `$HOME/.local/bin`。
+安装脚本会检测操作系统和架构，验证 SHA-256 校验值，并默认将 `autozeagent`、`aze` 和 `autozeagentd` 安装到 `$HOME/.local/bin`。
 
 Add that directory to `PATH` if the installer prints a reminder.
 
@@ -276,17 +276,32 @@ On Windows, run the complete validation and build workflow from the repository r
 .\scripts\dev.ps1 -Action all
 ```
 
-On Linux or macOS, run the project checks and build both commands.
+On Linux or macOS, run the project checks and build the CLI, TUI alias, and daemon.
 
-在 Linux 或 macOS 上，运行项目检查并构建两个命令。
+在 Linux 或 macOS 上，运行项目检查并构建 CLI、TUI 短命令与守护进程。
 
 ```bash
 make all
 ```
 
-The resulting binaries are written to `bin/`.
+The resulting binaries are written to `bin/` (`autozeagent`, `aze` → same CLI, `autozeagentd`).
 
-生成的二进制文件位于 `bin/`。
+生成的二进制文件位于 `bin/`（`autozeagent`、`aze` 指向同一 CLI、`autozeagentd`）。
+
+Install them onto your user `PATH` so you can run `aze` from any directory (default: `~/.local/bin` on Unix).
+
+安装到用户 `PATH` 后可在任意目录直接运行 `aze`（Unix 默认：`~/.local/bin`）。
+
+```bash
+make install
+# optional: make install PREFIX=/usr/local
+aze
+```
+
+```powershell
+.\scripts\dev.ps1 -Action install
+aze
+```
 
 ### Linux system service / Linux 系统服务安装
 
@@ -349,32 +364,42 @@ Complete every item before changing repository visibility.
 
 ## Configuration / 配置方案
 
-Copy the public example to the machine-local configuration file.
+Provider configuration lives only in the OS config directory (not the project root).
 
-将公开配置示例复制为本机配置文件。
+Provider 配置**仅**放在系统/用户配置目录，不再从项目 cwd 读取。
 
-```powershell
-Copy-Item configs\autozeagent.json.example autozeagent.local.json
-```
+| Mode | Linux | Windows |
+| --- | --- | --- |
+| user | `~/.config/autozeagent/` | `%APPDATA%\AutoZeAgent\` |
+| system | `/etc/autozeagent/` | `%ProgramData%\AutoZeAgent\config\` |
+
+Lookup order under that directory:
+
+在该目录内的查找顺序：
+
+1. `autozeagent.local.json` (machine-local secrets / overrides)
+2. `autozeagent.json` (main config)
+
+On first daemon start, if ConfigDir is empty, AutoZeAgent may migrate a legacy project-root config once, otherwise it writes a template with `{env:…}` placeholders.
+
+首次启动若配置目录为空，可能一次性迁移旧项目根配置，否则写入带 `{env:…}` 的模板。
 
 ```bash
-cp configs/autozeagent.json.example autozeagent.local.json
+mkdir -p ~/.config/autozeagent
+cp configs/autozeagent.json.example ~/.config/autozeagent/autozeagent.json
+# or machine-local:
+# cp configs/autozeagent.json.example ~/.config/autozeagent/autozeagent.local.json
+chmod 600 ~/.config/autozeagent/autozeagent*.json
 ```
 
-AutoZeAgent checks provider configuration in the following order.
+```powershell
+New-Item -ItemType Directory -Force "$env:APPDATA\AutoZeAgent" | Out-Null
+Copy-Item configs\autozeagent.json.example "$env:APPDATA\AutoZeAgent\autozeagent.json"
+```
 
-AutoZeAgent 按以下顺序检查模型提供商配置。
+Use environment or file references instead of storing a literal API key.
 
-1. `./autozeagent.local.json` for machine-local configuration.
-   `./autozeagent.local.json`，用于本机私有配置。
-2. `./autozeagent.json` for project-shared configuration.
-   `./autozeagent.json`，用于项目共享配置。
-3. `autozeagent.json` in the current user or system configuration directory.
-   当前用户或系统配置目录中的 `autozeagent.json`。
-
-Use environment or file references instead of storing a literal API key in shared configuration.
-
-请使用环境变量或文件引用，不要在共享配置中保存字面 API Key。
+请使用环境变量或文件引用，不要保存字面 API Key。
 
 ```json
 {
@@ -428,16 +453,24 @@ Provider-specific options are documented in [`configs/autozeagent.json.example`]
 
 ## Running AutoZeAgent / 运行方案
 
-Start the daemon in one terminal.
+Open the interactive TUI (no arguments; same as `opencode` / `crush`).  
+`aze` / `autozeagent` and `autozeagent run` auto-start the unique local daemon if needed; it keeps running until `autozeagent daemon stop`. You can still start `autozeagentd` manually if you prefer.
 
-在一个终端中启动守护进程。
+打开交互式 TUI（无参数，与 `opencode` / `crush` 相同）。  
+`aze` / `autozeagent` 与 `autozeagent run` 会在需要时自动启动唯一本地守护进程；进程常驻，直到 `autozeagent daemon stop`。也可继续手动启动 `autozeagentd`。
 
 ```powershell
-autozeagentd --mode user
+aze
+# or: autozeagent
+autozeagent daemon status
+autozeagent daemon stop
 ```
 
 ```bash
-autozeagentd --mode user
+aze
+# or: autozeagent
+autozeagent daemon status
+autozeagent daemon stop
 ```
 
 Use the CLI from another terminal to check health and submit a task.
@@ -489,9 +522,9 @@ autozeagent job list --mode user
 autozeagent job status JOB_ID --mode user
 ```
 
-Run `autozeagent help` for the complete command list.
+Run `autozeagent help` (or `aze help`) for the complete command list.
 
-运行 `autozeagent help` 查看完整命令列表。
+运行 `autozeagent help`（或 `aze help`）查看完整命令列表。
 
 ## Open-source license / 开源协议
 
@@ -549,8 +582,8 @@ Real-provider failure testing and long-running Linux systemd fault injection rem
 
 ## Notes and precautions / 注意事项
 
-- **Do not commit secrets.** Keep API keys in environment variables, protected files, or `autozeagent.local.json`, which is ignored by the repository.
-  - **不要提交密钥。** 请将 API Key 保存在环境变量、受保护文件或已被仓库忽略的 `autozeagent.local.json` 中。
+- **Do not commit secrets.** Keep API keys in environment variables, protected files, or `~/.config/autozeagent/autozeagent.local.json` (never in the repo).
+  - **不要提交密钥。** 请将 API Key 保存在环境变量、受保护文件或用户配置目录中的 `autozeagent.local.json`（勿进仓库）。
 - **Treat local state as sensitive.** Databases, logs, task artifacts, runtime endpoints, and provider records may contain private information.
   - **将本地状态视为敏感数据。** 数据库、日志、任务产物、运行时端点和 Provider 记录可能包含隐私信息。
 - **Use least privilege.** Restrict filesystem roots, tool capabilities, service accounts, and environment access to the minimum required by the task.

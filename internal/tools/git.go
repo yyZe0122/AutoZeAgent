@@ -26,7 +26,7 @@ func newGitTools(roots []string, runner *executor.Runner) ([]Tool, error) {
 	if err != nil {
 		return nil, err
 	}
-	names := []string{"git.status", "git.diff", "git.add", "git.commit"}
+	names := []string{"git_status", "git_diff", "git_add", "git_commit"}
 	result := make([]Tool, 0, len(names))
 	for _, name := range names {
 		result = append(result, &gitTool{name: name, guard: guard, runner: runner})
@@ -81,9 +81,9 @@ func (t *gitTool) parse(raw json.RawMessage) (string, []string, error) {
 	}
 	arguments := []string{"-C", repository}
 	switch t.name {
-	case "git.status":
+	case "git_status":
 		arguments = append(arguments, "status", "--porcelain=v1")
-	case "git.diff":
+	case "git_diff":
 		arguments = append(arguments, "diff", "--no-ext-diff")
 		if common.Staged {
 			arguments = append(arguments, "--cached")
@@ -92,13 +92,13 @@ func (t *gitTool) parse(raw json.RawMessage) (string, []string, error) {
 			arguments = append(arguments, "--")
 			arguments = append(arguments, common.Paths...)
 		}
-	case "git.add":
+	case "git_add":
 		if len(common.Paths) == 0 {
 			return "", nil, errors.New("git.add requires at least one relative path")
 		}
 		arguments = append(arguments, "add", "--")
 		arguments = append(arguments, common.Paths...)
-	case "git.commit":
+	case "git_commit":
 		message := strings.TrimSpace(common.Message)
 		if message == "" {
 			return "", nil, errors.New("git.commit message is required")
@@ -126,9 +126,9 @@ func validateGitPaths(paths []string) error {
 
 func gitRisk(name string) policy.RiskLevel {
 	switch name {
-	case "git.status", "git.diff":
+	case "git_status", "git_diff":
 		return policy.RiskR0
-	case "git.add":
+	case "git_add":
 		return policy.RiskR1
 	default:
 		return policy.RiskR2
@@ -136,19 +136,19 @@ func gitRisk(name string) policy.RiskLevel {
 }
 func gitDescription(name string) string {
 	return map[string]string{
-		"git.status": "Read repository working tree status.",
-		"git.diff":   "Read repository differences.",
-		"git.add":    "Stage approved repository paths.",
-		"git.commit": "Create a local commit with an approved message.",
+		"git_status": "Read repository working tree status.",
+		"git_diff":   "Read repository differences.",
+		"git_add":    "Stage approved repository paths.",
+		"git_commit": "Create a local commit with an approved message.",
 	}[name]
 }
 
 func gitSchema(name string) string {
 	base := map[string]string{
-		"git.status": `{"type":"object","additionalProperties":false,"required":["repository"],"properties":{"repository":{"type":"string"}}}`,
-		"git.diff":   `{"type":"object","additionalProperties":false,"required":["repository"],"properties":{"repository":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}},"staged":{"type":"boolean"}}}`,
-		"git.add":    `{"type":"object","additionalProperties":false,"required":["repository","paths"],"properties":{"repository":{"type":"string"},"paths":{"type":"array","minItems":1,"items":{"type":"string"}}}}`,
-		"git.commit": `{"type":"object","additionalProperties":false,"required":["repository","message"],"properties":{"repository":{"type":"string"},"message":{"type":"string"}}}`,
+		"git_status": `{"type":"object","additionalProperties":false,"required":["repository"],"properties":{"repository":{"type":"string"}}}`,
+		"git_diff":   `{"type":"object","additionalProperties":false,"required":["repository"],"properties":{"repository":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}},"staged":{"type":"boolean"}}}`,
+		"git_add":    `{"type":"object","additionalProperties":false,"required":["repository","paths"],"properties":{"repository":{"type":"string"},"paths":{"type":"array","minItems":1,"items":{"type":"string"}}}}`,
+		"git_commit": `{"type":"object","additionalProperties":false,"required":["repository","message"],"properties":{"repository":{"type":"string"},"message":{"type":"string"}}}`,
 	}
 	return base[name]
 }

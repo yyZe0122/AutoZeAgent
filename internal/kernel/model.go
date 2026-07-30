@@ -86,6 +86,7 @@ const (
 var taskTransitions = map[TaskState]map[TaskState]struct{}{
 	TaskCreated: {
 		TaskPlanning:  {},
+		TaskRunning:   {}, // agent/session chat: skip planner + human approval
 		TaskCancelled: {},
 	},
 	TaskPlanning: {
@@ -119,15 +120,39 @@ var taskTransitions = map[TaskState]map[TaskState]struct{}{
 	},
 }
 
+// ExecutionMode is the task-level posture set at create time.
+// plan: Planner → human approve → Start (grants enforce tool scope).
+// agent: session chat via chatsession (skips Planner; workspace pre-grants).
+type ExecutionMode string
+
+const (
+	ExecutionModeAgent ExecutionMode = "agent"
+	ExecutionModePlan  ExecutionMode = "plan"
+)
+
+func (m ExecutionMode) Valid() bool {
+	return m == ExecutionModeAgent || m == ExecutionModePlan
+}
+
+func NormalizeExecutionMode(value string) ExecutionMode {
+	switch ExecutionMode(strings.TrimSpace(value)) {
+	case ExecutionModePlan:
+		return ExecutionModePlan
+	default:
+		return ExecutionModeAgent
+	}
+}
+
 type Task struct {
-	ID        TaskID
-	SessionID SessionID
-	Title     string
-	Objective string
-	State     TaskState
-	Version   uint64
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID            TaskID
+	SessionID     SessionID
+	Title         string
+	Objective     string
+	State         TaskState
+	ExecutionMode ExecutionMode
+	Version       uint64
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // TaskSkillSnapshot is the immutable, task-bound planning input selected from
@@ -141,6 +166,10 @@ type TaskSkillSnapshot struct {
 }
 
 func NewTask(id TaskID, sessionID SessionID, title, objective string, now time.Time) (Task, error) {
+	return NewTaskWithMode(id, sessionID, title, objective, ExecutionModeAgent, now)
+}
+
+func NewTaskWithMode(id TaskID, sessionID SessionID, title, objective string, mode ExecutionMode, now time.Time) (Task, error) {
 	if strings.TrimSpace(string(id)) == "" || strings.TrimSpace(string(sessionID)) == "" {
 		return Task{}, fmt.Errorf("%w: task and session IDs are required", ErrInvalidAggregate)
 	}
@@ -149,10 +178,16 @@ func NewTask(id TaskID, sessionID SessionID, title, objective string, now time.T
 	if title == "" || objective == "" {
 		return Task{}, fmt.Errorf("%w: task title and objective are required", ErrInvalidAggregate)
 	}
+	if mode == "" {
+		mode = ExecutionModeAgent
+	}
+	if !mode.Valid() {
+		return Task{}, fmt.Errorf("%w: execution_mode must be plan or agent", ErrInvalidAggregate)
+	}
 	now = normalizedTime(now)
 	return Task{
 		ID: id, SessionID: sessionID, Title: title, Objective: objective,
-		State: TaskCreated, Version: 1, CreatedAt: now, UpdatedAt: now,
+		State: TaskCreated, ExecutionMode: mode, Version: 1, CreatedAt: now, UpdatedAt: now,
 	}, nil
 }
 
@@ -191,6 +226,7 @@ const (
 var planTransitions = map[PlanState]map[PlanState]struct{}{
 	PlanDraft: {
 		PlanWaitingApproval: {},
+		PlanApproved:        {}, // session-chat synthetic workspace plan (no human gate)
 		PlanSuperseded:      {},
 	},
 	PlanWaitingApproval: {

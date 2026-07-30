@@ -4,27 +4,43 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
-func TestLoadPrefersProjectLocalConfig(t *testing.T) {
+func TestLoadUsesConfigDirLocalFirst(t *testing.T) {
 	root := t.TempDir()
-	userDir := filepath.Join(root, "user")
-	projectDir := filepath.Join(root, "project")
-	if err := os.MkdirAll(userDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(projectDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeConfig(t, filepath.Join(userDir, Filename), "user-provider/user-model", "https://user.example")
-	writeConfig(t, filepath.Join(projectDir, LocalFilename), "deepseek/deepseek-v4-flash", "https://api.deepseek.com")
-	resolved, err := Load(userDir, projectDir)
+	writeConfig(t, filepath.Join(root, Filename), "user-provider/user-model", "https://user.example")
+	writeConfig(t, filepath.Join(root, LocalFilename), "deepseek/deepseek-v4-flash", "https://api.deepseek.com")
+	resolved, err := Load(root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if resolved == nil || resolved.ProviderID != "deepseek" || resolved.ModelID != "deepseek-v4-flash" {
 		t.Fatalf("resolved = %+v", resolved)
+	}
+	if resolved.Source != filepath.Join(root, LocalFilename) {
+		t.Fatalf("source = %q", resolved.Source)
+	}
+}
+
+func TestLoadIgnoresProjectDirectory(t *testing.T) {
+	root := t.TempDir()
+	configDir := filepath.Join(root, "config")
+	projectDir := filepath.Join(root, "project")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeConfig(t, filepath.Join(projectDir, LocalFilename), "deepseek/deepseek-v4-flash", "https://api.deepseek.com")
+	resolved, err := Load(configDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != nil {
+		t.Fatalf("expected nil when only project has config, got %+v", resolved)
 	}
 }
 
@@ -50,7 +66,7 @@ func TestLoadResolvesFileAPIKey(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, LocalFilename), []byte(config), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	resolved, err := Load(root, root)
+	resolved, err := Load(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,8 +78,106 @@ func TestLoadResolvesFileAPIKey(t *testing.T) {
 func TestLoadRejectsUnknownModel(t *testing.T) {
 	root := t.TempDir()
 	writeConfig(t, filepath.Join(root, LocalFilename), "deepseek/missing", "https://api.deepseek.com")
-	if _, err := Load(root, root); err == nil {
+	if _, err := Load(root); err == nil {
 		t.Fatal("expected model validation error")
+	}
+}
+
+func TestWriteSelectedModelUpdatesTopLevelOnly(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, LocalFilename)
+	content := `{
+  "model": "deepseek/deepseek-v4-flash",
+  "provider": {
+    "deepseek": {
+      "options": {
+        "baseURL": "https://api.deepseek.com",
+        "apiKey": "{env:TEST_KEY}"
+      },
+      "models": {
+        "deepseek-v4-flash": {},
+        "deepseek-chat": {"name": "chat"}
+      }
+    }
+  }
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	written, err := WriteSelectedModel(root, "deepseek/deepseek-chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if written != path {
+		t.Fatalf("written = %q want %q", written, path)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"model": "deepseek/deepseek-chat"`) {
+		t.Fatalf("model not updated: %s", raw)
+	}
+	if !strings.Contains(string(raw), `{env:TEST_KEY}`) {
+		t.Fatalf("apiKey placeholder lost: %s", raw)
+	}
+	if err := validateModelInFile(path, "deepseek", "deepseek-chat"); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateModelInFile(path, "deepseek", "missing"); err == nil {
+		t.Fatal("expected missing model error")
+	}
+}
+
+func TestEnsureConfigMigratesThenLoad(t *testing.T) {
+	root := t.TempDir()
+	configDir := filepath.Join(root, "config")
+	projectDir := filepath.Join(root, "project")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeConfig(t, filepath.Join(projectDir, LocalFilename), "deepseek/deepseek-v4-pro", "https://api.deepseek.com")
+	result, err := EnsureConfig(configDir, projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Migrated || result.Path == "" || result.Source == "" {
+		t.Fatalf("ensure = %+v", result)
+	}
+	resolved, err := Load(configDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved == nil || resolved.ModelID != "deepseek-v4-pro" {
+		t.Fatalf("resolved = %+v", resolved)
+	}
+	// second ensure does not overwrite
+	again, err := EnsureConfig(configDir, projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Migrated || again.Created {
+		t.Fatalf("second ensure should reuse: %+v", again)
+	}
+}
+
+func TestEnsureConfigWritesDefaultWhenEmpty(t *testing.T) {
+	root := t.TempDir()
+	result, err := EnsureConfig(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Created || result.Path != filepath.Join(root, Filename) {
+		t.Fatalf("ensure = %+v", result)
+	}
+	// template uses env key; Load fails without env — but ListModelRefs works
+	selected, models, err := ListModelRefs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected != "deepseek/deepseek-chat" || len(models) == 0 {
+		t.Fatalf("selected=%q models=%v", selected, models)
 	}
 }
 
@@ -162,7 +276,7 @@ func TestLoadResolvesHeaderPlaceholders(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, LocalFilename), []byte(config), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	resolved, err := Load(root, root)
+	resolved, err := Load(root)
 	if err != nil {
 		t.Fatal(err)
 	}

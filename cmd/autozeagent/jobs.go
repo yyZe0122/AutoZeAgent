@@ -4,12 +4,11 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"time"
 
+	"autozeagent.local/autozeagent/internal/gatewayclient"
 	"autozeagent.local/autozeagent/internal/platform/paths"
 	"autozeagent.local/autozeagent/pkg/schedulerapi"
 )
@@ -39,29 +38,29 @@ func runJobCreate(args []string) error {
 		return err
 	}
 	if values.idempotencyKey == "" {
-		values.idempotencyKey, err = randomWorkflowID("job-")
+		values.idempotencyKey, err = gatewayclient.RandomID("job-")
 		if err != nil {
 			return err
 		}
 	}
 	if values.title == "" {
-		values.title = taskTitle(values.objective)
+		values.title = gatewayclient.TaskTitle(values.objective)
 	}
-	client, err := newWorkflowClient(mode)
+	client, err := gatewayclient.New(mode)
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
-	var job schedulerapi.Job
-	if err := client.DoJSON(ctx, http.MethodPost, "/v1/jobs", schedulerapi.CreateRequest{
+	job, err := client.CreateJob(ctx, schedulerapi.CreateRequest{
 		Name: values.name, SessionID: values.sessionID, TaskTitle: values.title, TaskObjective: values.objective,
 		IntervalSeconds: int64(values.every / time.Second), NextRunAt: values.start,
 		TimeoutSeconds: int64(values.timeout / time.Second), MaxRetries: values.maxRetries,
 		BackoffSeconds: int64(values.backoff / time.Second), MisfirePolicy: values.misfirePolicy,
 		IdempotencyKey: values.idempotencyKey,
-	}, &job); err != nil {
-		return fmt.Errorf("create job: %w", err)
+	})
+	if err != nil {
+		return err
 	}
 	return writeJSON(job)
 }
@@ -127,23 +126,17 @@ func runJobList(args []string) error {
 	if err != nil {
 		return err
 	}
-	client, err := newWorkflowClient(mode)
+	client, err := gatewayclient.New(mode)
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
-	path := "/v1/jobs"
-	if *includeArchived {
-		path += "?include_archived=true"
+	jobs, err := client.ListJobs(ctx, *includeArchived)
+	if err != nil {
+		return err
 	}
-	var response struct {
-		Jobs []schedulerapi.Job `json:"jobs"`
-	}
-	if err := client.DoJSON(ctx, http.MethodGet, path, nil, &response); err != nil {
-		return fmt.Errorf("list jobs: %w", err)
-	}
-	return writeJSON(response)
+	return writeJSON(map[string]any{"jobs": jobs})
 }
 
 func runJobStatus(args []string) error {
@@ -151,15 +144,15 @@ func runJobStatus(args []string) error {
 	if err != nil {
 		return err
 	}
-	client, err := newWorkflowClient(mode)
+	client, err := gatewayclient.New(mode)
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
-	var job schedulerapi.Job
-	if err := client.DoJSON(ctx, http.MethodGet, "/v1/jobs/"+url.PathEscape(jobID), nil, &job); err != nil {
-		return fmt.Errorf("get job: %w", err)
+	job, err := client.GetJob(ctx, jobID)
+	if err != nil {
+		return err
 	}
 	return writeJSON(job)
 }
@@ -169,17 +162,15 @@ func runJobAction(action string, args []string) error {
 	if err != nil {
 		return err
 	}
-	client, err := newWorkflowClient(mode)
+	client, err := gatewayclient.New(mode)
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
-	var job schedulerapi.Job
-	if err := client.DoJSON(ctx, http.MethodPost, "/v1/jobs/"+url.PathEscape(jobID)+"/actions", map[string]any{
-		"action": action, "reviewer": "local-user", "reason": reason,
-	}, &job); err != nil {
-		return fmt.Errorf("%s job: %w", action, err)
+	job, err := client.JobAction(ctx, jobID, action, "local-user", reason)
+	if err != nil {
+		return err
 	}
 	return writeJSON(job)
 }

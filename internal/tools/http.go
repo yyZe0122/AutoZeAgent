@@ -33,7 +33,7 @@ func newHTTPGetTool(maximumBytes int64) Tool {
 
 func (t *httpGetTool) Definition() toolapi.Definition {
 	return toolapi.Definition{
-		Name: "http.get", Description: "Perform an approved HTTP or HTTPS GET without redirects.",
+		Name: "http_get", Description: "Perform an approved HTTP or HTTPS GET without redirects.",
 		Risk: string(policy.RiskR2), DefaultTimeoutMillis: 30000,
 		InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false,"required":["url"],"properties":{"url":{"type":"string"},"max_bytes":{"type":"integer","minimum":1}}}`),
 	}
@@ -50,7 +50,7 @@ func (t *httpGetTool) Authorization(raw json.RawMessage) (Authorization, error) 
 		return Authorization{}, err
 	}
 	_ = input
-	return Authorization{Capability: "http.get", NetworkDomain: strings.ToLower(parsed.Hostname())}, nil
+	return Authorization{Capability: "http_get", NetworkDomain: strings.ToLower(parsed.Hostname())}, nil
 }
 
 func (t *httpGetTool) Execute(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {

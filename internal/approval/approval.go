@@ -188,6 +188,115 @@ func (r *Repository) Decide(ctx context.Context, input DecisionInput) (Approval,
 	return approval, nil
 }
 
+// RecordSystemApproval records an approved decision for a plan that is already
+// PlanApproved (session-chat workspace preauthorization). It does not change
+// plan or task state and does not require waiting_approval.
+func (r *Repository) RecordSystemApproval(ctx context.Context, input DecisionInput) (Approval, error) {
+	if ctx == nil {
+		return Approval{}, errors.New("approval context is required")
+	}
+	if r == nil || r.db == nil {
+		return Approval{}, errors.New("approval repository is unavailable")
+	}
+	if strings.TrimSpace(string(input.ID)) == "" || strings.TrimSpace(input.DecidedBy) == "" {
+		return Approval{}, fmt.Errorf("%w: approval ID and decision maker are required", ErrInvalidDecision)
+	}
+	if input.Decision != DecisionApproved {
+		return Approval{}, fmt.Errorf("%w: system approval must be approved", ErrInvalidDecision)
+	}
+	if input.Scope != ScopePlan {
+		return Approval{}, fmt.Errorf("%w: system approval is plan-scoped only", ErrInvalidDecision)
+	}
+	if strings.TrimSpace(string(input.StepID)) != "" {
+		return Approval{}, fmt.Errorf("%w: plan scope cannot include a step ID", ErrInvalidDecision)
+	}
+	planHash, err := input.Plan.Hash()
+	if err != nil {
+		return Approval{}, err
+	}
+	decidedAt := normalizeTime(input.DecidedAt)
+	var expiresAt *time.Time
+	if input.ExpiresAt != nil {
+		normalized := input.ExpiresAt.UTC()
+		if !normalized.After(decidedAt) {
+			return Approval{}, fmt.Errorf("%w: expiration must be after the decision", ErrInvalidDecision)
+		}
+		expiresAt = &normalized
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Approval{}, fmt.Errorf("begin system approval: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := requireCurrentPlan(ctx, tx, input.Plan, planHash); err != nil {
+		return Approval{}, err
+	}
+	var planState, taskState, execMode string
+	err = tx.QueryRowContext(ctx, `
+        SELECT p.state, t.state, t.execution_mode
+        FROM plans p JOIN tasks t ON t.task_id = p.task_id
+        WHERE p.plan_id = ? AND p.task_id = ?`, input.Plan.PlanID, input.Plan.TaskID,
+	).Scan(&planState, &taskState, &execMode)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Approval{}, kernel.ErrNotFound
+	}
+	if err != nil {
+		return Approval{}, fmt.Errorf("query system approval state: %w", err)
+	}
+	if planState != string(kernel.PlanApproved) {
+		return Approval{}, fmt.Errorf("%w: system approval requires plan approved (got %s)", ErrApprovalClosed, planState)
+	}
+	if kernel.NormalizeExecutionMode(execMode) != kernel.ExecutionModeAgent {
+		return Approval{}, fmt.Errorf("%w: system approval requires agent execution_mode", ErrInvalidDecision)
+	}
+
+	var expires any
+	if expiresAt != nil {
+		expires = formatTime(*expiresAt)
+	}
+	_, err = tx.ExecContext(ctx, `
+        INSERT INTO approvals (
+            approval_id, plan_id, plan_revision, decision, scope_hash,
+            decided_by, decided_at, expires_at, scope_type, step_id, reason, invalidated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+		input.ID, input.Plan.PlanID, input.Plan.Revision, DecisionApproved, planHash,
+		strings.TrimSpace(input.DecidedBy), formatTime(decidedAt), expires,
+		ScopePlan, nil, strings.TrimSpace(input.Reason),
+	)
+	if err != nil {
+		if sqliteerror.IsUniqueConstraint(err) {
+			// Idempotent: return existing row shape for grant issuance.
+			return Approval{
+				ID: input.ID, PlanID: input.Plan.PlanID, PlanRevision: input.Plan.Revision,
+				PlanHash: planHash, Scope: ScopePlan, Decision: DecisionApproved,
+				DecidedBy: strings.TrimSpace(input.DecidedBy), Reason: strings.TrimSpace(input.Reason),
+				DecidedAt: decidedAt, ExpiresAt: expiresAt,
+			}, fmt.Errorf("%w: %s", ErrAlreadyExists, input.ID)
+		}
+		return Approval{}, fmt.Errorf("insert system approval: %w", err)
+	}
+
+	approval := Approval{
+		ID: input.ID, PlanID: input.Plan.PlanID, PlanRevision: input.Plan.Revision,
+		PlanHash: planHash, Scope: ScopePlan, Decision: DecisionApproved,
+		DecidedBy: strings.TrimSpace(input.DecidedBy), Reason: strings.TrimSpace(input.Reason),
+		DecidedAt: decidedAt, ExpiresAt: expiresAt,
+	}
+	event, err := approvalEvent(approval)
+	if err != nil {
+		return Approval{}, err
+	}
+	if _, err := r.events.AppendTx(ctx, tx, event); err != nil {
+		return Approval{}, fmt.Errorf("append system approval event: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return Approval{}, fmt.Errorf("commit system approval: %w", err)
+	}
+	return approval, nil
+}
+
 // IsApproved accepts either a current whole-plan approval or a current approval
 // for the requested step. A revision or hash change makes old records unusable.
 func (r *Repository) IsApproved(ctx context.Context, plan PlanDocument, stepID kernel.StepID, now time.Time) (bool, error) {

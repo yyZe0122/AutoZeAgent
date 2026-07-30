@@ -201,6 +201,13 @@ func (p *Provider) Stream(ctx context.Context, request providerapi.CompletionReq
 			return p.protocol(errors.New("stream event after finish reason"))
 		}
 		choice := chunk.Choices[0]
+		if choice.Delta.ReasoningContent != "" {
+			if err := handler(providerapi.StreamEvent{
+				Type: providerapi.StreamThinking, ThinkingDelta: choice.Delta.ReasoningContent,
+			}); err != nil {
+				return err
+			}
+		}
 		if choice.Delta.Content != "" {
 			if err := handler(providerapi.StreamEvent{Type: providerapi.StreamDelta, ContentDelta: choice.Delta.Content}); err != nil {
 				return err
@@ -643,8 +650,9 @@ type chatResponse struct {
 type streamResponse struct {
 	Choices []struct {
 		Delta struct {
-			Content   string `json:"content"`
-			ToolCalls []struct {
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content"`
+			ToolCalls        []struct {
 				Index    int    `json:"index"`
 				ID       string `json:"id"`
 				Function struct {

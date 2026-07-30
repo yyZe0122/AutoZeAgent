@@ -17,14 +17,15 @@ import (
 var ErrNotFound = errors.New("core query resource not found")
 
 type Task struct {
-	ID        coreidentity.TaskID     `json:"task_id"`
-	SessionID *coreidentity.SessionID `json:"session_id,omitempty"`
-	Title     string                  `json:"title"`
-	Objective string                  `json:"objective"`
-	State     string                  `json:"state"`
-	Version   uint64                  `json:"version"`
-	CreatedAt string                  `json:"created_at"`
-	UpdatedAt string                  `json:"updated_at"`
+	ID            coreidentity.TaskID     `json:"task_id"`
+	SessionID     *coreidentity.SessionID `json:"session_id,omitempty"`
+	Title         string                  `json:"title"`
+	Objective     string                  `json:"objective"`
+	State         string                  `json:"state"`
+	ExecutionMode string                  `json:"execution_mode"`
+	Version       uint64                  `json:"version"`
+	CreatedAt     string                  `json:"created_at"`
+	UpdatedAt     string                  `json:"updated_at"`
 }
 
 type Step struct {
@@ -78,6 +79,52 @@ type Run struct {
 	Result     *string              `json:"result,omitempty"`
 }
 
+// TaskUsage is the aggregated provider usage for all runs of a task.
+// Source: agent_run_records.usage JSON on assistant_message rows.
+type TaskUsage struct {
+	TaskID       coreidentity.TaskID `json:"task_id"`
+	InputTokens  int64               `json:"input_tokens"`
+	OutputTokens int64               `json:"output_tokens"`
+	TotalTokens  int64               `json:"total_tokens"`
+	CostMicros   int64               `json:"cost_micros"`
+}
+
+// Session is a chat container; tasks and runs hang off it.
+type Session struct {
+	ID           coreidentity.SessionID `json:"session_id"`
+	State        string                 `json:"state"`
+	Version      uint64                 `json:"version"`
+	CreatedAt    string                 `json:"created_at"`
+	UpdatedAt    string                 `json:"updated_at"`
+	Title        string                 `json:"title,omitempty"`
+	LatestTaskID *coreidentity.TaskID   `json:"latest_task_id,omitempty"`
+	LatestState  string                 `json:"latest_task_state,omitempty"`
+	TaskCount    int                    `json:"task_count"`
+}
+
+// TranscriptMessage is a chat-facing projection of agent_run_records
+// (plus synthetic user lines from task objectives when records are empty).
+type TranscriptMessage struct {
+	ID         string                 `json:"id"`
+	SessionID  coreidentity.SessionID `json:"session_id,omitempty"`
+	TaskID     coreidentity.TaskID    `json:"task_id,omitempty"`
+	RunID      coreidentity.RunID     `json:"run_id,omitempty"`
+	Position   int                    `json:"position"`
+	Role       string                 `json:"role"` // user | assistant | tool | system
+	Content    string                 `json:"content"`
+	Thinking   string                 `json:"thinking,omitempty"`
+	ToolCallID string                 `json:"tool_call_id,omitempty"`
+	ToolCalls  []TranscriptToolCall   `json:"tool_calls,omitempty"`
+	RecordType string                 `json:"record_type,omitempty"`
+	CreatedAt  string                 `json:"created_at"`
+}
+
+type TranscriptToolCall struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
 type StoredPlanDocument struct {
 	Revision  uint64
 	Hash      string
@@ -116,7 +163,7 @@ func (s *Store) ListTasks(ctx context.Context, options TaskListOptions) ([]Task,
 		return nil, err
 	}
 	query := `
-        SELECT task_id, session_id, title, objective, state, version, created_at, updated_at
+        SELECT task_id, session_id, title, objective, state, execution_mode, version, created_at, updated_at
         FROM tasks`
 	args := make([]any, 0, 3)
 	if state := strings.TrimSpace(options.State); state != "" {
@@ -147,7 +194,7 @@ func (s *Store) GetTask(ctx context.Context, id coreidentity.TaskID) (Task, erro
 		return Task{}, err
 	}
 	item, err := scanTask(s.db.QueryRowContext(ctx, `
-        SELECT task_id, session_id, title, objective, state, version, created_at, updated_at
+        SELECT task_id, session_id, title, objective, state, execution_mode, version, created_at, updated_at
         FROM tasks WHERE task_id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Task{}, ErrNotFound
@@ -334,6 +381,31 @@ func (s *Store) GetRun(ctx context.Context, id coreidentity.RunID) (Run, error) 
         FROM runs r WHERE r.run_id = ?`, id))
 }
 
+// TaskUsage sums assistant_message usage for every run belonging to taskID.
+// Missing usage fields count as zero; unknown task still returns zeros (no ErrNotFound).
+func (s *Store) TaskUsage(ctx context.Context, taskID coreidentity.TaskID) (TaskUsage, error) {
+	if err := validateGet(ctx, string(taskID)); err != nil {
+		return TaskUsage{}, err
+	}
+	var usage TaskUsage
+	usage.TaskID = taskID
+	err := s.db.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(SUM(CAST(COALESCE(json_extract(a.usage, '$.input_tokens'), 0) AS INTEGER)), 0),
+			COALESCE(SUM(CAST(COALESCE(json_extract(a.usage, '$.output_tokens'), 0) AS INTEGER)), 0),
+			COALESCE(SUM(CAST(COALESCE(json_extract(a.usage, '$.total_tokens'), 0) AS INTEGER)), 0),
+			COALESCE(SUM(CAST(COALESCE(json_extract(a.usage, '$.cost.micros'), 0) AS INTEGER)), 0)
+		FROM agent_run_records a
+		JOIN runs r ON r.run_id = a.run_id
+		WHERE r.task_id = ? AND a.record_type = 'assistant_message'`,
+		taskID,
+	).Scan(&usage.InputTokens, &usage.OutputTokens, &usage.TotalTokens, &usage.CostMicros)
+	if err != nil {
+		return TaskUsage{}, fmt.Errorf("task usage: %w", err)
+	}
+	return usage, nil
+}
+
 func scanRun(row scanner) (Run, error) {
 	var item Run
 	var step, finished, failure, result sql.NullString
@@ -393,12 +465,15 @@ type scanner interface {
 func scanTask(row scanner) (Task, error) {
 	var item Task
 	var session sql.NullString
-	if err := row.Scan(&item.ID, &session, &item.Title, &item.Objective, &item.State, &item.Version, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.ID, &session, &item.Title, &item.Objective, &item.State, &item.ExecutionMode, &item.Version, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		return Task{}, err
 	}
 	if session.Valid {
 		sessionID := coreidentity.SessionID(session.String)
 		item.SessionID = &sessionID
+	}
+	if item.ExecutionMode == "" {
+		item.ExecutionMode = "agent"
 	}
 	if err := normalizeTimeFields(&item.CreatedAt, &item.UpdatedAt); err != nil {
 		return Task{}, err

@@ -8,7 +8,6 @@ import (
 	"flag"
 	"fmt"
 	"io/fs"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -19,7 +18,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"autozeagent.local/autozeagent/internal/app"
-	"autozeagent.local/autozeagent/internal/gateway"
+	"autozeagent.local/autozeagent/internal/gatewayclient"
 	"autozeagent.local/autozeagent/internal/platform/paths"
 )
 
@@ -99,13 +98,13 @@ func queryGatewayHealth(ctx context.Context, runtimeDir string) (healthCheck, er
 	}
 	var lastErr error
 	for {
-		client, err := gateway.NewLocalClient(runtimeDir)
+		client, err := gatewayclient.NewFromRuntimeDir(runtimeDir)
 		if err == nil {
-			var result healthCheck
-			err = client.DoJSON(ctx, http.MethodGet, "/v1/health", nil, &result)
-			if err == nil {
-				return result, nil
+			result, healthErr := client.Health(ctx)
+			if healthErr == nil {
+				return healthCheck{OK: result.OK, Core: result.Core}, nil
 			}
+			err = healthErr
 		}
 		lastErr = err
 		select {
