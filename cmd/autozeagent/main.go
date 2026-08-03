@@ -128,10 +128,9 @@ func printUsage() {
 
 	fmt.Println("  autozeagent task status <task-id> [--mode user|system]")
 	fmt.Println("  autozeagent task pause|resume|cancel <task-id> [--reason <text>] [--mode user|system]")
-	fmt.Println("  autozeagent job create --session <id> --name <name> --every <duration> [options] \"objective\"")
+	fmt.Println("  autozeagent job create ...  (secondary; prefer TUI /cron)")
 	fmt.Println("  autozeagent job list|status|pause|resume|cancel ...")
-	fmt.Println("  autozeagent approval show <plan-id> [--step <step-id>] [--mode user|system]")
-	fmt.Println("  autozeagent approval decide <plan-id> --action <action> [--step <step-id>] [--reason <text>] [--mode user|system]")
+	fmt.Println("  autozeagent approval show|decide ...  (removed; use Tab plan or run --execution-mode plan)")
 	fmt.Println("  autozeagent db check [--mode user|system]")
 	fmt.Println("  autozeagent help")
 }

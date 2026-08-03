@@ -13,7 +13,7 @@ Agent -> Tool Broker -> Policy + Approval/Grant + Audit -> Tool
 
 Skill 只是上下文，不能创建 Approval 或 Grant。Provider 只能返回文本、结构化 Plan 或 Tool 请求。Gateway 与 Scheduler 只能触发应用用例，不能绕过 Broker 直接执行模型请求的操作。
 
-未来外部工具优先采用 MCP，代码诊断优先采用 LSP；只实现当前实际需要的窄适配器。不得为了协议接入恢复通用 Module Runtime、私有 RPC、Supervisor 或独立数据库。
+未来外部工具优先采用 MCP，代码诊断优先采用 LSP；只实现当前实际需要的窄适配器。不得为了协议接入恢复通用 Module Runtime、私有 RPC、Supervisor 或独立数据库。MCP 配置与 stdio 接入见 ADR-040。
 
 ## 实现要求
 

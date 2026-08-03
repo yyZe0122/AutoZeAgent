@@ -119,10 +119,7 @@ func (p *Provider) Complete(ctx context.Context, request providerapi.CompletionR
 	if err := json.Unmarshal(payload, &decoded); err != nil {
 		return providerapi.CompletionResponse{}, providerhttp.Protocol(p.name, errors.New("invalid JSON response"))
 	}
-	result := providerapi.CompletionResponse{FinishReason: decoded.StopReason, Usage: providerapi.Usage{
-		InputTokens: providerapi.TokenCount(decoded.Usage.InputTokens), OutputTokens: providerapi.TokenCount(decoded.Usage.OutputTokens),
-		TotalTokens: providerapi.TokenCount(decoded.Usage.InputTokens + decoded.Usage.OutputTokens),
-	}}
+	result := providerapi.CompletionResponse{FinishReason: decoded.StopReason, Usage: usageFromAnthropic(decoded.Usage)}
 	for index, block := range decoded.Content {
 		switch block.Type {
 		case "text":
@@ -329,8 +326,22 @@ type outputFormat struct {
 type messageResponse struct {
 	Content    []contentBlock `json:"content"`
 	StopReason string         `json:"stop_reason"`
-	Usage      struct {
-		InputTokens  int64 `json:"input_tokens"`
-		OutputTokens int64 `json:"output_tokens"`
-	} `json:"usage"`
+	Usage      anthropicUsage `json:"usage"`
+}
+
+type anthropicUsage struct {
+	InputTokens              int64 `json:"input_tokens"`
+	OutputTokens             int64 `json:"output_tokens"`
+	CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+}
+
+func usageFromAnthropic(u anthropicUsage) providerapi.Usage {
+	return providerapi.Usage{
+		InputTokens:      providerapi.TokenCount(u.InputTokens),
+		OutputTokens:     providerapi.TokenCount(u.OutputTokens),
+		TotalTokens:      providerapi.TokenCount(u.InputTokens + u.OutputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens),
+		CacheReadTokens:  providerapi.TokenCount(u.CacheReadInputTokens),
+		CacheWriteTokens: providerapi.TokenCount(u.CacheCreationInputTokens),
+	}
 }

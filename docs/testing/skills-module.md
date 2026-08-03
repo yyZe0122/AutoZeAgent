@@ -38,13 +38,13 @@ $env:GOCACHE=Join-Path $PWD '.cache\go-build'
 $env:GOMODCACHE=Join-Path $PWD '.cache\gomod'
 $env:GOPATH=Join-Path $PWD '.cache\gopath'
 $env:GOTELEMETRY='off'
-go test ./internal/kernel ./internal/store/sqlite ./internal/skillcatalog ./internal/tasksubmission ./internal/planner ./internal/gateway ./cmd/autozeagentd
+go test ./internal/kernel ./internal/store/sqlite ./internal/skillcatalog ./internal/tasksubmission ./internal/chatsession ./internal/gateway ./cmd/autozeagentd
 ```
 
 Linux 目标机：
 
 ```bash
-go test ./internal/kernel ./internal/store/sqlite ./internal/skillcatalog ./internal/tasksubmission ./internal/planner ./internal/gateway ./cmd/autozeagentd
+go test ./internal/kernel ./internal/store/sqlite ./internal/skillcatalog ./internal/tasksubmission ./internal/chatsession ./internal/gateway ./cmd/autozeagentd
 ```
 
 覆盖范围：
@@ -53,23 +53,23 @@ go test ./internal/kernel ./internal/store/sqlite ./internal/skillcatalog ./inte
 - 数据库 trigger 拒绝快照 UPDATE/DELETE，读取时重新计算 SHA-256，内容被篡改则 fail closed；
 - Task Submission 对未知 ID、重复 ID 或不可用 Catalog fail closed；
 - 相同 Task ID 的幂等重试使用持久快照，不重读已经删除或变化的 Skill 文件；
-- Planner 将 Skill context 注入独立 system message，Memory 仍位于 user message 并明确视为不可信数据；
-- Skill 不能扩大 Planner capability schema，也不能创建 Approval/Grant、修改 Policy 或执行 Tool；
-- `GET /v1/skills` 只公开稳定排序的元数据，不泄露文件路径或正文；
+- Chat（`chatsession`）从 Task Skill 快照注入**独立** system 消息（ADR-036）；只读快照、不重读 `SKILL.md`；不存在 Memory 模块；
+- Skill 不能扩大 capability schema，也不能创建 Approval/Grant、修改 Policy 或执行 Tool；
+- `GET /v1/skills` 只公开稳定排序的元数据，不泄露文件路径或正文；`gatewayclient.ListSkills` + TUI `/skills` 显式选择并随 `POST /v1/tasks` 附带 `skill_ids`（不自动匹配）；
 - `autozeagentd` 按配置目录、项目目录的优先级发现 Skill，同 ID 由项目目录覆盖，并保留非法文件 diagnostic。
+
+额外建议：
+
+```bash
+go test ./internal/gatewayclient ./internal/tui ./internal/chatsession -count=1
+```
 
 ## legacy artifact 删除回归
 
-Windows 本地：
-
-```powershell
-go test ./internal/architecture
-```
-
-Linux 目标机：
+若仓库含 `internal/architecture` 包：
 
 ```bash
 go test ./internal/architecture
 ```
 
-架构测试要求旧 `cmd/autozeagent-skills`、`internal/skills`、`pkg/skillsapi`、`migrations/skills` 与配置示例持续不存在，并继续验证模型可寻址的 Module 能力不能绕过 Tool Broker、Canonical Plan Hash、Approval、Grant 和 Audit。
+架构意图：旧 `cmd/autozeagent-skills`、`internal/skills`、`pkg/skillsapi`、`migrations/skills` 与配置示例持续不存在；模型可寻址能力不能绕过 Tool Broker、Canonical Plan Hash、Grant 和 Audit。

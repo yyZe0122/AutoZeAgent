@@ -38,19 +38,21 @@ Local release matrix: `goreleaser release --snapshot --clean --parallelism 1`.
 
 | Path | Role |
 | --- | --- |
-| `cmd/autozeagentd` | Wires SQLite, kernel, planner, agent, tools, gateway, scheduler heartbeat |
+| `cmd/autozeagentd` | Wires SQLite, kernel, chatsession, agent, tools, gateway, taskcontrol |
 | `cmd/autozeagent` | Gateway client only — no tools, no provider, no grants; no-arg/`tui` → `internal/tui` |
 | `internal/gatewayclient` | Shared CLI+TUI facade over Gateway HTTP/SSE |
-| `internal/tui` | Bubble Tea UI; Gateway-only (target: only import `gatewayclient` + paths + pkg) |
+| `internal/tui` | Bubble Tea UI; Gateway-only (`gatewayclient` + paths + `pkg/*` + optional `modelstream`) |
+| `internal/chatsession` | Multi-turn chat for agent (build/write) and plan (read-only); workspace grants by mode |
+| `internal/contextpack` | Provider-view token estimate/pack/compact; snapshots (ADR-041) |
 | `internal/*` | Domain + app services (not a monorepo) |
 | `pkg/{event,provider,scheduler,tool}api` | Stable cross-boundary contracts |
 | `migrations/core/*.sql` | Embedded ordered migrations (`embed.go`); applied in `internal/store/sqlite.Open` |
-| `docs/architecture/` | Numbered ADRs — project design knowledge base |
-| `docs/optimization/current.md` | **Only** living optimization doc (target shape, backlog §5.1) |
+| `docs/architecture/` | Numbered ADRs — design KB; start at `docs/architecture/README.md` |
+| `docs/optimization/current.md` | **Only** living optimization doc (backlog) |
 
 ### Wiring rules
 
-- **Writes** go through narrow services: `tasksubmission`, `approvalsubmission`, `runexecution`. **Reads** go through `corequery`. Gateway must not hold a business `*sql.DB`.
+- **Writes** go through narrow services: `tasksubmission` (submit)、`chatsession` (chat runs)、`taskcontrol` (pause/resume/cancel). **Reads** go through `corequery`. Gateway must not hold a business `*sql.DB`.
 - Model-requested effects go **only** through Tool Broker (`internal/tools`, `RegisterBuiltins`). Nested `internal/tools/internal/executor` is intentionally unimportable outside `tools`.
 - Scheduler is **in-process** on Core’s shared `*sql.DB` — no separate scheduler DB or process.
 - Skills are file-based: `<config_dir>/skills` and `.autozeagent/skills` as `<id>/SKILL.md`. Instruction text only — never approvals, grants, or policy expansion.
@@ -70,8 +72,12 @@ Local release matrix: `goreleaser release --snapshot --clean --parallelism 1`.
 
 - Modes: `--mode user|system` (OS-specific dirs; Linux user uses XDG).
 - Provider config is **ConfigDir only** (not project cwd): `autozeagent.local.json` then `autozeagent.json` under user/system config dir (Linux `~/.config/autozeagent`, Windows `%APPDATA%\AutoZeAgent`). Daemon `EnsureConfig` migrates from project/data dir once if ConfigDir is empty, else seeds a template. Prefer `{env:VAR}` / file refs over literal API keys.
+- Per-model options: `maxTokens` = output cap; optional `contextWindow` = model context length for **packing + UI pressure** (not the same field as `maxTokens`). See `docs/provider-protocols.md`, ADR-041.
+- Optional **`chat`** in the same JSON: `roots` (absolute workspace paths; empty = daemon cwd), `allow_write` (optional ceiling for **agent** writes; omit = true), `tools.git` / `tools.process` (agent-only high-risk grants; default false), `compaction.enabled` (default true), `max_iterations` (1–64, default 8). Plan mode is always read-only. See ADR-038, ADR-041.
+- `autozeagent config validate` checks path layout + provider load/resolve + chat structure; never prints secrets.
 - Daemon owns `core.db` lifecycle; components must not close the shared connection.
+- Dual-track tasks (OpenCode-style): both modes → `chatsession`; **agent** = write grants, **plan** = read-only. No interactive Planner/approval path. TUI Tab switches draft mode. Job runner disabled pending redesign.
 
 ## Deep dives
 
-Start with: `docs/architecture/001-core-boundaries.md`, `004-database-ownership.md`, `012-tool-broker-execution-boundary.md`, `018-local-gateway-boundary.md`, `022-application-query-boundaries.md`, `037-cli-daemon-lifecycle.md`. Optimization backlog: `docs/optimization/current.md`. PR norms: `CONTRIBUTING.md`.
+Index: `docs/architecture/README.md`. Start with: `001-core-boundaries`, `004-database-ownership`, `012-tool-broker-execution-boundary`, `018-local-gateway-boundary`, `037-cli-daemon-lifecycle`, `038-session-chat-boundary`, `041-context-packing-and-pressure`, `022-application-query-boundaries`. Optimization backlog: `docs/optimization/current.md`. PR norms: `CONTRIBUTING.md`.

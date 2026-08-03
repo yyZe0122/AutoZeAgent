@@ -2,7 +2,9 @@
 
 ## 状态
 
-已接受，2026-07-17。
+**Superseded（交互路径）** — 2026-07-30：Approval Prompt DTO / 人批交互已移除；plan 为只读 chat。见 ADR-038。  
+Grant 与 Tool Broker 边界仍适用。  
+原状态：已接受，2026-07-17。
 
 ## 背景
 

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -13,6 +14,8 @@ import (
 	"autozeagent.local/autozeagent/pkg/schedulerapi"
 	"autozeagent.local/autozeagent/pkg/sqliteerror"
 )
+
+const jobSelectColumns = `job_id,name,session_id,task_title,task_objective,execution_mode,skill_ids,interval_seconds,next_run_at,timeout_seconds,max_retries,backoff_seconds,misfire_policy,idempotency_key,status,created_at,updated_at`
 
 type Store struct{ db *sql.DB }
 
@@ -43,6 +46,8 @@ func (s *Store) Create(ctx context.Context, request schedulerapi.CreateRequest) 
 	request.TaskObjective = strings.TrimSpace(request.TaskObjective)
 	request.IdempotencyKey = strings.TrimSpace(request.IdempotencyKey)
 	request.MisfirePolicy = strings.ToLower(strings.TrimSpace(request.MisfirePolicy))
+	request.ExecutionMode = normalizeExecutionMode(request.ExecutionMode)
+	request.SkillIDs = normalizeSkillIDs(request.SkillIDs)
 	if request.MisfirePolicy == "" {
 		request.MisfirePolicy = schedulerapi.MisfireRunOnce
 	}
@@ -61,7 +66,21 @@ func (s *Store) Create(ctx context.Context, request schedulerapi.CreateRequest) 
 	if request.MisfirePolicy != schedulerapi.MisfireSkip && request.MisfirePolicy != schedulerapi.MisfireCatchUp && request.MisfirePolicy != schedulerapi.MisfireRunOnce {
 		return schedulerapi.Job{}, errors.New("invalid misfire policy")
 	}
+	if request.ExecutionMode != schedulerapi.ExecutionModeAgent && request.ExecutionMode != schedulerapi.ExecutionModePlan {
+		return schedulerapi.Job{}, errors.New("execution_mode must be agent or plan")
+	}
+	var sessionExists int
+	if err := s.db.QueryRowContext(ctx, `SELECT 1 FROM sessions WHERE session_id=?`, request.SessionID).Scan(&sessionExists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return schedulerapi.Job{}, errors.New("session not found")
+		}
+		return schedulerapi.Job{}, err
+	}
 	nextRun, err := parseOptionalTime(request.NextRunAt, time.Now().UTC())
+	if err != nil {
+		return schedulerapi.Job{}, err
+	}
+	skillJSON, err := encodeSkillIDs(request.SkillIDs)
 	if err != nil {
 		return schedulerapi.Job{}, err
 	}
@@ -70,7 +89,10 @@ func (s *Store) Create(ctx context.Context, request schedulerapi.CreateRequest) 
 		return schedulerapi.Job{}, err
 	}
 	when := nowString()
-	_, err = s.db.ExecContext(ctx, `INSERT INTO jobs(job_id,name,session_id,task_title,task_objective,interval_seconds,next_run_at,timeout_seconds,max_retries,backoff_seconds,misfire_policy,idempotency_key,status,retry_attempt,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, jobID, request.Name, request.SessionID, request.TaskTitle, request.TaskObjective, request.IntervalSeconds, formatTime(nextRun), request.TimeoutSeconds, request.MaxRetries, request.BackoffSeconds, request.MisfirePolicy, request.IdempotencyKey, schedulerapi.StatusActive, 0, when, when)
+	_, err = s.db.ExecContext(ctx, `INSERT INTO jobs(job_id,name,session_id,task_title,task_objective,execution_mode,skill_ids,interval_seconds,next_run_at,timeout_seconds,max_retries,backoff_seconds,misfire_policy,idempotency_key,status,retry_attempt,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		jobID, request.Name, request.SessionID, request.TaskTitle, request.TaskObjective, request.ExecutionMode, skillJSON,
+		request.IntervalSeconds, formatTime(nextRun), request.TimeoutSeconds, request.MaxRetries, request.BackoffSeconds,
+		request.MisfirePolicy, request.IdempotencyKey, schedulerapi.StatusActive, 0, when, when)
 	if err != nil {
 		if sqliteerror.IsUniqueConstraint(err) {
 			return s.getByIdempotencyKey(ctx, request.IdempotencyKey)
@@ -85,15 +107,15 @@ func (s *Store) Get(ctx context.Context, jobID string) (schedulerapi.Job, error)
 	if jobID == "" {
 		return schedulerapi.Job{}, errors.New("job_id is required")
 	}
-	return scanJob(s.db.QueryRowContext(ctx, `SELECT job_id,name,session_id,task_title,task_objective,interval_seconds,next_run_at,timeout_seconds,max_retries,backoff_seconds,misfire_policy,idempotency_key,status,created_at,updated_at FROM jobs WHERE job_id=?`, jobID))
+	return scanJob(s.db.QueryRowContext(ctx, `SELECT `+jobSelectColumns+` FROM jobs WHERE job_id=?`, jobID))
 }
 
 func (s *Store) getByIdempotencyKey(ctx context.Context, key string) (schedulerapi.Job, error) {
-	return scanJob(s.db.QueryRowContext(ctx, `SELECT job_id,name,session_id,task_title,task_objective,interval_seconds,next_run_at,timeout_seconds,max_retries,backoff_seconds,misfire_policy,idempotency_key,status,created_at,updated_at FROM jobs WHERE idempotency_key=?`, key))
+	return scanJob(s.db.QueryRowContext(ctx, `SELECT `+jobSelectColumns+` FROM jobs WHERE idempotency_key=?`, key))
 }
 
 func (s *Store) List(ctx context.Context, includeArchived bool) ([]schedulerapi.Job, error) {
-	query := `SELECT job_id,name,session_id,task_title,task_objective,interval_seconds,next_run_at,timeout_seconds,max_retries,backoff_seconds,misfire_policy,idempotency_key,status,created_at,updated_at FROM jobs`
+	query := `SELECT ` + jobSelectColumns + ` FROM jobs`
 	if !includeArchived {
 		query += ` WHERE status <> 'archived'`
 	}
@@ -194,7 +216,7 @@ func (s *Store) ClaimDue(ctx context.Context, request schedulerapi.ClaimDueReque
 	if _, err := tx.ExecContext(ctx, `DELETE FROM job_leases WHERE expires_at<=?`, formatTime(now)); err != nil {
 		return nil, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT job_id,name,session_id,task_title,task_objective,interval_seconds,next_run_at,timeout_seconds,max_retries,backoff_seconds,misfire_policy,idempotency_key,status,retry_attempt,retry_at,retry_origin_at,created_at,updated_at FROM jobs WHERE status='active' AND (CASE WHEN retry_at<>'' THEN retry_at ELSE next_run_at END)<=? AND job_id NOT IN (SELECT job_id FROM job_leases) ORDER BY (CASE WHEN retry_at<>'' THEN retry_at ELSE next_run_at END),job_id LIMIT ?`, formatTime(now), request.Limit)
+	rows, err := tx.QueryContext(ctx, `SELECT job_id,name,session_id,task_title,task_objective,execution_mode,skill_ids,interval_seconds,next_run_at,timeout_seconds,max_retries,backoff_seconds,misfire_policy,idempotency_key,status,retry_attempt,retry_at,retry_origin_at,created_at,updated_at FROM jobs WHERE status='active' AND (CASE WHEN retry_at<>'' THEN retry_at ELSE next_run_at END)<=? AND job_id NOT IN (SELECT job_id FROM job_leases) ORDER BY (CASE WHEN retry_at<>'' THEN retry_at ELSE next_run_at END),job_id LIMIT ?`, formatTime(now), request.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -248,7 +270,12 @@ func (s *Store) ClaimDue(ctx context.Context, request schedulerapi.ClaimDueReque
 				return nil, err
 			}
 		}
-		tasks = append(tasks, schedulerapi.TaskRequest{JobID: item.job.ID, RunID: runID, LeaseID: leaseID, SessionID: item.job.SessionID, Title: item.job.TaskTitle, Objective: item.job.TaskObjective, ScheduledAt: formatTime(scheduledAt), TimeoutSeconds: item.job.TimeoutSeconds, IdempotencyKey: coreTaskKey, RequiresPlan: true})
+		tasks = append(tasks, schedulerapi.TaskRequest{
+			JobID: item.job.ID, RunID: runID, LeaseID: leaseID, SessionID: item.job.SessionID,
+			Title: item.job.TaskTitle, Objective: item.job.TaskObjective,
+			ExecutionMode: item.job.ExecutionMode, SkillIDs: append([]string(nil), item.job.SkillIDs...),
+			ScheduledAt: formatTime(scheduledAt), TimeoutSeconds: item.job.TimeoutSeconds, IdempotencyKey: coreTaskKey,
+		})
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -344,12 +371,92 @@ type scanner interface{ Scan(...any) error }
 
 func scanJob(row scanner) (schedulerapi.Job, error) {
 	var job schedulerapi.Job
-	err := row.Scan(&job.ID, &job.Name, &job.SessionID, &job.TaskTitle, &job.TaskObjective, &job.IntervalSeconds, &job.NextRunAt, &job.TimeoutSeconds, &job.MaxRetries, &job.BackoffSeconds, &job.MisfirePolicy, &job.IdempotencyKey, &job.Status, &job.CreatedAt, &job.UpdatedAt)
-	return job, err
+	var skillJSON string
+	err := row.Scan(&job.ID, &job.Name, &job.SessionID, &job.TaskTitle, &job.TaskObjective, &job.ExecutionMode, &skillJSON,
+		&job.IntervalSeconds, &job.NextRunAt, &job.TimeoutSeconds, &job.MaxRetries, &job.BackoffSeconds, &job.MisfirePolicy,
+		&job.IdempotencyKey, &job.Status, &job.CreatedAt, &job.UpdatedAt)
+	if err != nil {
+		return schedulerapi.Job{}, err
+	}
+	job.ExecutionMode = normalizeExecutionMode(job.ExecutionMode)
+	job.SkillIDs, err = decodeSkillIDs(skillJSON)
+	if err != nil {
+		return schedulerapi.Job{}, err
+	}
+	return job, nil
 }
+
 func scanDueJob(row scanner, job *schedulerapi.Job, retry *int, retryAt, retryOrigin *string) error {
-	return row.Scan(&job.ID, &job.Name, &job.SessionID, &job.TaskTitle, &job.TaskObjective, &job.IntervalSeconds, &job.NextRunAt, &job.TimeoutSeconds, &job.MaxRetries, &job.BackoffSeconds, &job.MisfirePolicy, &job.IdempotencyKey, &job.Status, retry, retryAt, retryOrigin, &job.CreatedAt, &job.UpdatedAt)
+	var skillJSON string
+	if err := row.Scan(&job.ID, &job.Name, &job.SessionID, &job.TaskTitle, &job.TaskObjective, &job.ExecutionMode, &skillJSON,
+		&job.IntervalSeconds, &job.NextRunAt, &job.TimeoutSeconds, &job.MaxRetries, &job.BackoffSeconds, &job.MisfirePolicy,
+		&job.IdempotencyKey, &job.Status, retry, retryAt, retryOrigin, &job.CreatedAt, &job.UpdatedAt); err != nil {
+		return err
+	}
+	job.ExecutionMode = normalizeExecutionMode(job.ExecutionMode)
+	ids, err := decodeSkillIDs(skillJSON)
+	if err != nil {
+		return err
+	}
+	job.SkillIDs = ids
+	return nil
 }
+
+func normalizeExecutionMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case schedulerapi.ExecutionModePlan:
+		return schedulerapi.ExecutionModePlan
+	default:
+		return schedulerapi.ExecutionModeAgent
+	}
+}
+
+func normalizeSkillIDs(ids []string) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func encodeSkillIDs(ids []string) (string, error) {
+	if len(ids) == 0 {
+		return "[]", nil
+	}
+	raw, err := json.Marshal(ids)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+func decodeSkillIDs(raw string) ([]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "[]" {
+		return nil, nil
+	}
+	var ids []string
+	if err := json.Unmarshal([]byte(raw), &ids); err != nil {
+		return nil, fmt.Errorf("decode skill_ids: %w", err)
+	}
+	return normalizeSkillIDs(ids), nil
+}
+
 func parseOptionalTime(raw string, fallback time.Time) (time.Time, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

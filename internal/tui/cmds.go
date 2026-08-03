@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"autozeagent.local/autozeagent/internal/gatewayclient"
+	"autozeagent.local/autozeagent/pkg/schedulerapi"
 )
 
 func (m model) handleLineCmd(line string) tea.Cmd {
@@ -30,17 +32,15 @@ func (m model) handleLineCmd(line string) tea.Cmd {
 		return m.statusCommandCmd()
 	case "/model":
 		return m.modelCommandCmd(arg)
+	case "/skills":
+		return m.skillsCmd()
 	case "/theme":
 		return m.themeCommandCmd(arg)
 	case "/cron":
-		return m.cronCmd()
+		return m.cronCmd(arg)
 	case "/new":
 		// Explicit /new always opens a fresh session (clear focus first).
 		return m.freshSessionCmd(arg)
-	case "/approve":
-		return m.approveCmd(arg)
-	case "/run":
-		return m.runCmd()
 	case "/pause", "/resume", "/cancel":
 		action, _ := gatewayclient.ParseTaskAction(name)
 		return m.taskActionCmd(action, arg)
@@ -50,8 +50,6 @@ func (m model) handleLineCmd(line string) tea.Cmd {
 		}
 	case "/tasks":
 		return m.tasksCmd(arg)
-	case "/details":
-		return func() tea.Msg { return commandDoneMsg{toggleDetails: true} }
 	default:
 		return func() tea.Msg {
 			return commandDoneMsg{err: fmt.Errorf("unknown command %s (try /help)", name)}
@@ -99,16 +97,101 @@ func (m model) tasksCmd(arg string) tea.Cmd {
 	}
 }
 
-func (m model) cronCmd() tea.Cmd {
+func (m model) cronCmd(arg string) tea.Cmd {
+	arg = strings.TrimSpace(arg)
+	if arg == "" {
+		return func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+			defer cancel()
+			jobs, err := m.gateway.ListJobs(ctx, false)
+			if err != nil {
+				return commandDoneMsg{err: err}
+			}
+			return commandDoneMsg{openList: listJobs, jobs: jobs, status: "scheduled jobs · /cron <every> <objective> to create"}
+		}
+	}
+	return m.cronCreateCmd(arg)
+}
+
+// cronCreateCmd: /cron <every> <objective> on the current session (TUI primary path).
+// Mode and skills follow the draft (Tab agent|plan, /skills).
+func (m model) cronCreateCmd(arg string) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
-		defer cancel()
-		jobs, err := m.gateway.ListJobs(ctx, false)
+		everyRaw, objective, ok := splitCronCreateArg(arg)
+		if !ok {
+			return commandDoneMsg{err: fmt.Errorf("usage: /cron <every> <objective>  (e.g. /cron 15m check status)")}
+		}
+		every, err := parseCronEvery(everyRaw)
 		if err != nil {
 			return commandDoneMsg{err: err}
 		}
-		return commandDoneMsg{openList: listJobs, jobs: jobs, status: "scheduled jobs"}
+		sessionID := strings.TrimSpace(string(m.sessionID))
+		if sessionID == "" || sessionID == "…" {
+			return commandDoneMsg{err: fmt.Errorf("focus a session first (send a message or /sessions), then /cron")}
+		}
+		execMode := string(m.draftMode)
+		if execMode != gatewayclient.ExecutionModePlan {
+			execMode = gatewayclient.ExecutionModeAgent
+		}
+		key, err := gatewayclient.RandomID("job-")
+		if err != nil {
+			return commandDoneMsg{err: err}
+		}
+		title := gatewayclient.TaskTitle(objective)
+		name := title
+		if len(name) > 40 {
+			name = name[:40]
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+		defer cancel()
+		job, err := m.gateway.CreateJob(ctx, schedulerapi.CreateRequest{
+			Name: name, SessionID: sessionID, TaskTitle: title, TaskObjective: objective,
+			ExecutionMode: execMode, SkillIDs: append([]string(nil), m.selectedSkillIDs...),
+			IntervalSeconds: int64(every.Seconds()), IdempotencyKey: key,
+		})
+		if err != nil {
+			return commandDoneMsg{err: err}
+		}
+		jobs, listErr := m.gateway.ListJobs(ctx, false)
+		if listErr != nil {
+			return commandDoneMsg{
+				status: fmt.Sprintf("created job %s every %s (%s)", shortID(job.ID), every, execMode),
+			}
+		}
+		return commandDoneMsg{
+			openList: listJobs, jobs: jobs,
+			status: fmt.Sprintf("created job %s every %s (%s)", shortID(job.ID), every, execMode),
+		}
 	}
+}
+
+func splitCronCreateArg(arg string) (every, objective string, ok bool) {
+	arg = strings.TrimSpace(arg)
+	if arg == "" {
+		return "", "", false
+	}
+	parts := strings.SplitN(arg, " ", 2)
+	if len(parts) != 2 {
+		return "", "", false
+	}
+	every = strings.TrimSpace(parts[0])
+	objective = strings.TrimSpace(parts[1])
+	if every == "" || objective == "" {
+		return "", "", false
+	}
+	return every, objective, true
+}
+
+func parseCronEvery(raw string) (time.Duration, error) {
+	raw = strings.TrimSpace(raw)
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("invalid interval %q (use Go duration, e.g. 15m, 1h)", raw)
+	}
+	if d < time.Second {
+		return 0, fmt.Errorf("interval must be at least 1s")
+	}
+	return d, nil
 }
 
 func (m model) themeCommandCmd(arg string) tea.Cmd {
@@ -117,6 +200,22 @@ func (m model) themeCommandCmd(arg string) tea.Cmd {
 			return commandDoneMsg{err: fmt.Errorf("/theme toggles day/night (no args)")}
 		}
 		return commandDoneMsg{toggleTheme: true}
+	}
+}
+
+func (m model) skillsCmd() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+		defer cancel()
+		skills, err := m.gateway.ListSkills(ctx)
+		if err != nil {
+			return commandDoneMsg{err: err}
+		}
+		status := "toggle skills · Enter select · Esc close"
+		if n := len(m.selectedSkillIDs); n > 0 {
+			status = fmt.Sprintf("%d skill(s) selected · Enter toggle · Esc close", n)
+		}
+		return commandDoneMsg{openList: listSkills, skills: skills, status: status}
 	}
 }
 
@@ -132,7 +231,12 @@ func (m model) loadStatusCmd() tea.Cmd {
 		if err != nil {
 			return statusDoneMsg{health: health, err: err}
 		}
-		return statusDoneMsg{health: health, model: modelCfg}
+		msg := statusDoneMsg{health: health, model: modelCfg}
+		if mcp, mcpErr := m.gateway.MCPStatus(ctx); mcpErr == nil {
+			msg.mcp = mcp
+			msg.mcpOK = true
+		}
+		return msg
 	}
 }
 
@@ -164,10 +268,11 @@ func (m model) modelCommandCmd(arg string) tea.Cmd {
 		arg = strings.TrimSpace(arg)
 		if arg == "" {
 			return commandDoneMsg{
-				openList:  listModels,
-				modelName: cfg.Model,
-				models:    cfg.Models,
-				status:    "select a model",
+				openList:      listModels,
+				modelName:     cfg.Model,
+				models:        cfg.Models,
+				contextWindow: cfg.ContextWindow,
+				status:        "select a model",
 			}
 		}
 		if !strings.Contains(arg, "/") {
@@ -175,10 +280,11 @@ func (m model) modelCommandCmd(arg string) tea.Cmd {
 		}
 		if arg == cfg.Model {
 			return commandDoneMsg{
-				status:    fmt.Sprintf("already using %s", cfg.Model),
-				modelName: cfg.Model,
-				models:    cfg.Models,
-				closeList: true,
+				status:        fmt.Sprintf("already using %s", cfg.Model),
+				modelName:     cfg.Model,
+				models:        cfg.Models,
+				contextWindow: cfg.ContextWindow,
+				closeList:     true,
 			}
 		}
 		updated, err := m.gateway.SetModelConfig(ctx, arg)
@@ -186,10 +292,11 @@ func (m model) modelCommandCmd(arg string) tea.Cmd {
 			return commandDoneMsg{err: err}
 		}
 		return commandDoneMsg{
-			status:    fmt.Sprintf("model=%s", updated.Model),
-			modelName: updated.Model,
-			models:    updated.Models,
-			closeList: true,
+			status:        fmt.Sprintf("model=%s", updated.Model),
+			modelName:     updated.Model,
+			models:        updated.Models,
+			contextWindow: updated.ContextWindow,
+			closeList:     true,
 		}
 	}
 }
@@ -204,6 +311,7 @@ func (m model) newTaskCmd(objective string) tea.Cmd {
 	if sessionID == "…" {
 		sessionID = ""
 	}
+	skillIDs := append([]string(nil), m.selectedSkillIDs...)
 	return func() tea.Msg {
 		if objective == "" {
 			return commandDoneMsg{err: fmt.Errorf("usage: /new <objective>")}
@@ -217,6 +325,9 @@ func (m model) newTaskCmd(objective string) tea.Cmd {
 		if sessionID != "" {
 			req.SessionID = sessionID
 		}
+		if len(skillIDs) > 0 {
+			req.SkillIDs = skillIDs
+		}
 		submitted, err := m.gateway.SubmitTask(ctx, req)
 		if err != nil {
 			return commandDoneMsg{err: err}
@@ -225,102 +336,19 @@ func (m model) newTaskCmd(objective string) tea.Cmd {
 		if submitted.Task.SessionID != nil && *submitted.Task.SessionID != "" {
 			sid = *submitted.Task.SessionID
 		}
-		status := fmt.Sprintf("task %s submitted (%s · %s)", submitted.Task.ID, submitted.Task.State, execMode)
-		if execMode == gatewayclient.ExecutionModeAgent {
-			status = fmt.Sprintf("message sent · task %s", shortID(string(submitted.Task.ID)))
-			if sid != "" {
-				status = fmt.Sprintf("chat · session %s · task %s", shortID(string(sid)), shortID(string(submitted.Task.ID)))
-			}
-		} else if submitted.PlanningPending {
-			status = fmt.Sprintf("task %s planning… (%s)", submitted.Task.ID, execMode)
-			if sid != "" {
-				status = fmt.Sprintf("planning… · task %s (%s)", shortID(string(submitted.Task.ID)), execMode)
-			}
-			status += " — plan mode: approve to run"
+		label := "build"
+		if execMode == gatewayclient.ExecutionModePlan {
+			label = "plan (read-only)"
 		}
-		// Agent chat must not focus a client-invented plan- id (that is plan-mode only).
-		planID := submitted.PlanID
-		if execMode == gatewayclient.ExecutionModeAgent {
-			planID = ""
+		status := fmt.Sprintf("%s · task %s", label, shortID(string(submitted.Task.ID)))
+		if sid != "" {
+			status = fmt.Sprintf("%s · session %s · task %s", label, shortID(string(sid)), shortID(string(submitted.Task.ID)))
 		}
 		return commandDoneMsg{
 			status:    status,
 			taskID:    submitted.Task.ID,
-			planID:    planID,
+			planID:    "",
 			sessionID: sid,
-		}
-	}
-}
-
-func (m model) approveCmd(arg string) tea.Cmd {
-	return func() tea.Msg {
-		action, err := gatewayclient.ParseApprovalAction(arg)
-		if err != nil {
-			return commandDoneMsg{err: err}
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
-		defer cancel()
-		prompt := m.prompt
-		if prompt == nil {
-			planID, err := m.resolvePlanID(ctx)
-			if err != nil {
-				return commandDoneMsg{err: err}
-			}
-			p, err := m.gateway.ApprovalPrompt(ctx, planID, "")
-			if err != nil {
-				return commandDoneMsg{err: err}
-			}
-			prompt = &p
-		}
-		if !gatewayclient.PromptAllows(*prompt, action, "") {
-			return commandDoneMsg{err: fmt.Errorf("action %s not available", action)}
-		}
-		decision, err := m.gateway.DecideApproval(ctx, *prompt, "", action, "local-user", "")
-		if err != nil {
-			return commandDoneMsg{err: err}
-		}
-		status := fmt.Sprintf("approval %s (%s)", decision.ID, decision.Decision)
-		// After human approve, Start is allowed for both agent and plan modes; grants enforce scope.
-		switch action {
-		case gatewayclient.ActionAllowPlan, gatewayclient.ActionAllowOnce, gatewayclient.ActionAllowLimited:
-			started, startErr := m.gateway.StartRuns(ctx, gatewayclient.RunStartRequest{
-				TaskID: prompt.TaskID, PlanID: prompt.PlanID, PlanRevision: prompt.Revision, PlanHash: prompt.PlanHash,
-			})
-			if startErr != nil {
-				return commandDoneMsg{status: status, err: fmt.Errorf("auto-start runs: %w", startErr), taskID: prompt.TaskID}
-			}
-			status += fmt.Sprintf("; started %d run(s)", len(started.RunIDs))
-			return commandDoneMsg{status: status, taskID: prompt.TaskID}
-		}
-		return commandDoneMsg{status: status, taskID: prompt.TaskID}
-	}
-}
-
-func (m model) runCmd() tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
-		defer cancel()
-		prompt := m.prompt
-		if prompt == nil {
-			planID, err := m.resolvePlanID(ctx)
-			if err != nil {
-				return commandDoneMsg{err: err}
-			}
-			p, err := m.gateway.ApprovalPrompt(ctx, planID, "")
-			if err != nil {
-				return commandDoneMsg{err: err}
-			}
-			prompt = &p
-		}
-		started, err := m.gateway.StartRuns(ctx, gatewayclient.RunStartRequest{
-			TaskID: prompt.TaskID, PlanID: prompt.PlanID, PlanRevision: prompt.Revision, PlanHash: prompt.PlanHash,
-		})
-		if err != nil {
-			return commandDoneMsg{err: err}
-		}
-		return commandDoneMsg{
-			status: fmt.Sprintf("started %d run(s)", len(started.RunIDs)),
-			taskID: prompt.TaskID,
 		}
 	}
 }
@@ -342,26 +370,6 @@ func (m model) taskActionCmd(action gatewayclient.TaskAction, reason string) tea
 		}
 		return commandDoneMsg{status: fmt.Sprintf("task %s → %s", updated.ID, updated.State), taskID: updated.ID}
 	}
-}
-
-func (m model) resolvePlanID(ctx context.Context) (gatewayclient.PlanID, error) {
-	if m.planID != "" {
-		return m.planID, nil
-	}
-	if m.plan != nil {
-		return m.plan.ID, nil
-	}
-	if m.prompt != nil {
-		return m.prompt.PlanID, nil
-	}
-	if m.task == nil {
-		return "", fmt.Errorf("no current task/plan")
-	}
-	plan, err := m.gateway.FindPlanForTask(ctx, m.task.ID)
-	if err != nil {
-		return "", err
-	}
-	return plan.ID, nil
 }
 
 func (m model) refreshCmd(gen uint64, kind refreshKind) tea.Cmd {
@@ -409,15 +417,16 @@ func (m model) refreshCmd(gen uint64, kind refreshKind) tea.Cmd {
 		}
 
 		var (
-			wg      sync.WaitGroup
-			taskMu  sync.Mutex
-			taskErr error
-			task    gatewayclient.Task
-			plan    *gatewayclient.Plan
-			prompt  *gatewayclient.Prompt
-			runs    []gatewayclient.Run
-			usage   gatewayclient.TaskUsage
-			usageOK bool
+			wg          sync.WaitGroup
+			taskMu      sync.Mutex
+			taskErr     error
+			task        gatewayclient.Task
+			plan        *gatewayclient.Plan
+			runs        []gatewayclient.Run
+			usage       gatewayclient.TaskUsage
+			usageOK     bool
+			taskContext gatewayclient.TaskContext
+			contextOK   bool
 		)
 
 		needTask := kind == refreshFull || kind == refreshTask || kind == refreshPlan
@@ -457,11 +466,6 @@ func (m model) refreshCmd(gen uint64, kind refreshKind) tea.Cmd {
 				taskMu.Lock()
 				plan = &p
 				taskMu.Unlock()
-				if pr, promptErr := gw.ApprovalPrompt(ctx, p.ID, ""); promptErr == nil {
-					taskMu.Lock()
-					prompt = &pr
-					taskMu.Unlock()
-				}
 			}()
 		}
 
@@ -492,6 +496,18 @@ func (m model) refreshCmd(gen uint64, kind refreshKind) tea.Cmd {
 				usageOK = true
 				taskMu.Unlock()
 			}()
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				c, err := gw.TaskContext(ctx, taskID)
+				if err != nil {
+					return
+				}
+				taskMu.Lock()
+				taskContext = c
+				contextOK = true
+				taskMu.Unlock()
+			}()
 		}
 
 		wg.Wait()
@@ -505,10 +521,11 @@ func (m model) refreshCmd(gen uint64, kind refreshKind) tea.Cmd {
 			msg.task = &task
 		}
 		msg.plan = plan
-		msg.prompt = prompt
 		msg.runs = runs
 		msg.usage = usage
 		msg.usageOK = usageOK
+		msg.taskContext = taskContext
+		msg.contextOK = contextOK
 		return msg
 	}
 }

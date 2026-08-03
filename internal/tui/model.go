@@ -33,6 +33,7 @@ const (
 	listTasks             // task list (debug / focus)
 	listModels
 	listJobs
+	listSkills // multi-select skill picker for next submit
 )
 
 const (
@@ -72,33 +73,37 @@ type model struct {
 	dataDir   string
 	busy      bool
 
-	// Floating picker (sessions/models/jobs). Slash completer is separate.
+	// Floating picker (sessions/models/jobs/skills). Slash completer is separate.
 	list        listKind
 	selectedIdx int
-	// approvalOpen shows the approval action overlay when waiting approval.
-	approvalOpen bool
 
-	tasks     []gatewayclient.Task
-	sessions  []gatewayclient.Session
-	jobs      []schedulerapi.Job
-	sessionID gatewayclient.SessionID
-	task      *gatewayclient.Task
-	planID    gatewayclient.PlanID
-	plan      *gatewayclient.Plan
-	prompt    *gatewayclient.Prompt
-	runs      []gatewayclient.Run
-	messages  []gatewayclient.TranscriptMessage
+	tasks    []gatewayclient.Task
+	sessions []gatewayclient.Session
+	jobs     []schedulerapi.Job
+	skills   []gatewayclient.Skill
+	// selectedSkillIDs is draft selection for the next task submit (kept across turns).
+	selectedSkillIDs []string
+	sessionID        gatewayclient.SessionID
+	task             *gatewayclient.Task
+	planID           gatewayclient.PlanID
+	plan             *gatewayclient.Plan
+	runs             []gatewayclient.Run
+	messages         []gatewayclient.TranscriptMessage
 	// live assistant draft from model-stream (typewriter); cleared on complete/refresh.
 	liveContent  string
 	liveThinking string
 	liveRunID    gatewayclient.RunID
 	timeline     []timelineItem
 	tlCache      timelineRenderCache
-	planDetails  bool
 	stickBottom  bool
 
-	usage   gatewayclient.TaskUsage
-	usageOK bool
+	usage         gatewayclient.TaskUsage
+	usageOK       bool
+	taskContext   gatewayclient.TaskContext
+	contextOK     bool
+	mcpStatus     gatewayclient.MCPStatus
+	mcpOK         bool
+	contextWindow int64 // model context length from ModelConfig; 0 = unknown
 
 	animFrame int
 	animOn    bool
@@ -129,23 +134,26 @@ const (
 )
 
 type refreshDoneMsg struct {
-	gen      uint64
-	kind     refreshKind
-	tasks    []gatewayclient.Task
-	sessions []gatewayclient.Session
-	task     *gatewayclient.Task
-	plan     *gatewayclient.Plan
-	prompt   *gatewayclient.Prompt
-	runs     []gatewayclient.Run
-	messages []gatewayclient.TranscriptMessage
-	usage    gatewayclient.TaskUsage
-	usageOK  bool
-	err      error
+	gen         uint64
+	kind        refreshKind
+	tasks       []gatewayclient.Task
+	sessions    []gatewayclient.Session
+	task        *gatewayclient.Task
+	plan        *gatewayclient.Plan
+	runs        []gatewayclient.Run
+	messages    []gatewayclient.TranscriptMessage
+	usage       gatewayclient.TaskUsage
+	usageOK     bool
+	taskContext gatewayclient.TaskContext
+	contextOK   bool
+	err         error
 }
 
 type statusDoneMsg struct {
 	health gatewayclient.Health
 	model  gatewayclient.ModelConfig
+	mcp    gatewayclient.MCPStatus
+	mcpOK  bool
 	err    error
 }
 
@@ -160,12 +168,14 @@ type commandDoneMsg struct {
 	closeList     bool
 	quit          bool
 	help          bool
-	toggleDetails bool
 	toggleTheme   bool
 	modelName     string
 	models        []string
+	contextWindow int64
 	jobs          []schedulerapi.Job
 	sessions      []gatewayclient.Session
+	skills        []gatewayclient.Skill
+	skillIDs      []string // replace selectedSkillIDs when set (toggle apply)
 }
 
 type sseEventMsg struct {
@@ -228,12 +238,8 @@ func (m *model) wantsAnim() bool {
 	return m.runActivity() == activityActive
 }
 
-func (m *model) waitingApproval() bool {
-	return m.task != nil && m.task.State == gatewayclient.TaskStateWaitingApproval && m.prompt != nil
-}
-
 func (m *model) pickerOpen() bool {
-	return m.list != listNone || m.completer.visible || (m.approvalOpen && m.waitingApproval())
+	return m.list != listNone || m.completer.visible
 }
 
 func (m *model) toggleDraftMode() {
@@ -247,9 +253,9 @@ func (m *model) toggleDraftMode() {
 
 func (m *model) applyPlaceholder() {
 	if m.draftMode == modePlan {
-		m.input.Placeholder = "plan mode · describe goal (approve to execute)"
+		m.input.Placeholder = "plan mode · read-only analysis (no edits)"
 	} else {
-		m.input.Placeholder = "agent mode · message or /command"
+		m.input.Placeholder = "agent mode · build (read+write) · message or /command"
 	}
 }
 

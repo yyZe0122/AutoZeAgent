@@ -11,15 +11,15 @@ import (
 
 func TestCompleterFiltersPrefix(t *testing.T) {
 	var c completer
-	c.update("/ap")
+	c.update("/mo")
 	if !c.visible || len(c.items) == 0 {
 		t.Fatalf("expected items, got %#v", c.items)
 	}
-	if c.items[0].Name != "/approve" {
+	if c.items[0].Name != "/model" {
 		t.Fatalf("got %q", c.items[0].Name)
 	}
 	name := c.accept()
-	if name != "/approve" {
+	if name != "/model" {
 		t.Fatalf("accept = %q", name)
 	}
 	if c.visible {

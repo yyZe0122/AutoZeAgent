@@ -248,8 +248,9 @@ func (r *Repository) RecordSystemApproval(ctx context.Context, input DecisionInp
 	if planState != string(kernel.PlanApproved) {
 		return Approval{}, fmt.Errorf("%w: system approval requires plan approved (got %s)", ErrApprovalClosed, planState)
 	}
-	if kernel.NormalizeExecutionMode(execMode) != kernel.ExecutionModeAgent {
-		return Approval{}, fmt.Errorf("%w: system approval requires agent execution_mode", ErrInvalidDecision)
+	mode := kernel.NormalizeExecutionMode(execMode)
+	if mode != kernel.ExecutionModeAgent && mode != kernel.ExecutionModePlan {
+		return Approval{}, fmt.Errorf("%w: system approval requires agent or plan execution_mode", ErrInvalidDecision)
 	}
 
 	var expires any

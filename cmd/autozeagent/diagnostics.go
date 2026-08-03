@@ -20,11 +20,19 @@ import (
 	"autozeagent.local/autozeagent/internal/app"
 	"autozeagent.local/autozeagent/internal/gatewayclient"
 	"autozeagent.local/autozeagent/internal/platform/paths"
+	"autozeagent.local/autozeagent/internal/providerconfig"
 )
 
 type configCheck struct {
-	OK   bool       `json:"ok"`
-	Mode paths.Mode `json:"mode"`
+	OK         bool       `json:"ok"`
+	Mode       paths.Mode `json:"mode"`
+	PathsOK    bool       `json:"paths_ok"`
+	ProviderOK bool       `json:"provider_ok"`
+	Model      string     `json:"model,omitempty"`
+	ProviderID string     `json:"provider_id,omitempty"`
+	Source     string     `json:"source,omitempty"`
+	// ChatAgentWriteCeiling reports whether agent mode may write (plan is always RO).
+	ChatAgentWriteCeiling bool `json:"chat_agent_write_ceiling"`
 }
 
 type databaseCheck struct {
@@ -167,7 +175,28 @@ func validateConfig(mode paths.Mode) (configCheck, error) {
 	if err := layout.Validate(); err != nil {
 		return configCheck{}, err
 	}
-	return configCheck{OK: true, Mode: mode}, nil
+	check := configCheck{Mode: mode, PathsOK: true}
+	chat, err := providerconfig.LoadChat(layout.ConfigDir)
+	if err != nil {
+		return configCheck{}, fmt.Errorf("chat config: %w", err)
+	}
+	check.ChatAgentWriteCeiling = chat.AgentWriteCeiling()
+	if _, err := providerconfig.LoadMCP(layout.ConfigDir); err != nil {
+		return configCheck{}, fmt.Errorf("mcp config: %w", err)
+	}
+	resolved, err := providerconfig.Load(layout.ConfigDir)
+	if err != nil {
+		return configCheck{}, fmt.Errorf("provider config: %w", err)
+	}
+	if resolved == nil {
+		return configCheck{}, errors.New("provider config not found under config directory")
+	}
+	check.ProviderOK = true
+	check.Model = resolved.ProviderID + "/" + resolved.ModelID
+	check.ProviderID = resolved.ProviderID
+	check.Source = resolved.Source
+	check.OK = true
+	return check, nil
 }
 
 func databaseFiles(root string) ([]string, error) {

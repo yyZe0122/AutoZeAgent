@@ -16,6 +16,76 @@ import (
 	"autozeagent.local/autozeagent/pkg/toolapi"
 )
 
+func TestRunnerTrimsLongToolResultsForProviderOnly(t *testing.T) {
+	store, db, _ := openAgentFixture(t)
+	longBody := strings.Repeat("Z", 200)
+	longOutputBytes, err := json.Marshal(map[string]string{"body": longBody})
+	if err != nil {
+		t.Fatal(err)
+	}
+	longOutput := string(longOutputBytes)
+	provider := &sequenceProvider{responses: []providerapi.CompletionResponse{
+		{
+			ToolCalls: []providerapi.ToolCall{{ID: "call-long", Name: "test_read", Arguments: `{}`}},
+			Usage:     providerapi.Usage{TotalTokens: 1},
+		},
+		{Content: "done", Usage: providerapi.Usage{TotalTokens: 1}},
+	}}
+	broker := &longOutputBroker{recordingBroker: recordingBroker{db: db, definitions: testDefinitions()}, output: longOutput}
+	runner, err := New(Config{
+		Provider: provider, Broker: broker, Records: store, Model: "test-model",
+		MaxToolResultRunes: 96,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := testRunRequest()
+	request.AllowedTools = []string{"test_read"}
+	result, err := runner.Run(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != "done" {
+		t.Fatalf("result = %+v", result)
+	}
+	if len(provider.requests) != 2 {
+		t.Fatalf("provider calls = %d, want 2", len(provider.requests))
+	}
+	// Second request includes tool result: trimmed for provider.
+	var toolMsg *providerapi.Message
+	for i := range provider.requests[1].Messages {
+		m := &provider.requests[1].Messages[i]
+		if m.Role == providerapi.RoleTool && m.ToolCallID == "call-long" {
+			toolMsg = m
+			break
+		}
+	}
+	if toolMsg == nil {
+		t.Fatal("missing tool message in provider request")
+	}
+	if toolMsg.Content == longOutput {
+		t.Fatal("provider still received full tool output")
+	}
+	if !strings.Contains(toolMsg.Content, "trimmed") {
+		t.Fatalf("expected trim marker, got %q", toolMsg.Content)
+	}
+	// Persisted record keeps full content.
+	records, err := store.List(context.Background(), request.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persisted string
+	for _, rec := range records {
+		if rec.Type == RecordToolResult && rec.Message.ToolCallID == "call-long" {
+			persisted = rec.Message.Content
+			break
+		}
+	}
+	if persisted != longOutput {
+		t.Fatalf("persisted tool result len=%d want %d", len(persisted), len(longOutput))
+	}
+}
+
 func TestRunnerRetriesRetryableProviderErrors(t *testing.T) {
 	store, _, _ := openAgentFixture(t)
 	provider := &sequenceProvider{
@@ -207,6 +277,41 @@ func TestRunnerRestoresDeniedToolResultAfterRestart(t *testing.T) {
 	}
 }
 
+func TestRunnerRespectsMaxIterations(t *testing.T) {
+	store, db, _ := openAgentFixture(t)
+	// Each response requests a tool call so the loop never finishes with content.
+	var responses []providerapi.CompletionResponse
+	for i := 0; i < 5; i++ {
+		responses = append(responses, providerapi.CompletionResponse{
+			ToolCalls: []providerapi.ToolCall{{
+				ID: fmt.Sprintf("call-%d", i), Name: "test_read", Arguments: `{}`,
+			}},
+			Usage: providerapi.Usage{TotalTokens: 1, InputTokens: 1},
+		})
+	}
+	provider := &sequenceProvider{responses: responses}
+	broker := &recordingBroker{db: db, definitions: testDefinitions()}
+	runner, err := New(Config{
+		Provider: provider, Broker: broker, Records: store, Model: "test-model",
+		MaxIterations: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := testRunRequest()
+	request.AllowedTools = []string{"test_read"}
+	result, err := runner.Run(context.Background(), request)
+	if !errors.Is(err, ErrMaxIterations) {
+		t.Fatalf("Run() error = %v, want ErrMaxIterations", err)
+	}
+	if result.Iterations != 2 {
+		t.Fatalf("iterations = %d, want 2", result.Iterations)
+	}
+	if provider.calls != 2 {
+		t.Fatalf("provider calls = %d, want 2", provider.calls)
+	}
+}
+
 func TestRunnerStillFailsOnNonDeniedToolError(t *testing.T) {
 	store, _, _ := openAgentFixture(t)
 	provider := &sequenceProvider{responses: []providerapi.CompletionResponse{{
@@ -291,6 +396,39 @@ func (p *sequenceProvider) Stream(_ context.Context, request providerapi.Complet
 		return errors.New("unexpected provider call")
 	}
 	return providerapi.EmitResponse(p.responses[index], handler)
+}
+
+type longOutputBroker struct {
+	recordingBroker
+	output string
+}
+
+func (b *longOutputBroker) Execute(_ context.Context, request toolapi.Request) (toolapi.Response, error) {
+	b.calls++
+	if b.executeErr != nil {
+		return toolapi.Response{}, b.executeErr
+	}
+	now := time.Now().UTC()
+	response := toolapi.Response{
+		CallID: request.CallID, Tool: request.Tool, Output: json.RawMessage(b.output),
+		StartedAt: now, FinishedAt: now,
+	}
+	if b.db != nil {
+		payload, err := json.Marshal(map[string]any{"response": response})
+		if err != nil {
+			return toolapi.Response{}, err
+		}
+		_, err = b.db.Exec(`INSERT INTO tool_calls
+			(tool_call_id, run_id, step_id, grant_id, tool_name, state, request, response, started_at, finished_at)
+			VALUES (?, ?, ?, NULL, ?, 'succeeded', ?, ?, ?, ?)`,
+			request.CallID, request.RunID, request.StepID, request.Tool, string(request.Arguments), string(payload),
+			now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano),
+		)
+		if err != nil {
+			return toolapi.Response{}, err
+		}
+	}
+	return response, nil
 }
 
 type recordingBroker struct {

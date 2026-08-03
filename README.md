@@ -22,9 +22,9 @@ AutoZeAgent is designed for automation work that cannot be represented safely as
 
 AutoZeAgent 面向无法安全地用单次提示词或短生命周期进程表达的自动化工作。
 
-A user submits a persistent **Task**, the planner produces a reviewable **Plan**, approvals authorize specific actions, and one or more recoverable **Runs** carry the work forward.
+Work runs on two tracks (OpenCode-style): **agent** (build) is multi-turn chat with workspace **read+write** tools; **plan** is the same chat with **read-only** tools. Both use `chatsession` and the Tool Broker — there is no separate Planner approval pipeline for interactive use.
 
-用户提交一个持久化的 **Task（任务）**，规划器生成可审查的 **Plan（计划）**，审批授权具体操作，一个或多个可恢复的 **Run（运行）** 持续推进工作。
+默认双轨（对齐 OpenCode）：**agent**（build）为可写多轮对话；**plan** 为同一会话的**只读**分析对话。二者都走 `chatsession` 与 Tool Broker，交互侧无独立「规划→审批→执行」管道。
 
 The production system intentionally contains only one long-running daemon, one local CLI (including the interactive TUI), and one SQLite source of truth. CLI subcommands and the TUI are peers that talk only to the local Gateway.
 
@@ -53,8 +53,8 @@ AutoZeAgent 围绕一个简单想法构建：自动化智能体可以长时间�
 
 - **Persistence instead of prompt history.** Important state is stored as explicit domain records rather than depending on an in-memory conversation.
   - **用持久化代替提示词历史。** 重要状态以明确的领域记录保存，而不是依赖内存中的对话上下文。
-- **Plans before effects.** Actions can be inspected and approved before tools are allowed to change the system.
-  - **先计划，再产生副作用。** 在工具被允许修改系统之前，可以先检查并审批计划中的操作。
+- **Grants before effects.** Model-requested tools run only under capability grants and the Tool Broker (chat modes issue workspace grants; no interactive Planner approval UX).
+  - **先授权，再产生副作用。** 模型请求的工具仅在 Capability Grant 与 Tool Broker 下执行（chat 按 mode 发 workspace grant；无交互 Planner 审批 UX）。
 - **Recovery instead of blind retries.** Provider and tool records make it possible to continue after interruption without repeating already completed tool calls.
   - **用恢复代替盲目重试。** Provider 和工具记录允许系统在中断后继续运行，同时避免重复已经成功完成的工具调用。
 - **One database instead of distributed state.** A single SQLite database keeps task, execution, scheduling, event, and audit facts transactionally close.
@@ -78,47 +78,50 @@ The architecture diagram is a repository-hosted static SVG, so it does not depen
 
 架构图使用仓库内托管的静态 SVG，因此不依赖 GitHub Mermaid 或其他富媒体渲染功能。
 
-**Text fallback:** `User → autozeagent CLI → authenticated local gateway → autozeagentd → planner / scheduler / tool broker / skill catalog → model providers / controlled effects`, with durable state stored in `core.db`.
+**Text fallback:** `User → autozeagent CLI/TUI → authenticated local gateway → autozeagentd → chatsession (agent|plan) · agent runner · tool broker · skill catalog → model providers / controlled effects`, durable state in `core.db` (scheduler tables retained; job runner disabled).
 
-**文本回退：** `用户 → autozeagent CLI → 认证本地网关 → autozeagentd → 规划器 / 调度器 / 工具代理 / 技能目录 → 模型提供商 / 受控副作用`，持久化状态统一保存到 `core.db`。
+**文本回退：** `用户 → autozeagent CLI/TUI → 认证本地网关 → autozeagentd → chatsession（agent|plan）· 智能体运行器 · 工具代理 · 技能目录 → 模型提供商 / 受控副作用`，持久化状态在 `core.db`（调度表保留；Job runner 已停）。
 
 ### Main components / 主要组件
 
-- **`autozeagent` CLI:** submits tasks, inspects state, handles approvals, controls tasks and jobs, reads logs, and runs diagnostics.
-  - **`autozeagent` CLI：** 提交任务、查看状态、处理审批、控制任务与定时作业、读取日志并运行诊断。
-- **`autozeagentd` daemon:** owns the application lifecycle, local gateway, planner, agent runner, scheduler heartbeat, tool registration, and recovery workers.
-  - **`autozeagentd` 守护进程：** 负责应用生命周期、本地网关、规划器、智能体运行器、调度心跳、工具注册和恢复工作器。
-- **Local gateway:** uses an authenticated loopback endpoint on Windows and a Unix domain socket on Linux/macOS.
-  - **本地网关：** Windows 使用经过认证的回环端点，Linux/macOS 使用 Unix Domain Socket。
-- **Planner and agent:** turn a task objective into an approved plan and advance it through provider and tool steps.
-  - **规划器与智能体：** 将任务目标转化为经过审批的计划，并通过 Provider 与工具步骤持续推进。
-- **Tool Broker:** is the only model-requested path to filesystem, process, HTTP, Git, and other registered effects.
-  - **Tool Broker：** 是模型请求文件系统、进程、HTTP、Git 及其他已注册副作用的唯一通道。
-- **Scheduler:** stores recurring jobs in `core.db` and uses claim/lease, retry/backoff, idempotent task submission, and misfire policies.
-  - **调度器：** 将周期性作业保存在 `core.db`，并使用领取/租约、重试/退避、幂等任务提交和错过执行策略。
-- **`core.db`:** stores persistent tasks, plans, approvals, grants, runs, tool calls, provider records, jobs, events, skill snapshots, artifacts, and audit data.
-  - **`core.db`：** 保存持久化任务、计划、审批、授权、运行、工具调用、Provider 记录、作业、事件、技能快照、产物和审计数据。
+- **`autozeagent` CLI + TUI:** peers over `gatewayclient` (submit tasks, chat/plan modes, task control, jobs list, diagnostics, metrics). No-arg / `aze` opens the TUI. No interactive plan approval UX.
+  - **`autozeagent` CLI + TUI：** 经 `gatewayclient` 并列访问 Gateway（提交任务、chat/plan、任务控制、作业列表、诊断、指标）。无参 / `aze` 进入 TUI。无人批交互。
+- **`autozeagentd` daemon:** lifecycle, gateway, chatsession, agent runner, tools, recovery; scheduler tables only (runner off).
+  - **`autozeagentd` 守护进程：** 生命周期、网关、chatsession、智能体运行器、工具、恢复与 chat-native Job runner。
+- **Local gateway:** authenticated loopback (Windows) or Unix domain socket (Linux/macOS). Does not run tools, call providers, or issue grants.
+  - **本地网关：** Windows 认证回环 / Linux·macOS Unix Socket。不执行工具、不调 Provider、不发 Grant。
+- **Chat (agent = build):** multi-turn Session chat with workspace read+write grants (unless `chat.allow_write` ceiling is false).
+  - **Chat（agent = build）：** 多轮对话，工作区可读可写（除非 `chat.allow_write` 天花板为 false）。
+- **Chat (plan):** same loop, **read-only** workspace grants (analyze / discuss; no edits).
+  - **Chat（plan）：** 同一循环，工作区**只读**（分析/讨论；不可改文件）。
+- **Tool Broker:** only model-requested path to filesystem, process, HTTP, Git, and other registered effects.
+  - **Tool Broker：** 模型请求副作用的唯一通道。
+- **Scheduled jobs (ADR-042):** fixed-interval session chat submits (`agent` default / `plan`); TUI `/cron` primary, CLI secondary.
+  - **定时 Job（ADR-042）：** 固定间隔 session chat 提交（默认 agent / 可选 plan）；**TUI `/cron` 为主**，CLI 次要。
+- **`core.db`:** tasks, plans, approvals, grants, runs, tool/provider records, jobs, events, skill snapshots, artifacts, audit, context snapshots / session compactions (provider-view packing; ADR-041).
+  - **`core.db`：** 任务、计划、审批、授权、运行、工具/Provider 记录、作业、事件、技能快照、产物、审计、上下文窗压快照与会话摘要（provider 视图装配；ADR-041）。
 
 ### Execution flow / 执行流程
 
-1. The user submits a task objective through `autozeagent`.
-   用户通过 `autozeagent` 提交任务目标。
-2. The daemon persists the task and asks the configured provider to produce a structured plan.
-   守护进程持久化任务，并请求已配置的模型提供商生成结构化计划。
-3. The plan is evaluated against policy and pauses when approval is required.
-   计划经过策略评估，并在需要审批时暂停。
-4. An approved plan creates a bounded, recoverable run.
-   获批的计划会创建一个有预算限制且可恢复的运行。
-5. Every model-requested effect is routed through the Tool Broker and recorded before and after execution.
-   模型请求的每个副作用都通过 Tool Broker 路由，并在执行前后保存记录。
-6. If the daemon stops, durable provider and tool records are used to resume without repeating successful tool calls.
-   如果守护进程停止，系统会利用持久化的 Provider 和工具记录继续运行，避免重复成功的工具调用。
-7. Events, state changes, usage, and audit facts remain available in `core.db` for inspection and diagnostics.
-   事件、状态变化、用量和审计事实会保留在 `core.db` 中，供检查和诊断使用。
+**Agent (build) / agent：**
 
-More detailed decisions are documented under [`docs/architecture`](docs/architecture/) and in [`docs/optimization/current.md`](docs/optimization/current.md).
+1. Message via TUI or `POST /v1/tasks` with `execution_mode=agent`.
+2. `chatsession` starts a chat Run with **read+write** workspace grants.
+3. Tools only through the Tool Broker; stream + records persist.
 
-更详细的设计决策记录在 [`docs/architecture`](docs/architecture/) 和 [`docs/optimization/current.md`](docs/optimization/current.md) 中。
+**Plan / plan：**
+
+1. Same submit path with `execution_mode=plan`.
+2. Same `chatsession`, but grants are **read-only** (no write/patch/mkdir).
+3. Model may inspect and discuss; edits require switching to agent.
+
+**Both / 共通：** recovery uses durable provider/tool records; facts in `core.db`. Session history is packed for the provider (token budget, tool clear, optional default compaction); full transcript stays in DB. Window pressure: `GET /v1/tasks/{id}/context` (not the same as lifetime `…/usage`).
+
+**共通：** 恢复依赖持久 provider/tool 记录；事实在 `core.db`。会话历史对 provider 做 token 预算装配（旧 tool 清空、默认可摘要）；全文仍在库。窗压：`GET /v1/tasks/{id}/context`（不同于寿命累计 `…/usage`）。
+
+Design details: [`docs/architecture/`](docs/architecture/) (start at [README](docs/architecture/README.md)), especially [ADR-038](docs/architecture/038-session-chat-boundary.md); living backlog: [`docs/optimization/current.md`](docs/optimization/current.md).
+
+设计细节见 [`docs/architecture/`](docs/architecture/)（入口 [README](docs/architecture/README.md)），尤其 [ADR-038](docs/architecture/038-session-chat-boundary.md)；活 backlog：[`docs/optimization/current.md`](docs/optimization/current.md)。
 
 ## Requirements / 环境要求
 
@@ -415,13 +418,28 @@ Use environment or file references instead of storing a literal API key.
         "deepseek-chat": {
           "name": "DeepSeek Chat",
           "temperature": 0.2,
-          "maxTokens": 4096
+          "maxTokens": 4096,
+          "contextWindow": 65536
         }
       }
     }
+  },
+  "chat": {
+    "roots": [],
+    "allow_write": true,
+    "compaction": { "enabled": true },
+    "max_iterations": 8
   }
 }
 ```
+
+Optional **`chat`**: `roots` (absolute paths; empty = daemon cwd); `allow_write` (agent write ceiling, omit = true); `tools.git` / `tools.process` (agent-only high-risk grants, default false); `compaction.enabled` (default true); `max_iterations` (1–64, default 8). **Plan mode is always read-only.** HTTP is never pre-authorized by chat.
+
+可选 **`chat`**：`roots`（空 = daemon cwd）；`allow_write`（agent 写天花板，省略 = true）；`tools.git` / `tools.process`（仅 agent 高风险预授权，默认 false）；`compaction.enabled`（默认 true）；`max_iterations`（1–64，默认 8）。**plan 永远只读。** HTTP 不由 chat 预授权。
+
+Model **`contextWindow`** (optional) is the context length for packing and UI pressure; **`maxTokens`** is the output cap only. See `docs/provider-protocols.md` and ADR-041.
+
+模型 **`contextWindow`**（可选）为上下文长度，用于装配与窗压；**`maxTokens`** 仅为输出上限。见 `docs/provider-protocols.md` 与 ADR-041。
 
 Set the referenced environment variable before starting the daemon.
 
@@ -435,9 +453,9 @@ $env:DEEPSEEK_API_KEY = '<your-api-key>'
 export DEEPSEEK_API_KEY='<your-api-key>'
 ```
 
-Validate the effective configuration without printing the resolved secret.
+Validate path layout plus provider config load/resolve (and optional `chat` block). Does not print secrets. Fails if the config file is missing, JSON is invalid, or `{env:…}` / `{file:…}` cannot be resolved.
 
-验证最终生效的配置，同时不会打印解析后的密钥。
+校验路径布局，并加载/解析 provider 配置（含可选 `chat` 段）。不打印密钥。配置缺失、JSON 非法，或 `{env:…}` / `{file:…}` 无法解析时失败。
 
 ```powershell
 autozeagent config validate --mode user
@@ -453,11 +471,15 @@ Provider-specific options are documented in [`configs/autozeagent.json.example`]
 
 ## Running AutoZeAgent / 运行方案
 
-Open the interactive TUI (no arguments; same as `opencode` / `crush`).  
-`aze` / `autozeagent` and `autozeagent run` auto-start the unique local daemon if needed; it keeps running until `autozeagent daemon stop`. You can still start `autozeagentd` manually if you prefer.
+Open the interactive TUI (no arguments; same idea as `opencode` / `crush`).  
+`aze` / `autozeagent` and `autozeagent run` auto-start the unique local daemon if needed; it keeps running until `autozeagent daemon stop`. You can still start `autozeagentd` manually.
 
-打开交互式 TUI（无参数，与 `opencode` / `crush` 相同）。  
-`aze` / `autozeagent` 与 `autozeagent run` 会在需要时自动启动唯一本地守护进程；进程常驻，直到 `autozeagent daemon stop`。也可继续手动启动 `autozeagentd`。
+打开交互式 TUI（无参数）。  
+`aze` / `autozeagent` 与 `autozeagent run` 会在需要时自动启动唯一本地守护进程；常驻直到 `autozeagent daemon stop`。也可手动启动 `autozeagentd`。
+
+**Note:** `health`, `task`, and most subcommands talk to an **already running** daemon; they do not ensure one. Only TUI entry and `run` call `daemonctl` ensure.
+
+**说明：** `health`、`task` 等多数子命令要求 daemon **已在运行**；只有进入 TUI 与 `run` 会 ensure daemon。
 
 ```powershell
 aze
@@ -473,9 +495,33 @@ autozeagent daemon status
 autozeagent daemon stop
 ```
 
-Use the CLI from another terminal to check health and submit a task.
+### TUI modes and slash commands / TUI 模式与斜杠命令
 
-在另一个终端中使用 CLI 检查健康状态并提交任务。
+| Input | Behavior |
+| --- | --- |
+| **Tab** | Toggle **agent** (build · read+write) ↔ **plan** (read-only analysis) |
+| Plain text | Submit on the current mode / focused session |
+| `/help` | Full slash list |
+| `/new [msg]` | Fresh session |
+| `/sessions` or `/tasks` | Session/task list overlay |
+| `/model` | Model picker; `/model provider/model` switches immediately |
+| `/cron` | List jobs; `/cron 15m <objective>` create on focused session (Tab mode) |
+| `/theme` | Day ↔ night |
+| `/quit` (`/q`, `/exit`) | **Only** way to exit (Ctrl+C clears input) |
+
+| 输入 | 行为 |
+| --- | --- |
+| **Tab** | 切换 **agent**（build 可写）↔ **plan**（只读分析） |
+| 普通文本 | 按当前模式 / 聚焦会话提交 |
+| `/help` | 完整斜杠列表 |
+| `/new [msg]` | 新会话 |
+| `/sessions` 或 `/tasks` | 会话/任务列表 |
+| `/model` | 模型列表；`/model provider/model` 立即切换 |
+| `/cron` | 列表；`/cron 15m <objective>` 在当前会话创建（Tab 模式） |
+| `/theme` | 日/夜主题 |
+| `/quit`（`/q` `/exit`） | **唯一**退出（Ctrl+C 只清空输入） |
+
+### CLI from another terminal / 另一终端 CLI
 
 ```powershell
 autozeagent health --mode user
@@ -507,15 +553,18 @@ autozeagent logs --tail 200 --mode user
 autozeagent db check --mode user
 ```
 
-Create and inspect a recurring job stored in `core.db`.
+Prefer TUI `/cron` for create/list. CLI is a secondary scripting entry:
 
-创建并检查保存在 `core.db` 中的周期性作业。
+优先用 TUI `/cron` 创建/列表。CLI 为次要脚本入口：
 
 ```bash
+# In TUI (focused session):  /cron 1h Check the repository status.
+
 autozeagent job create \
   --session SESSION_ID \
   --name workspace-status \
   --every 1h \
+  --execution-mode agent \
   "Check the repository status."
 
 autozeagent job list --mode user
@@ -588,7 +637,7 @@ Real-provider failure testing and long-running Linux systemd fault injection rem
   - **将本地状态视为敏感数据。** 数据库、日志、任务产物、运行时端点和 Provider 记录可能包含隐私信息。
 - **Use least privilege.** Restrict filesystem roots, tool capabilities, service accounts, and environment access to the minimum required by the task.
   - **遵循最小权限原则。** 将文件系统根目录、工具能力、服务账户和环境访问限制在任务真正需要的最小范围内。
-- **Review approvals carefully.** Approval and capability grants are security boundaries, not confirmation dialogs to accept automatically.
+- **Treat grants as security boundaries.** Capability grants and the Tool Broker are not optional confirmations; chat modes only pre-issue workspace grants by design.
   - **认真检查审批内容。** 审批与能力授权是安全边界，不应被当作可以自动确认的普通弹窗。
 - **Keep autonomy bounded.** Configure realistic duration, token, cost, provider-turn, and tool-call budgets for the workload.
   - **保持自主运行有界。** 根据工作负载配置合理的持续时间、Token、成本、Provider 回合和工具调用预算。

@@ -17,6 +17,7 @@ import (
 type fakeGateway struct {
 	tasks  []gatewayclient.Task
 	jobs   []schedulerapi.Job
+	skills []gatewayclient.Skill
 	health gatewayclient.Health
 	model  gatewayclient.ModelConfig
 }
@@ -31,10 +32,6 @@ func (f *fakeGateway) StreamModelEvents(context.Context, gatewayclient.SessionID
 
 func (f *fakeGateway) ListSessions(context.Context, int) ([]gatewayclient.Session, error) {
 	return nil, nil
-}
-
-func (f *fakeGateway) GetSession(context.Context, gatewayclient.SessionID) (gatewayclient.Session, error) {
-	return gatewayclient.Session{}, errors.New("not found")
 }
 
 func (f *fakeGateway) SessionMessages(context.Context, gatewayclient.SessionID, int) ([]gatewayclient.TranscriptMessage, error) {
@@ -58,6 +55,14 @@ func (f *fakeGateway) SetModelConfig(_ context.Context, model string) (gatewaycl
 	return f.model, nil
 }
 
+func (f *fakeGateway) MCPStatus(context.Context) (gatewayclient.MCPStatus, error) {
+	return gatewayclient.MCPStatus{}, nil
+}
+
+func (f *fakeGateway) ListSkills(context.Context) ([]gatewayclient.Skill, error) {
+	return f.skills, nil
+}
+
 func (f *fakeGateway) ListTasks(context.Context, int) ([]gatewayclient.Task, error) {
 	return f.tasks, nil
 }
@@ -73,6 +78,10 @@ func (f *fakeGateway) GetTask(_ context.Context, id gatewayclient.TaskID) (gatew
 
 func (f *fakeGateway) TaskUsage(_ context.Context, id gatewayclient.TaskID) (gatewayclient.TaskUsage, error) {
 	return gatewayclient.TaskUsage{TaskID: id}, nil
+}
+
+func (f *fakeGateway) TaskContext(_ context.Context, id gatewayclient.TaskID) (gatewayclient.TaskContext, error) {
+	return gatewayclient.TaskContext{TaskID: id, Source: "none", Ratio: 1}, nil
 }
 
 func (f *fakeGateway) SubmitTask(context.Context, gatewayclient.TaskSubmissionRequest) (gatewayclient.TaskSubmissionResponse, error) {
@@ -95,20 +104,19 @@ func (f *fakeGateway) ListRuns(context.Context, gatewayclient.TaskID, int) ([]ga
 	return nil, nil
 }
 
-func (f *fakeGateway) StartRuns(context.Context, gatewayclient.RunStartRequest) (gatewayclient.StartResult, error) {
-	return gatewayclient.StartResult{}, errors.New("not implemented")
-}
-
-func (f *fakeGateway) ApprovalPrompt(context.Context, gatewayclient.PlanID, gatewayclient.StepID) (gatewayclient.Prompt, error) {
-	return gatewayclient.Prompt{}, errors.New("not found")
-}
-
-func (f *fakeGateway) DecideApproval(context.Context, gatewayclient.Prompt, gatewayclient.StepID, gatewayclient.Action, string, string) (gatewayclient.Approval, error) {
-	return gatewayclient.Approval{}, errors.New("not implemented")
-}
-
 func (f *fakeGateway) ListJobs(context.Context, bool) ([]schedulerapi.Job, error) {
 	return f.jobs, nil
+}
+
+func (f *fakeGateway) CreateJob(_ context.Context, request schedulerapi.CreateRequest) (schedulerapi.Job, error) {
+	job := schedulerapi.Job{
+		ID: "job-created", Name: request.Name, SessionID: request.SessionID,
+		TaskTitle: request.TaskTitle, TaskObjective: request.TaskObjective,
+		ExecutionMode: request.ExecutionMode, SkillIDs: request.SkillIDs,
+		IntervalSeconds: request.IntervalSeconds, Status: schedulerapi.StatusActive,
+	}
+	f.jobs = append(f.jobs, job)
+	return job, nil
 }
 
 func TestRefreshCmdUsesGateway(t *testing.T) {
@@ -205,7 +213,7 @@ func TestModelListAndCron(t *testing.T) {
 		}
 	}
 
-	msg := mm.cronCmd()()
+	msg := mm.cronCmd("")()
 	done := msg.(commandDoneMsg)
 	if done.err != nil || done.openList != listJobs || len(done.jobs) != 1 {
 		t.Fatalf("cronCmd = %#v", done)
@@ -232,12 +240,53 @@ func TestModelListAndCron(t *testing.T) {
 		}
 	}
 
+	// Skills multi-select picker.
+	gw.skills = []gatewayclient.Skill{
+		{ID: "git", Name: "Git", Description: "git helpers", Source: "user"},
+		{ID: "go", Name: "Go", Description: "go helpers", Source: "project"},
+	}
+	skillMsg := mm.skillsCmd()()
+	skillDone := skillMsg.(commandDoneMsg)
+	if skillDone.err != nil || skillDone.openList != listSkills || len(skillDone.skills) != 2 {
+		t.Fatalf("skillsCmd = %#v", skillDone)
+	}
+	updated, _ = mm.Update(skillDone)
+	mm = updated.(model)
+	if mm.list != listSkills || mm.listLen() != 2 {
+		t.Fatalf("listSkills: kind=%v len=%d", mm.list, mm.listLen())
+	}
+	mm.selectedIdx = 0
+	_ = mm.listEnter()
+	if len(mm.selectedSkillIDs) != 1 || mm.selectedSkillIDs[0] != "git" {
+		t.Fatalf("after toggle select = %#v", mm.selectedSkillIDs)
+	}
+	_ = mm.listEnter()
+	if len(mm.selectedSkillIDs) != 0 {
+		t.Fatalf("after toggle off = %#v", mm.selectedSkillIDs)
+	}
+	mm.selectedIdx = 1
+	_ = mm.listEnter()
+	if len(mm.selectedSkillIDs) != 1 || mm.selectedSkillIDs[0] != "go" {
+		t.Fatalf("select go = %#v", mm.selectedSkillIDs)
+	}
+	view = renderPickerOverlay(&mm, 80)
+	for _, want := range []string{"Skills", "git", "go"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("skills list missing %q:\n%s", want, view)
+		}
+	}
+
 	strip := mm.renderContextStrip()
 	if !strings.Contains(strip, "deepseek/a") || !strings.Contains(strip, "ctx") {
 		t.Fatalf("strip=%q", strip)
 	}
 	panel := mm.renderContextPanel(20)
-	if !strings.Contains(panel, "Metrics") || !strings.Contains(panel, "tokens") || !strings.Contains(panel, "MCP") {
-		t.Fatalf("panel:\n%s", panel)
+	for _, want := range []string{"Metrics", "tokens", "budget", "data", "/data/aze"} {
+		if !strings.Contains(panel, want) {
+			t.Fatalf("panel missing %q:\n%s", want, panel)
+		}
+	}
+	if strings.Contains(panel, "MCP") || strings.Contains(panel, "cache") {
+		t.Fatalf("panel should hide cache/MCP without data:\n%s", panel)
 	}
 }

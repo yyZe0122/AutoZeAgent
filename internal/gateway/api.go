@@ -19,13 +19,12 @@ import (
 	"autozeagent.local/autozeagent/internal/app"
 	"autozeagent.local/autozeagent/internal/applicationerror"
 	"autozeagent.local/autozeagent/internal/approval"
-	"autozeagent.local/autozeagent/internal/approvalsubmission"
 	"autozeagent.local/autozeagent/internal/corequery"
 	"autozeagent.local/autozeagent/internal/events"
 	"autozeagent.local/autozeagent/internal/kernel"
 	"autozeagent.local/autozeagent/internal/modelstream"
-	"autozeagent.local/autozeagent/internal/runexecution"
 	"autozeagent.local/autozeagent/internal/skillcatalog"
+	"autozeagent.local/autozeagent/internal/taskcontrol"
 	"autozeagent.local/autozeagent/internal/tasksubmission"
 	"autozeagent.local/autozeagent/pkg/schedulerapi"
 )
@@ -44,6 +43,8 @@ type QueryService interface {
 	ListTasks(context.Context, corequery.TaskListOptions) ([]corequery.Task, error)
 	GetTask(context.Context, kernel.TaskID) (corequery.Task, error)
 	TaskUsage(context.Context, kernel.TaskID) (corequery.TaskUsage, error)
+	TaskContext(context.Context, kernel.TaskID) (corequery.TaskContext, error)
+	SessionContext(context.Context, kernel.SessionID) (corequery.TaskContext, error)
 	ListPlans(context.Context, corequery.PlanListOptions) ([]corequery.Plan, error)
 	GetPlan(context.Context, kernel.PlanID) (corequery.Plan, error)
 	ListApprovals(context.Context, corequery.ApprovalListOptions) ([]corequery.Approval, error)
@@ -55,17 +56,13 @@ type TaskSubmitter interface {
 	Submit(context.Context, tasksubmission.Request) (tasksubmission.Result, error)
 }
 
-type ApprovalDecider interface {
-	Prompt(context.Context, approvalsubmission.PromptRequest) (approvalsubmission.Prompt, error)
-	Act(context.Context, approvalsubmission.ActionRequest) (approval.Approval, error)
-}
-
-type RunStarter interface {
-	Start(context.Context, runexecution.StartRequest) (runexecution.StartResult, error)
-}
+// ApprovalDecider and RunStarter are optional legacy interfaces; interactive
+// plan approval and plan-step Start are removed (HTTP 410).
+type ApprovalDecider interface{}
+type RunStarter interface{}
 
 type TaskController interface {
-	ControlTask(context.Context, runexecution.TaskActionRequest) (kernel.Task, error)
+	ControlTask(context.Context, taskcontrol.TaskActionRequest) (kernel.Task, error)
 }
 
 type JobService interface {
@@ -80,11 +77,27 @@ type JobService interface {
 type ModelConfig struct {
 	Model  string   `json:"model"`
 	Models []string `json:"models"`
+	// ContextWindow is the selected model's context length in tokens; 0 = unknown.
+	ContextWindow int64 `json:"context_window,omitempty"`
 }
 
 // ModelSwitcher applies a provider/model selection at runtime.
 type ModelSwitcher interface {
 	SelectModel(ctx context.Context, ref string) (ModelConfig, error)
+}
+
+// MCPStatus is a secret-free MCP snapshot for GET /v1/config/mcp.
+type MCPStatus struct {
+	Enabled bool `json:"enabled"`
+	Total   int  `json:"total"`
+	OK      int  `json:"ok"`
+	Error   int  `json:"error"`
+	Tools   int  `json:"tools"`
+}
+
+// MCPStatusProvider supplies live MCP status (optional).
+type MCPStatusProvider interface {
+	MCPStatus() MCPStatus
 }
 
 type APIConfig struct {
@@ -101,6 +114,8 @@ type APIConfig struct {
 	ModelSwitcher     ModelSwitcher
 	// ModelStream is optional; when set, exposes GET /v1/model-stream.
 	ModelStream *modelstream.Hub
+	// MCP is optional; when set, exposes GET /v1/config/mcp.
+	MCP MCPStatusProvider
 }
 
 type API struct {
@@ -117,11 +132,12 @@ type API struct {
 	modelConfig       ModelConfig
 	modelSwitcher     ModelSwitcher
 	modelStream       *modelstream.Hub
+	mcp               MCPStatusProvider
 }
 
 func NewAPI(config APIConfig) (*API, error) {
-	if config.Queries == nil || config.TaskSubmissions == nil || config.ApprovalDecisions == nil || config.Core == nil || config.Events == nil {
-		return nil, errors.New("gateway queries, task submission service, approval decision service, core, and event store are required")
+	if config.Queries == nil || config.TaskSubmissions == nil || config.Core == nil || config.Events == nil {
+		return nil, errors.New("gateway queries, task submission service, core, and event store are required")
 	}
 	if config.ModelConfig.Models == nil {
 		config.ModelConfig.Models = []string{}
@@ -130,6 +146,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		queries: config.Queries, taskSubmissions: config.TaskSubmissions,
 		approvalDecisions: config.ApprovalDecisions, runStarts: config.RunStarts, taskControls: config.TaskControls, jobs: config.Jobs, core: config.Core, events: config.Events, skills: config.Skills,
 		modelConfig: config.ModelConfig, modelSwitcher: config.ModelSwitcher, modelStream: config.ModelStream,
+		mcp: config.MCP,
 	}, nil
 }
 
@@ -140,12 +157,16 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.handleHealth(w, r)
 	case r.URL.Path == "/v1/config/model":
 		a.handleConfigModel(w, r)
+	case r.URL.Path == "/v1/config/mcp":
+		a.handleConfigMCP(w, r)
 	case r.URL.Path == "/v1/skills":
 		a.handleSkills(w, r)
 	case r.URL.Path == "/v1/sessions":
 		a.handleSessions(w, r)
 	case strings.HasSuffix(r.URL.Path, "/messages") && strings.HasPrefix(r.URL.Path, "/v1/sessions/"):
 		a.handleSessionMessages(w, r)
+	case strings.HasSuffix(r.URL.Path, "/context") && strings.HasPrefix(r.URL.Path, "/v1/sessions/"):
+		a.handleSessionContext(w, r)
 	case strings.HasPrefix(r.URL.Path, "/v1/sessions/"):
 		a.handleSession(w, r)
 	case r.URL.Path == "/v1/tasks":
@@ -154,6 +175,8 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.handleTaskAction(w, r)
 	case strings.HasSuffix(r.URL.Path, "/usage") && strings.HasPrefix(r.URL.Path, "/v1/tasks/"):
 		a.handleTaskUsage(w, r)
+	case strings.HasSuffix(r.URL.Path, "/context") && strings.HasPrefix(r.URL.Path, "/v1/tasks/"):
+		a.handleTaskContext(w, r)
 	case strings.HasSuffix(r.URL.Path, "/messages") && strings.HasPrefix(r.URL.Path, "/v1/tasks/"):
 		a.handleTaskMessages(w, r)
 	case strings.HasPrefix(r.URL.Path, "/v1/tasks/"):
@@ -203,6 +226,17 @@ func (a *API) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, healthResponse{OK: true, Core: a.core.Status()})
 }
 
+func (a *API) handleConfigMCP(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	if a.mcp == nil {
+		writeJSON(w, http.StatusOK, MCPStatus{})
+		return
+	}
+	writeJSON(w, http.StatusOK, a.mcp.MCPStatus())
+}
+
 func (a *API) handleConfigModel(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -213,7 +247,9 @@ func (a *API) handleConfigModel(w http.ResponseWriter, r *http.Request) {
 		if models == nil {
 			models = []string{}
 		}
-		writeJSON(w, http.StatusOK, ModelConfig{Model: config.Model, Models: models})
+		writeJSON(w, http.StatusOK, ModelConfig{
+			Model: config.Model, Models: models, ContextWindow: config.ContextWindow,
+		})
 	case http.MethodPut:
 		if a.modelSwitcher == nil {
 			writeError(w, http.StatusServiceUnavailable, "model_switch_unavailable", "model switching is not configured")
@@ -482,6 +518,40 @@ func (a *API) handleTaskUsage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, usage)
 }
 
+func (a *API) handleTaskContext(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	basePath := strings.TrimSuffix(r.URL.Path, "/context")
+	id, ok := pathID(w, basePath, "/v1/tasks/")
+	if !ok {
+		return
+	}
+	item, err := a.queries.TaskContext(r.Context(), kernel.TaskID(id))
+	if err != nil {
+		writeInternal(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (a *API) handleSessionContext(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	basePath := strings.TrimSuffix(r.URL.Path, "/context")
+	id, ok := pathID(w, basePath, "/v1/sessions/")
+	if !ok {
+		return
+	}
+	item, err := a.queries.SessionContext(r.Context(), kernel.SessionID(id))
+	if err != nil {
+		writeInternal(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
 func (a *API) handleTaskAction(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
@@ -495,7 +565,7 @@ func (a *API) handleTaskAction(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var request runexecution.TaskActionRequest
+	var request taskcontrol.TaskActionRequest
 	if err := decodeJSON(w, r, &request); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
@@ -542,7 +612,16 @@ func (a *API) handleJobs(w http.ResponseWriter, r *http.Request) {
 		}
 		job, err := a.jobs.Create(r.Context(), request)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			msg := err.Error()
+			switch {
+			case strings.Contains(msg, "required"), strings.Contains(msg, "invalid"),
+				strings.Contains(msg, "must be"), strings.Contains(msg, "RFC3339"):
+				writeError(w, http.StatusBadRequest, "invalid_request", msg)
+			case strings.Contains(msg, "session not found"):
+				writeError(w, http.StatusNotFound, "not_found", msg)
+			default:
+				writeInternal(w, err)
+			}
 			return
 		}
 		writeJSON(w, http.StatusCreated, job)
@@ -715,32 +794,24 @@ func approvalViewFromDomain(value approval.Approval) approvalView {
 }
 
 type decisionRequest struct {
-	ApprovalID   string                    `json:"approval_id"`
-	PlanID       kernel.PlanID             `json:"plan_id"`
-	PlanRevision uint64                    `json:"plan_revision"`
-	PlanHash     string                    `json:"plan_hash"`
-	StepID       kernel.StepID             `json:"step_id"`
-	Action       approvalsubmission.Action `json:"action"`
-	DecidedBy    string                    `json:"decided_by"`
-	Reason       string                    `json:"reason"`
-	ExpiresAt    *time.Time                `json:"expires_at,omitempty"`
+	ApprovalID   string        `json:"approval_id"`
+	PlanID       kernel.PlanID `json:"plan_id"`
+	PlanRevision uint64        `json:"plan_revision"`
+	PlanHash     string        `json:"plan_hash"`
+	StepID       kernel.StepID `json:"step_id"`
+	Action       string        `json:"action"`
+	DecidedBy    string        `json:"decided_by"`
+	Reason       string        `json:"reason"`
+	ExpiresAt    *time.Time    `json:"expires_at,omitempty"`
 }
 
 func (a *API) handleApprovalPrompt(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	prompt, err := a.approvalDecisions.Prompt(r.Context(), approvalsubmission.PromptRequest{
-		PlanID: kernel.PlanID(strings.TrimSpace(r.URL.Query().Get("plan_id"))),
-		StepID: kernel.StepID(strings.TrimSpace(r.URL.Query().Get("step_id"))),
-	})
-	if err != nil {
-		if !writeApplicationError(w, err) {
-			writeInternal(w, err)
-		}
-		return
-	}
-	writeJSON(w, http.StatusOK, prompt)
+	// Interactive plan approval removed: plan mode is read-only chat (OpenCode-style).
+	writeError(w, http.StatusGone, "gone",
+		"interactive plan approval was removed; use Tab plan for read-only chat or autozeagent run --execution-mode plan")
 }
 
 func (a *API) handleApprovals(w http.ResponseWriter, r *http.Request) {
@@ -770,30 +841,9 @@ func (a *API) listApprovals(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) decideApproval(w http.ResponseWriter, r *http.Request) {
-	var request decisionRequest
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "invalid approval request")
-		return
-	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		writeError(w, http.StatusBadRequest, "invalid_request", "approval request must contain one JSON value")
-		return
-	}
-	decision, err := a.approvalDecisions.Act(r.Context(), approvalsubmission.ActionRequest{
-		ApprovalID: approval.ApprovalID(request.ApprovalID),
-		PlanID:     request.PlanID, Revision: request.PlanRevision, PlanHash: request.PlanHash,
-		StepID: request.StepID, Action: request.Action,
-		DecidedBy: request.DecidedBy, Reason: request.Reason, ExpiresAt: request.ExpiresAt,
-	})
-	if err != nil {
-		if !writeApplicationError(w, err) {
-			writeInternal(w, err)
-		}
-		return
-	}
-	writeJSON(w, http.StatusCreated, approvalViewFromDomain(decision))
+	// Interactive plan approval removed: plan mode is read-only chat (OpenCode-style).
+	writeError(w, http.StatusGone, "gone",
+		"interactive plan approval was removed; use Tab plan for read-only chat or autozeagent run --execution-mode plan")
 }
 
 type runStartRequest struct {
@@ -830,31 +880,8 @@ func (a *API) listRuns(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) startRuns(w http.ResponseWriter, r *http.Request) {
-	if a.runStarts == nil {
-		writeApplicationError(w, applicationerror.Wrap(applicationerror.CodeUnavailable, true, errors.New("agent provider is not configured")))
-		return
-	}
-	var request runStartRequest
-	if err := decodeJSON(w, r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
-		return
-	}
-	traceID, err := randomID("trace-")
-	if err != nil {
-		writeInternal(w, err)
-		return
-	}
-	result, err := a.runStarts.Start(r.Context(), runexecution.StartRequest{
-		TaskID: request.TaskID, PlanID: request.PlanID, PlanRevision: request.PlanRevision,
-		PlanHash: request.PlanHash, Actor: "local-user", TraceID: traceID,
-	})
-	if err != nil {
-		if !writeApplicationError(w, err) {
-			writeInternal(w, err)
-		}
-		return
-	}
-	writeJSON(w, http.StatusAccepted, result)
+	// Plan-step Start removed with Planner; chat starts runs via task submission.
+	writeError(w, http.StatusGone, "gone", "plan-step run start was removed; submit a chat task instead")
 }
 
 func (a *API) handleRun(w http.ResponseWriter, r *http.Request) {

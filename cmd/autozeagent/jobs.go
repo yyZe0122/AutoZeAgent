@@ -18,6 +18,8 @@ type jobCreateValues struct {
 	sessionID      string
 	name           string
 	title          string
+	executionMode  string
+	skills         multiString
 	every          time.Duration
 	start          string
 	timeout        time.Duration
@@ -26,6 +28,18 @@ type jobCreateValues struct {
 	misfirePolicy  string
 	idempotencyKey string
 	objective      string
+}
+
+type multiString []string
+
+func (m *multiString) String() string { return strings.Join(*m, ",") }
+func (m *multiString) Set(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	*m = append(*m, value)
+	return nil
 }
 
 func runJobCreate(args []string) error {
@@ -54,6 +68,7 @@ func runJobCreate(args []string) error {
 	defer cancel()
 	job, err := client.CreateJob(ctx, schedulerapi.CreateRequest{
 		Name: values.name, SessionID: values.sessionID, TaskTitle: values.title, TaskObjective: values.objective,
+		ExecutionMode: values.executionMode, SkillIDs: []string(values.skills),
 		IntervalSeconds: int64(values.every / time.Second), NextRunAt: values.start,
 		TimeoutSeconds: int64(values.timeout / time.Second), MaxRetries: values.maxRetries,
 		BackoffSeconds: int64(values.backoff / time.Second), MisfirePolicy: values.misfirePolicy,
@@ -73,6 +88,8 @@ func parseJobCreateArgs(args []string) (jobCreateValues, error) {
 	flags.StringVar(&values.sessionID, "session", "", "existing session ID")
 	flags.StringVar(&values.name, "name", "", "job name")
 	flags.StringVar(&values.title, "title", "", "task title")
+	flags.StringVar(&values.executionMode, "execution-mode", schedulerapi.ExecutionModeAgent, "chat mode: agent (default) or plan")
+	flags.Var(&values.skills, "skill", "skill id (repeatable); instruction snapshot only")
 	flags.DurationVar(&values.every, "every", 0, "heartbeat interval, for example 15m or 1h")
 	flags.StringVar(&values.start, "start", "", "first run time in RFC3339; default is now")
 	flags.DurationVar(&values.timeout, "timeout", 30*time.Minute, "scheduled task timeout")
@@ -93,6 +110,7 @@ func parseJobCreateArgs(args []string) (jobCreateValues, error) {
 	values.start = strings.TrimSpace(values.start)
 	values.idempotencyKey = strings.TrimSpace(values.idempotencyKey)
 	values.misfirePolicy = strings.ToLower(strings.TrimSpace(values.misfirePolicy))
+	values.executionMode = strings.ToLower(strings.TrimSpace(values.executionMode))
 	if values.sessionID == "" || values.name == "" || values.objective == "" || values.every < time.Second || values.timeout < time.Second || values.maxRetries < 0 || values.backoff < 0 {
 		return jobCreateValues{}, fmt.Errorf("session, name, objective, positive --every/--timeout, and non-negative retry settings are required")
 	}
@@ -107,6 +125,11 @@ func parseJobCreateArgs(args []string) (jobCreateValues, error) {
 	case schedulerapi.MisfireRunOnce, schedulerapi.MisfireSkip, schedulerapi.MisfireCatchUp:
 	default:
 		return jobCreateValues{}, fmt.Errorf("invalid --misfire %q", values.misfirePolicy)
+	}
+	switch values.executionMode {
+	case schedulerapi.ExecutionModeAgent, schedulerapi.ExecutionModePlan:
+	default:
+		return jobCreateValues{}, fmt.Errorf("invalid --execution-mode %q", values.executionMode)
 	}
 	return values, nil
 }

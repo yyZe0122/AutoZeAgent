@@ -1,6 +1,7 @@
 # ADR-013：Provider 与 Planner 强制边界
 
-- 状态：Accepted
+- 状态：**Superseded（交互路径）** — 2026-07-30：交互侧已删除 Planner；Provider 仅服务 Agent Runner / chat。见 ADR-038。历史「Planner 只提案」边界对已删代码仍作反回归参考。
+- 原状态：Accepted
 - 日期：2026-07-13
 
 ## 背景
@@ -28,9 +29,9 @@ Provider Router 按数字优先级从小到大尝试 Provider。只有显式标�
 
 OpenAI-compatible Provider 配置只保存 `APIKeyRef` 和 `SecretResolver`，每次请求时临时解析密钥。Provider 结构体不长期保存解析后的明文，也不把密钥或服务端错误正文写入错误消息。后续可以替换为环境变量、文件权限隔离的 Secret Store 或系统密钥环，而不修改 Provider 协议。
 
-### Planner 只产出提案
+### Planner 只产出提案（历史包；已删除）
 
-`internal/planner` 只能调用 Provider 并返回 `approval.PlanDocument`。它不导入 Tool Broker 内部执行器，不创建 Capability Grant，也不执行模型返回的 Tool Call。
+~~`internal/planner`~~ 已从生产路径删除（ADR-038）。历史规则仍成立：任何曾存在的 Planner **只能**调用 Provider 并返回 `approval.PlanDocument`，不得导入 Tool Broker 内部执行器、不创建 Capability Grant、不执行模型返回的 Tool Call。当前 chat 路径由 `chatsession` 构造 PlanDocument 并发放 workspace grant。
 
 默认 Planner Capability Catalog 只有：
 

@@ -1,5 +1,5 @@
-// Package schedulerapi defines the stable contract for the optional Scheduler module.
-// Scheduler emits task requests; it cannot execute tools or create Core tasks directly.
+// Package schedulerapi defines the stable contract for the in-process Scheduler.
+// Scheduler emits chat task requests; it cannot execute tools or create Core tasks directly.
 package schedulerapi
 
 const (
@@ -30,49 +30,60 @@ const (
 	MisfireRunOnce = "run_once"
 )
 
+const (
+	ExecutionModeAgent = "agent"
+	ExecutionModePlan  = "plan"
+)
+
 type Job struct {
-	ID              string `json:"id"`
-	Name            string `json:"name"`
-	SessionID       string `json:"session_id"`
-	TaskTitle       string `json:"task_title"`
-	TaskObjective   string `json:"task_objective"`
-	IntervalSeconds int64  `json:"interval_seconds"`
-	NextRunAt       string `json:"next_run_at"`
-	TimeoutSeconds  int64  `json:"timeout_seconds"`
-	MaxRetries      int    `json:"max_retries"`
-	BackoffSeconds  int64  `json:"backoff_seconds"`
-	MisfirePolicy   string `json:"misfire_policy"`
-	IdempotencyKey  string `json:"idempotency_key"`
-	Status          string `json:"status"`
-	CreatedAt       string `json:"created_at"`
-	UpdatedAt       string `json:"updated_at"`
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	SessionID       string   `json:"session_id"`
+	TaskTitle       string   `json:"task_title"`
+	TaskObjective   string   `json:"task_objective"`
+	ExecutionMode   string   `json:"execution_mode"`
+	SkillIDs        []string `json:"skill_ids,omitempty"`
+	IntervalSeconds int64    `json:"interval_seconds"`
+	NextRunAt       string   `json:"next_run_at"`
+	TimeoutSeconds  int64    `json:"timeout_seconds"`
+	MaxRetries      int      `json:"max_retries"`
+	BackoffSeconds  int64    `json:"backoff_seconds"`
+	MisfirePolicy   string   `json:"misfire_policy"`
+	IdempotencyKey  string   `json:"idempotency_key"`
+	Status          string   `json:"status"`
+	CreatedAt       string   `json:"created_at"`
+	UpdatedAt       string   `json:"updated_at"`
 }
 
+// TaskRequest is a claimed due job fire handed to scheduledtasks for chat submit.
 type TaskRequest struct {
-	JobID          string `json:"job_id"`
-	RunID          string `json:"run_id"`
-	LeaseID        string `json:"lease_id"`
-	SessionID      string `json:"session_id"`
-	Title          string `json:"title"`
-	Objective      string `json:"objective"`
-	ScheduledAt    string `json:"scheduled_at"`
-	TimeoutSeconds int64  `json:"timeout_seconds"`
-	IdempotencyKey string `json:"idempotency_key"`
-	RequiresPlan   bool   `json:"requires_plan"`
+	JobID          string   `json:"job_id"`
+	RunID          string   `json:"run_id"`
+	LeaseID        string   `json:"lease_id"`
+	SessionID      string   `json:"session_id"`
+	Title          string   `json:"title"`
+	Objective      string   `json:"objective"`
+	ExecutionMode  string   `json:"execution_mode"`
+	SkillIDs       []string `json:"skill_ids,omitempty"`
+	ScheduledAt    string   `json:"scheduled_at"`
+	TimeoutSeconds int64    `json:"timeout_seconds"`
+	IdempotencyKey string   `json:"idempotency_key"`
 }
 
 type CreateRequest struct {
-	Name            string `json:"name"`
-	SessionID       string `json:"session_id"`
-	TaskTitle       string `json:"task_title"`
-	TaskObjective   string `json:"task_objective"`
-	IntervalSeconds int64  `json:"interval_seconds"`
-	NextRunAt       string `json:"next_run_at"`
-	TimeoutSeconds  int64  `json:"timeout_seconds,omitempty"`
-	MaxRetries      int    `json:"max_retries,omitempty"`
-	BackoffSeconds  int64  `json:"backoff_seconds,omitempty"`
-	MisfirePolicy   string `json:"misfire_policy,omitempty"`
-	IdempotencyKey  string `json:"idempotency_key"`
+	Name            string   `json:"name"`
+	SessionID       string   `json:"session_id"`
+	TaskTitle       string   `json:"task_title"`
+	TaskObjective   string   `json:"task_objective"`
+	ExecutionMode   string   `json:"execution_mode,omitempty"`
+	SkillIDs        []string `json:"skill_ids,omitempty"`
+	IntervalSeconds int64    `json:"interval_seconds"`
+	NextRunAt       string   `json:"next_run_at"`
+	TimeoutSeconds  int64    `json:"timeout_seconds,omitempty"`
+	MaxRetries      int      `json:"max_retries,omitempty"`
+	BackoffSeconds  int64    `json:"backoff_seconds,omitempty"`
+	MisfirePolicy   string   `json:"misfire_policy,omitempty"`
+	IdempotencyKey  string   `json:"idempotency_key"`
 }
 type CreateResponse struct {
 	Job Job `json:"job"`

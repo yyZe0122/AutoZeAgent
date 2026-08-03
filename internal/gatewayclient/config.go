@@ -16,6 +16,9 @@ type Health struct {
 
 type ModelConfig = gateway.ModelConfig
 
+// MCPStatus is the secret-free MCP snapshot from GET /v1/config/mcp.
+type MCPStatus = gateway.MCPStatus
+
 func (c *Client) Health(ctx context.Context) (Health, error) {
 	var health Health
 	if err := c.inner.DoJSON(ctx, http.MethodGet, "/v1/health", nil, &health); err != nil {
@@ -44,4 +47,34 @@ func (c *Client) SetModelConfig(ctx context.Context, model string) (ModelConfig,
 		config.Models = []string{}
 	}
 	return config, nil
+}
+
+func (c *Client) MCPStatus(ctx context.Context) (MCPStatus, error) {
+	var status MCPStatus
+	if err := c.inner.DoJSON(ctx, http.MethodGet, "/v1/config/mcp", nil, &status); err != nil {
+		return MCPStatus{}, fmt.Errorf("config mcp: %w", err)
+	}
+	return status, nil
+}
+
+// Skill is metadata from GET /v1/skills (no body or file paths).
+type Skill struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Source      string `json:"source"`
+}
+
+// ListSkills returns discovered skill metadata (explicit selection only; no auto-match).
+func (c *Client) ListSkills(ctx context.Context) ([]Skill, error) {
+	var response struct {
+		Skills []Skill `json:"skills"`
+	}
+	if err := c.inner.DoJSON(ctx, http.MethodGet, "/v1/skills", nil, &response); err != nil {
+		return nil, fmt.Errorf("list skills: %w", err)
+	}
+	if response.Skills == nil {
+		return []Skill{}, nil
+	}
+	return response.Skills, nil
 }

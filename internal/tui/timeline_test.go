@@ -13,18 +13,16 @@ func TestBuildTimelineOrder(t *testing.T) {
 		ID: "task-1", Title: "Do thing", Objective: "Do the thing carefully",
 		State: gatewayclient.TaskStateRunning, CreatedAt: "t0", UpdatedAt: "t1",
 	}
-	prompt := &gatewayclient.Prompt{
-		PlanID: "plan-1", Revision: 1,
-		Steps: []gatewayclient.PromptStep{
-			{Title: "step"},
-		},
+	plan := &gatewayclient.Plan{
+		ID: "plan-1", Revision: 1, State: "ready",
+		Steps: []gatewayclient.Step{{Title: "step"}},
 	}
 	result := "all good"
 	runs := []gatewayclient.Run{{
 		ID: "run-1", TaskID: "task-1", State: gatewayclient.RunStateCompleted,
 		StartedAt: "t2", Result: &result,
 	}}
-	items := buildTimeline(task, nil, prompt, runs)
+	items := buildTimeline(task, plan, runs)
 	if len(items) < 4 {
 		t.Fatalf("items = %#v", items)
 	}
@@ -49,7 +47,7 @@ func TestBuildTimelineOrder(t *testing.T) {
 }
 
 func TestBuildTimelineNilTask(t *testing.T) {
-	if items := buildTimeline(nil, nil, nil, nil); items != nil {
+	if items := buildTimeline(nil, nil, nil); items != nil {
 		t.Fatalf("got %#v", items)
 	}
 }

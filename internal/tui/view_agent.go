@@ -32,10 +32,6 @@ func renderSessionView(m *model) string {
 	}
 	b.WriteString("\n")
 	b.WriteString(m.tlCache.render(m.timeline))
-	if m.waitingApproval() && m.planDetails && m.prompt != nil {
-		b.WriteString("\n")
-		b.WriteString(renderPlanDetailsInline(m))
-	}
 	return b.String()
 }
 
@@ -43,7 +39,7 @@ func renderEmptySession(m *model) string {
 	var b strings.Builder
 	b.WriteString(styleTitle.Render("Session") + "\n")
 	b.WriteString(styleDim.Render("Type to chat. /new opens a fresh session.") + "\n")
-	b.WriteString(styleDim.Render("/sessions lists past chats · Tab toggles agent (chat) | plan (approve).") + "\n")
+	b.WriteString(styleDim.Render("/sessions lists past chats · Tab toggles agent (build) | plan (read-only).") + "\n")
 	if len(m.sessions) > 0 {
 		b.WriteString("\n")
 		b.WriteString(styleMuted.Render("Recent sessions") + "\n")

@@ -189,15 +189,24 @@ func normalizeCapability(scope CapabilityScope) (CapabilityScope, error) {
 		return CapabilityScope{}, fmt.Errorf("%w: maximum calls must be positive", ErrInvalidPlan)
 	}
 	if normalized.Capability == "process_exec" {
-		if normalized.Command == "" {
-			return CapabilityScope{}, fmt.Errorf("%w: process_exec requires command", ErrInvalidPlan)
-		}
+		// Empty Command is allowed (scheme A path-scoped any-command grant). Non-empty is exact match.
 		if len(normalized.Paths) == 0 {
 			return CapabilityScope{}, fmt.Errorf("%w: process_exec requires at least one absolute working-directory path", ErrInvalidPlan)
 		}
 		for _, p := range normalized.Paths {
 			if !isAbsoluteCapabilityPath(p) {
 				return CapabilityScope{}, fmt.Errorf("%w: process_exec path %q must be absolute", ErrInvalidPlan, p)
+			}
+		}
+	}
+	if strings.HasPrefix(normalized.Capability, "git_") {
+		// git_* tools always authorize as Command "git"; empty grant command = any git argv under paths.
+		if len(normalized.Paths) == 0 {
+			return CapabilityScope{}, fmt.Errorf("%w: %s requires at least one absolute repository path", ErrInvalidPlan, normalized.Capability)
+		}
+		for _, p := range normalized.Paths {
+			if !isAbsoluteCapabilityPath(p) {
+				return CapabilityScope{}, fmt.Errorf("%w: %s path %q must be absolute", ErrInvalidPlan, normalized.Capability, p)
 			}
 		}
 	}

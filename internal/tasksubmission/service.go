@@ -1,5 +1,5 @@
 // Package tasksubmission coordinates the user-facing task creation use case.
-// Domain state changes remain owned by Kernel and planning remains owned by Planner.
+// Domain state changes remain owned by Kernel. Both agent and plan modes start session chat.
 package tasksubmission
 
 import (
@@ -22,6 +22,7 @@ const defaultMaxSkillContextBytes = 64 * 1024
 
 var (
 	ErrConflict = errors.New("task submission conflicts with an existing task")
+	// ErrPlanning is retained for gateway compatibility; new submits use chat, not Planner.
 	ErrPlanning = errors.New("task submission planning did not complete")
 )
 
@@ -31,15 +32,9 @@ type Repository interface {
 	CreateTaskWithSkillSnapshot(context.Context, kernel.TaskID, kernel.SessionID, string, string, []string, string, kernel.ExecutionMode, time.Time) (kernel.Task, error)
 	GetTask(context.Context, kernel.TaskID) (kernel.Task, error)
 	GetTaskSkillSnapshot(context.Context, kernel.TaskID) (kernel.TaskSkillSnapshot, error)
-	// TransitionTask moves created→planning so Submit can return before PlanTask finishes.
-	TransitionTask(context.Context, kernel.TaskID, uint64, kernel.TaskState, string, time.Time) (kernel.Task, error)
 }
 
-type Planner interface {
-	PlanTask(context.Context, kernel.Task, kernel.PlanID, uint64) (kernel.Task, approval.PlanDocument, error)
-}
-
-// ChatStarter starts multi-turn session chat for execution_mode=agent (skips Planner).
+// ChatStarter starts multi-turn session chat for agent (build) or plan (read-only) modes.
 type ChatStarter interface {
 	StartChat(context.Context, ChatStartRequest) (ChatStartResult, error)
 }
@@ -60,7 +55,6 @@ type ChatStartResult struct {
 
 type Config struct {
 	Repository           Repository
-	Planner              Planner
 	Chat                 ChatStarter
 	Skills               *skillcatalog.Catalog
 	MaxSkillContextBytes int
@@ -70,7 +64,6 @@ type Config struct {
 
 type Service struct {
 	repository           Repository
-	planner              Planner
 	chat                 ChatStarter
 	skills               *skillcatalog.Catalog
 	maxSkillContextBytes int
@@ -115,7 +108,6 @@ func New(config Config) (*Service, error) {
 	}
 	return &Service{
 		repository:           config.Repository,
-		planner:              config.Planner,
 		chat:                 config.Chat,
 		skills:               config.Skills,
 		maxSkillContextBytes: config.MaxSkillContextBytes,
@@ -204,62 +196,8 @@ func (s *Service) continueSubmission(ctx context.Context, task kernel.Task, requ
 }
 
 func (s *Service) planTask(ctx context.Context, task kernel.Task, request Request) (Result, error) {
-	result := Result{Task: task}
-	mode := kernel.NormalizeExecutionMode(string(task.ExecutionMode))
-	if mode == "" {
-		mode = kernel.ExecutionModeAgent
-	}
-
-	// Agent mode: multi-turn session chat — skip Planner entirely.
-	if mode == kernel.ExecutionModeAgent {
-		return s.startChat(ctx, task, request)
-	}
-
-	switch task.State {
-	case kernel.TaskCreated:
-		if s.planner == nil {
-			return result, nil
-		}
-	case kernel.TaskPlanning:
-		if s.planner == nil {
-			return result, planningError(task.ID, errors.New("planner is unavailable"))
-		}
-		// Already in flight (this process or planningrecovery). Do not spawn another.
-		return result, planningError(task.ID, errors.New("planning in progress"))
-	case kernel.TaskWaitingApproval:
-		// A retried idempotent submission may observe a plan committed earlier.
-		return result, nil
-	default:
-		return result, applicationerror.Wrap(applicationerror.CodeConflict, false, fmt.Errorf("%w: task %s is already %s", ErrConflict, task.ID, task.State))
-	}
-
-	var err error
-	if request.PlanID == "" {
-		request.PlanID, err = s.nextPlanID()
-		if err != nil {
-			return result, planningError(task.ID, err)
-		}
-	}
-
-	// Move to planning before returning so clients see a stable in-progress state.
-	// PlanTask itself is run asynchronously — provider latency must not block HTTP.
-	task, err = s.repository.TransitionTask(ctx, task.ID, task.Version, kernel.TaskPlanning, "planning started", s.now())
-	if err != nil {
-		return Result{Task: task}, planningError(task.ID, err)
-	}
-	result.Task = task
-
-	planID := request.PlanID
-	taskSnapshot := task
-	planner := s.planner
-	go func() {
-		planCtx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
-		defer cancel()
-		// PlanTask accepts TaskPlanning and completes Generate + CreatePlanForApproval.
-		// Failures leave the task in planning; planningrecovery retries.
-		_, _, _ = planner.PlanTask(planCtx, taskSnapshot, planID, 1)
-	}()
-	return result, planningError(task.ID, errors.New("planning in progress"))
+	// Both agent (build) and plan (read-only) use session chat — no Planner.
+	return s.startChat(ctx, task, request)
 }
 
 func (s *Service) startChat(ctx context.Context, task kernel.Task, request Request) (Result, error) {
@@ -272,7 +210,7 @@ func (s *Service) startChat(ctx context.Context, task kernel.Task, request Reque
 	case kernel.TaskCreated, kernel.TaskRunning, kernel.TaskCompleted, kernel.TaskFailed:
 		// StartChat is idempotent for already-started turns.
 	case kernel.TaskPlanning, kernel.TaskWaitingApproval:
-		// Legacy agent tasks that still went through Planner — leave them alone.
+		// Legacy tasks from deleted Planner path — do not start chat on them.
 		return result, nil
 	default:
 		return result, applicationerror.Wrap(applicationerror.CodeConflict, false, fmt.Errorf("%w: task %s is already %s", ErrConflict, task.ID, task.State))

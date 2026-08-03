@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"database/sql"
 	"errors"
 
 	"autozeagent.local/autozeagent/internal/tools/internal/executor"
@@ -50,4 +51,19 @@ func RegisterBuiltins(broker *Broker, roots []string, config ExecutorConfig) err
 		}
 	}
 	return nil
+}
+
+// RegisterTaskTool registers the ADR-039 task tool. Runner may be set later via SetRunner.
+func RegisterTaskTool(broker *Broker, db *sql.DB, runner SubagentRunner) (*taskTool, error) {
+	if broker == nil {
+		return nil, errors.New("tool broker is required")
+	}
+	tool, err := NewTaskTool(TaskToolConfig{DB: db, Runner: runner})
+	if err != nil {
+		return nil, err
+	}
+	if err := broker.Register(tool); err != nil {
+		return nil, err
+	}
+	return tool, nil
 }

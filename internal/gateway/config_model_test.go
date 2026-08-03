@@ -31,8 +31,9 @@ func (s *stubModelSwitcher) SelectModel(_ context.Context, ref string) (ModelCon
 
 func TestConfigModelEndpointReturnsSnapshot(t *testing.T) {
 	api := &API{modelConfig: ModelConfig{
-		Model:  "deepseek/deepseek-v4-flash",
-		Models: []string{"deepseek/deepseek-v4-flash", "deepseek/deepseek-chat"},
+		Model:         "deepseek/deepseek-v4-flash",
+		Models:        []string{"deepseek/deepseek-v4-flash", "deepseek/deepseek-chat"},
+		ContextWindow: 65536,
 	}}
 	request := httptest.NewRequest(http.MethodGet, "/v1/config/model", nil)
 	response := httptest.NewRecorder()
@@ -44,12 +45,15 @@ func TestConfigModelEndpointReturnsSnapshot(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Model != "deepseek/deepseek-v4-flash" || len(body.Models) != 2 {
+	if body.Model != "deepseek/deepseek-v4-flash" || len(body.Models) != 2 || body.ContextWindow != 65536 {
 		t.Fatalf("body = %+v", body)
 	}
 	raw := strings.ToLower(response.Body.String())
 	if strings.Contains(raw, "apikey") || strings.Contains(raw, "api_key") {
 		t.Fatalf("response leaked secrets: %s", response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), "context_window") {
+		t.Fatalf("expected context_window in body: %s", response.Body.String())
 	}
 }
 

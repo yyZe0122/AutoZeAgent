@@ -2,11 +2,11 @@
 
 - 状态：Accepted
 - 日期：2026-07-13
-- 更新：2026-07-21
+- 更新：2026-07-31（context_snapshots / session_compactions，ADR-041）
 
 ## 决策
 
-`autozeagentd` 独占一个 SQLite 数据库 `core.db`，它是 Session、Task、Plan、Approval、Grant、Run、Agent 记录、Tool Call、Event、Audit、Skill 快照和 Scheduler Job/Run/Lease 的事实源。
+`autozeagentd` 独占一个 SQLite 数据库 `core.db`，它是 Session、Task、Plan、Approval、Grant、Run、Agent 记录、Tool Call、Event、Audit、Skill 快照、Scheduler Job/Run/Lease，以及 **context 窗压快照 / session 摘要**（migration 016，ADR-041）的事实源。摘要只影响 provider 请求视图，不删除 transcript 或 `agent_run_records`。
 
 Scheduler 通过 Core 已打开的 `*sql.DB` 工作，不创建 `scheduler.db`。旧的 `memory.db`、`evolution.db` 和其他模块数据库不再属于生产架构，也不会被 daemon 自动读取或迁移。
 

@@ -24,6 +24,8 @@ func (m *model) listLen() int {
 		return len(m.sessions)
 	case listTasks:
 		return len(m.tasks)
+	case listSkills:
+		return len(m.skills)
 	default:
 		return 0
 	}
@@ -39,6 +41,12 @@ func (m *model) listTitle() string {
 		return "Sessions"
 	case listTasks:
 		return "Tasks"
+	case listSkills:
+		n := len(m.selectedSkillIDs)
+		if n == 0 {
+			return "Skills"
+		}
+		return fmt.Sprintf("Skills (%d selected)", n)
 	default:
 		return "Picker"
 	}
@@ -49,11 +57,13 @@ func (m *model) listHint() string {
 	case listModels:
 		return "↑↓ select · Enter switch · Esc close · PgUp scroll chat"
 	case listJobs:
-		return "↑↓ select · Enter details · Esc close · PgUp scroll chat"
+		return "↑↓ · Enter details · Esc · /cron <every> <obj> create"
 	case listSessions:
 		return "↑↓ select · Enter open chat · Esc close · PgUp scroll"
 	case listTasks:
 		return "↑↓ select · Enter focus task · Esc close"
+	case listSkills:
+		return "↑↓ · Enter toggle · Esc done (applies to next submit)"
 	default:
 		return "↑↓ · Enter · Esc"
 	}
@@ -95,6 +105,29 @@ func (m *model) listLine(i int) string {
 			stateBadge(s.LatestState),
 			styleDim.Render(truncate(title, 48)),
 		)
+	case listSkills:
+		if i < 0 || i >= len(m.skills) {
+			return ""
+		}
+		sk := m.skills[i]
+		mark := "  "
+		if skillSelected(m.selectedSkillIDs, sk.ID) {
+			mark = "* "
+		}
+		label := sk.Name
+		if label == "" {
+			label = sk.ID
+		}
+		src := sk.Source
+		if src == "" {
+			src = "?"
+		}
+		return fmt.Sprintf("%s%s  [%s]  %s",
+			mark,
+			sk.ID,
+			src,
+			styleDim.Render(truncate(label, 40)),
+		)
 	default:
 		if i < 0 || i >= len(m.tasks) {
 			return ""
@@ -108,6 +141,28 @@ func (m *model) listLine(i int) string {
 	}
 }
 
+func skillSelected(ids []string, id string) bool {
+	for _, s := range ids {
+		if s == id {
+			return true
+		}
+	}
+	return false
+}
+
+func toggleSkillID(ids []string, id string) []string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ids
+	}
+	for i, s := range ids {
+		if s == id {
+			return append(ids[:i], ids[i+1:]...)
+		}
+	}
+	return append(ids, id)
+}
+
 func formatJobLine(job schedulerapi.Job) string {
 	name := job.Name
 	if name == "" {
@@ -117,10 +172,15 @@ func formatJobLine(job schedulerapi.Job) string {
 	if next == "" {
 		next = "—"
 	}
-	return fmt.Sprintf("%s  %s  %s  next %s",
+	mode := job.ExecutionMode
+	if mode == "" {
+		mode = "agent"
+	}
+	return fmt.Sprintf("%s  %s  %s  %s  next %s",
 		shortID(job.ID),
 		stateBadge(job.Status),
-		truncate(name, 28),
+		mode,
+		truncate(name, 24),
 		styleDim.Render(truncate(next, 24)),
 	)
 }
@@ -140,9 +200,11 @@ func renderPickerOverlay(m *model, width int) string {
 		case listModels:
 			empty = "No models. Use /model provider/model."
 		case listJobs:
-			empty = "No scheduled jobs."
+			empty = "No jobs. /cron 15m <objective> on a focused session."
 		case listSessions:
 			empty = "No sessions yet. Type a message to start."
+		case listSkills:
+			empty = "No skills found. Add <id>/SKILL.md under config or .autozeagent/skills."
 		default:
 			empty = "No tasks yet."
 		}
@@ -181,7 +243,6 @@ func (m *model) openList(kind listKind) {
 	m.list = kind
 	m.selectedIdx = 0
 	m.helpOpen = false
-	m.approvalOpen = false
 	switch kind {
 	case listModels:
 		for i, name := range m.models {
@@ -192,6 +253,8 @@ func (m *model) openList(kind listKind) {
 		}
 	case listSessions:
 		// Keep current task/timeline mounted; picker floats above.
+	case listSkills:
+		// Multi-select; selection lives in selectedSkillIDs.
 	}
 }
 
@@ -231,7 +294,6 @@ func (m *model) listEnter() tea.Cmd {
 		m.closeList()
 		m.planID = ""
 		m.plan = nil
-		m.prompt = nil
 		m.runs = nil
 		m.messages = nil
 		m.viewportContent = ""
@@ -249,12 +311,25 @@ func (m *model) listEnter() tea.Cmd {
 		m.closeList()
 		m.planID = ""
 		m.plan = nil
-		m.prompt = nil
 		m.runs = nil
 		m.messages = nil
 		m.viewportContent = ""
 		m.stickBottom = true
 		return m.scheduleRefresh(refreshFull)
+	case listSkills:
+		if m.selectedIdx < 0 || m.selectedIdx >= len(m.skills) {
+			return nil
+		}
+		sk := m.skills[m.selectedIdx]
+		m.selectedSkillIDs = toggleSkillID(m.selectedSkillIDs, sk.ID)
+		n := len(m.selectedSkillIDs)
+		if n == 0 {
+			m.statusMsg = "no skills selected for next submit"
+		} else {
+			m.statusMsg = fmt.Sprintf("%d skill(s) for next submit: %s", n, strings.Join(m.selectedSkillIDs, ", "))
+		}
+		m.errMsg = ""
+		return nil
 	default:
 		return nil
 	}
@@ -265,8 +340,12 @@ func formatJobDetail(job schedulerapi.Job) string {
 	if name == "" {
 		name = "(unnamed)"
 	}
-	return fmt.Sprintf("job %s  %s  status=%s  interval=%ds  next=%s",
-		shortID(job.ID), name, job.Status, job.IntervalSeconds, orDash(job.NextRunAt))
+	mode := job.ExecutionMode
+	if mode == "" {
+		mode = "agent"
+	}
+	return fmt.Sprintf("job %s  %s  status=%s  mode=%s  interval=%ds  next=%s",
+		shortID(job.ID), name, job.Status, mode, job.IntervalSeconds, orDash(job.NextRunAt))
 }
 
 func orDash(s string) string {

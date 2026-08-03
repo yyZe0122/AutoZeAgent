@@ -118,11 +118,7 @@ func (p *Provider) Complete(ctx context.Context, request providerapi.CompletionR
 		return providerapi.CompletionResponse{}, providerhttp.Protocol(p.name, errors.New("response has no candidates"))
 	}
 	candidate := decoded.Candidates[0]
-	result := providerapi.CompletionResponse{FinishReason: candidate.FinishReason, Usage: providerapi.Usage{
-		InputTokens:  providerapi.TokenCount(decoded.UsageMetadata.PromptTokenCount),
-		OutputTokens: providerapi.TokenCount(decoded.UsageMetadata.CandidatesTokenCount),
-		TotalTokens:  providerapi.TokenCount(decoded.UsageMetadata.TotalTokenCount),
-	}}
+	result := providerapi.CompletionResponse{FinishReason: candidate.FinishReason, Usage: usageFromGemini(decoded.UsageMetadata)}
 	for index, part := range candidate.Content.Parts {
 		result.Content += part.Text
 		if part.FunctionCall != nil {
@@ -358,9 +354,26 @@ type generateResponse struct {
 		Content      content `json:"content"`
 		FinishReason string  `json:"finishReason"`
 	} `json:"candidates"`
-	UsageMetadata struct {
-		PromptTokenCount     int64 `json:"promptTokenCount"`
-		CandidatesTokenCount int64 `json:"candidatesTokenCount"`
-		TotalTokenCount      int64 `json:"totalTokenCount"`
-	} `json:"usageMetadata"`
+	UsageMetadata geminiUsage `json:"usageMetadata"`
+}
+
+type geminiUsage struct {
+	PromptTokenCount        int64 `json:"promptTokenCount"`
+	CandidatesTokenCount    int64 `json:"candidatesTokenCount"`
+	TotalTokenCount         int64 `json:"totalTokenCount"`
+	CachedContentTokenCount int64 `json:"cachedContentTokenCount"`
+}
+
+func usageFromGemini(u geminiUsage) providerapi.Usage {
+	cacheRead := u.CachedContentTokenCount
+	uncached := u.PromptTokenCount
+	if cacheRead > 0 && cacheRead <= u.PromptTokenCount {
+		uncached = u.PromptTokenCount - cacheRead
+	}
+	return providerapi.Usage{
+		InputTokens:     providerapi.TokenCount(uncached),
+		OutputTokens:    providerapi.TokenCount(u.CandidatesTokenCount),
+		TotalTokens:     providerapi.TokenCount(u.TotalTokenCount),
+		CacheReadTokens: providerapi.TokenCount(cacheRead),
+	}
 }

@@ -81,12 +81,51 @@ type Run struct {
 
 // TaskUsage is the aggregated provider usage for all runs of a task.
 // Source: agent_run_records.usage JSON on assistant_message rows.
+// InputTokens is uncached input; cache fields are optional provider metrics.
+// Cost is optional (vendor billing is authoritative; often zero).
 type TaskUsage struct {
-	TaskID       coreidentity.TaskID `json:"task_id"`
-	InputTokens  int64               `json:"input_tokens"`
-	OutputTokens int64               `json:"output_tokens"`
-	TotalTokens  int64               `json:"total_tokens"`
-	CostMicros   int64               `json:"cost_micros"`
+	TaskID           coreidentity.TaskID `json:"task_id"`
+	InputTokens      int64               `json:"input_tokens"`
+	OutputTokens     int64               `json:"output_tokens"`
+	TotalTokens      int64               `json:"total_tokens"`
+	CacheReadTokens  int64               `json:"cache_read_tokens"`
+	CacheWriteTokens int64               `json:"cache_write_tokens"`
+	CostMicros       int64               `json:"cost_micros"`
+}
+
+// CacheHitRate is cache_read / (cache_read + uncached input). ok=false when unknown.
+func (u TaskUsage) CacheHitRate() (rate float64, ok bool) {
+	if u.CacheReadTokens <= 0 && u.CacheWriteTokens <= 0 {
+		return 0, false
+	}
+	den := u.CacheReadTokens + u.InputTokens
+	if den <= 0 {
+		return 0, false
+	}
+	return float64(u.CacheReadTokens) / float64(den), true
+}
+
+// TaskContext is the last context-pressure snapshot for a task (window fill, not lifetime spend).
+type TaskContext struct {
+	TaskID           coreidentity.TaskID    `json:"task_id"`
+	SessionID        coreidentity.SessionID `json:"session_id"`
+	Model            string                 `json:"model"`
+	ContextWindow    int64                  `json:"context_window"`
+	MaxOutputTokens  int64                  `json:"max_output_tokens"`
+	UsableTokens     int64                  `json:"usable_tokens"`
+	LastPromptTokens int64                  `json:"last_prompt_tokens"`
+	LastOutputTokens int64                  `json:"last_output_tokens"`
+	EstimateTokens   int64                  `json:"estimate_tokens"`
+	CacheReadTokens  int64                  `json:"cache_read_tokens"`
+	CacheWriteTokens int64                  `json:"cache_write_tokens"`
+	Source           string                 `json:"source"`
+	EstimateSource   string                 `json:"estimate_source"`
+	Ratio            float64                `json:"ratio"`
+	Calibrated       bool                   `json:"calibrated"`
+	Compacted        bool                   `json:"compacted"`
+	HistoryMessages  int                    `json:"history_messages"`
+	Pressure         float64                `json:"pressure"`
+	UpdatedAt        string                 `json:"updated_at"`
 }
 
 // Session is a chat container; tasks and runs hang off it.
@@ -394,16 +433,99 @@ func (s *Store) TaskUsage(ctx context.Context, taskID coreidentity.TaskID) (Task
 			COALESCE(SUM(CAST(COALESCE(json_extract(a.usage, '$.input_tokens'), 0) AS INTEGER)), 0),
 			COALESCE(SUM(CAST(COALESCE(json_extract(a.usage, '$.output_tokens'), 0) AS INTEGER)), 0),
 			COALESCE(SUM(CAST(COALESCE(json_extract(a.usage, '$.total_tokens'), 0) AS INTEGER)), 0),
+			COALESCE(SUM(CAST(COALESCE(json_extract(a.usage, '$.cache_read_tokens'), 0) AS INTEGER)), 0),
+			COALESCE(SUM(CAST(COALESCE(json_extract(a.usage, '$.cache_write_tokens'), 0) AS INTEGER)), 0),
 			COALESCE(SUM(CAST(COALESCE(json_extract(a.usage, '$.cost.micros'), 0) AS INTEGER)), 0)
 		FROM agent_run_records a
 		JOIN runs r ON r.run_id = a.run_id
 		WHERE r.task_id = ? AND a.record_type = 'assistant_message'`,
 		taskID,
-	).Scan(&usage.InputTokens, &usage.OutputTokens, &usage.TotalTokens, &usage.CostMicros)
+	).Scan(&usage.InputTokens, &usage.OutputTokens, &usage.TotalTokens,
+		&usage.CacheReadTokens, &usage.CacheWriteTokens, &usage.CostMicros)
 	if err != nil {
 		return TaskUsage{}, fmt.Errorf("task usage: %w", err)
 	}
 	return usage, nil
+}
+
+// TaskContext returns the latest context pressure snapshot for taskID.
+// Missing snapshot returns zero values with Source "none" (no ErrNotFound).
+func (s *Store) TaskContext(ctx context.Context, taskID coreidentity.TaskID) (TaskContext, error) {
+	if err := validateGet(ctx, string(taskID)); err != nil {
+		return TaskContext{}, err
+	}
+	var item TaskContext
+	var calibrated, compacted int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT task_id, session_id, model, context_window, max_output_tokens, usable_tokens,
+			last_prompt_tokens, last_output_tokens, estimate_tokens,
+			cache_read_tokens, cache_write_tokens, source, estimate_source,
+			ratio, calibrated, compacted, history_messages, updated_at
+		FROM context_snapshots WHERE task_id = ?`, taskID,
+	).Scan(
+		&item.TaskID, &item.SessionID, &item.Model, &item.ContextWindow, &item.MaxOutputTokens, &item.UsableTokens,
+		&item.LastPromptTokens, &item.LastOutputTokens, &item.EstimateTokens,
+		&item.CacheReadTokens, &item.CacheWriteTokens, &item.Source, &item.EstimateSource,
+		&item.Ratio, &calibrated, &compacted, &item.HistoryMessages, &item.UpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return TaskContext{TaskID: taskID, Source: "none", EstimateSource: "local_estimate", Ratio: 1}, nil
+	}
+	if err != nil {
+		return TaskContext{}, fmt.Errorf("task context: %w", err)
+	}
+	item.Calibrated = calibrated != 0
+	item.Compacted = compacted != 0
+	if item.UsableTokens > 0 {
+		fill := item.LastPromptTokens
+		if fill <= 0 {
+			fill = item.EstimateTokens
+		}
+		if fill > 0 {
+			item.Pressure = float64(fill) / float64(item.UsableTokens)
+		}
+	}
+	return item, nil
+}
+
+// SessionContext returns the most recent context snapshot for sessionID.
+func (s *Store) SessionContext(ctx context.Context, sessionID coreidentity.SessionID) (TaskContext, error) {
+	if err := validateGet(ctx, string(sessionID)); err != nil {
+		return TaskContext{}, err
+	}
+	var item TaskContext
+	var calibrated, compacted int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT task_id, session_id, model, context_window, max_output_tokens, usable_tokens,
+			last_prompt_tokens, last_output_tokens, estimate_tokens,
+			cache_read_tokens, cache_write_tokens, source, estimate_source,
+			ratio, calibrated, compacted, history_messages, updated_at
+		FROM context_snapshots WHERE session_id = ?
+		ORDER BY updated_at DESC LIMIT 1`, sessionID,
+	).Scan(
+		&item.TaskID, &item.SessionID, &item.Model, &item.ContextWindow, &item.MaxOutputTokens, &item.UsableTokens,
+		&item.LastPromptTokens, &item.LastOutputTokens, &item.EstimateTokens,
+		&item.CacheReadTokens, &item.CacheWriteTokens, &item.Source, &item.EstimateSource,
+		&item.Ratio, &calibrated, &compacted, &item.HistoryMessages, &item.UpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return TaskContext{SessionID: sessionID, Source: "none", EstimateSource: "local_estimate", Ratio: 1}, nil
+	}
+	if err != nil {
+		return TaskContext{}, fmt.Errorf("session context: %w", err)
+	}
+	item.Calibrated = calibrated != 0
+	item.Compacted = compacted != 0
+	if item.UsableTokens > 0 {
+		fill := item.LastPromptTokens
+		if fill <= 0 {
+			fill = item.EstimateTokens
+		}
+		if fill > 0 {
+			item.Pressure = float64(fill) / float64(item.UsableTokens)
+		}
+	}
+	return item, nil
 }
 
 func scanRun(row scanner) (Run, error) {

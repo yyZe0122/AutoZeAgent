@@ -33,9 +33,9 @@ func TestTaskUsageSumsAssistantMessages(t *testing.T) {
 		{"INSERT INTO runs (run_id, task_id, plan_id, state, started_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
 			[]any{"run-u2", "task-u", "plan-u", kernel.RunRunning, stamp, stamp}},
 		{"INSERT INTO agent_run_records (run_id, position, record_type, message, usage, created_at) VALUES (?, 0, 'assistant_message', ?, ?, ?)",
-			[]any{"run-u1", `{"role":"assistant","content":"a"}`, `{"input_tokens":10,"output_tokens":20,"total_tokens":30,"cost":{"currency":"USD","micros":100}}`, stamp}},
+			[]any{"run-u1", `{"role":"assistant","content":"a"}`, `{"input_tokens":10,"output_tokens":20,"total_tokens":30,"cache_read_tokens":40,"cache_write_tokens":5,"cost":{"currency":"USD","micros":100}}`, stamp}},
 		{"INSERT INTO agent_run_records (run_id, position, record_type, message, usage, created_at) VALUES (?, 0, 'assistant_message', ?, ?, ?)",
-			[]any{"run-u2", `{"role":"assistant","content":"b"}`, `{"input_tokens":5,"output_tokens":15,"total_tokens":20,"cost":{"currency":"USD","micros":50}}`, stamp}},
+			[]any{"run-u2", `{"role":"assistant","content":"b"}`, `{"input_tokens":5,"output_tokens":15,"total_tokens":20,"cache_read_tokens":10,"cost":{"currency":"USD","micros":50}}`, stamp}},
 		{"INSERT INTO agent_run_records (run_id, position, record_type, message, usage, created_at) VALUES (?, 1, 'tool_result', ?, ?, ?)",
 			[]any{"run-u2", `{"role":"tool","content":"x"}`, `{"total_tokens":999}`, stamp}},
 	} {
@@ -57,6 +57,14 @@ func TestTaskUsageSumsAssistantMessages(t *testing.T) {
 	}
 	if usage.InputTokens != 15 || usage.OutputTokens != 35 || usage.TotalTokens != 50 || usage.CostMicros != 150 {
 		t.Fatalf("usage = %+v", usage)
+	}
+	if usage.CacheReadTokens != 50 || usage.CacheWriteTokens != 5 {
+		t.Fatalf("cache usage = %+v", usage)
+	}
+	// rate = 50 / (50 + 15) ≈ 0.769
+	rate, ok := usage.CacheHitRate()
+	if !ok || rate < 0.76 || rate > 0.77 {
+		t.Fatalf("CacheHitRate = %v ok=%v", rate, ok)
 	}
 
 	// Unknown task → zeros, no error.

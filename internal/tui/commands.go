@@ -16,15 +16,13 @@ var slashCommands = []slashCommand{
 	{Name: "/tasks", Desc: "list / focus tasks", Help: "/tasks [id-prefix]  list tasks or focus by id"},
 	{Name: "/back", Desc: "session list", Help: "/back  open session list"},
 	{Name: "/clear", Desc: "session list", Help: "/clear  open session list"},
-	{Name: "/approve", Desc: "decide current plan", Help: "/approve [allow_plan|reject|…]  decide plan"},
-	{Name: "/run", Desc: "start runs", Help: "/run  start runs for current plan"},
 	{Name: "/pause", Desc: "pause task", Help: "/pause [reason]  pause current task"},
 	{Name: "/resume", Desc: "resume task", Help: "/resume  resume current task"},
 	{Name: "/cancel", Desc: "cancel task", Help: "/cancel [reason]  cancel current task"},
-	{Name: "/details", Desc: "toggle plan details", Help: "/details  expand/collapse plan capabilities"},
 	{Name: "/model", Desc: "list or switch model", Help: "/model [provider/model]  pick or switch model"},
+	{Name: "/skills", Desc: "select skills for next submit", Help: "/skills  toggle skills for next task (explicit only)"},
 	{Name: "/theme", Desc: "toggle day/night theme", Help: "/theme  toggle day ↔ night theme"},
-	{Name: "/cron", Desc: "list scheduled jobs", Help: "/cron  scheduled jobs (read-only)"},
+	{Name: "/cron", Desc: "list or create scheduled jobs", Help: "/cron [every objective]  list jobs, or create on current session (Tab mode)"},
 	{Name: "/status", Desc: "health summary", Help: "/status  health + current summary"},
 	{Name: "/help", Desc: "command list", Help: "/help  command list"},
 	{Name: "/quit", Desc: "exit", Help: "/quit  exit TUI (/q /exit)"},
@@ -58,15 +56,15 @@ func helpText() string {
 	b.WriteString("  ↑↓             picker / completer / history (not chat)\n")
 	b.WriteString("  PgUp/PgDn      always scroll conversation\n")
 	b.WriteString("  Enter          complete slash once, then execute; open picker item\n")
-	b.WriteString("  Esc            close picker / completer / approval panel / clear input\n")
-	b.WriteString("  a / r          allow_plan / reject (waiting approval, empty input)\n")
+	b.WriteString("  Esc            close picker / completer / clear input\n")
 	b.WriteString("  Ctrl+C         clear input (exit via /quit only)\n")
 	b.WriteString("\nModes (input border + chip)\n")
-	b.WriteString("  agent  multi-turn chat + workspace tools (default)\n")
-	b.WriteString("  plan   plan → approve → run (grants enforce tool scope)\n")
+	b.WriteString("  agent  multi-turn chat + workspace tools (build/write)\n")
+	b.WriteString("  plan   multi-turn chat + workspace tools (read-only)\n")
 	b.WriteString("\nChat\n")
 	b.WriteString("  Plain text continues the current session (or starts one).\n")
 	b.WriteString("  /new always opens a fresh session. Tab sets agent|plan mode.\n")
+	b.WriteString("  /skills selects instruction skills for the next submit (not auto-matched).\n")
 	return b.String()
 }
 

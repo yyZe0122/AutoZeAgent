@@ -1,6 +1,5 @@
-// Package scheduledtasks transfers Scheduler task requests into the mandatory
-// Kernel without allowing Scheduler to create plans, approvals, grants, or tool
-// calls.
+// Package scheduledtasks transfers due Scheduler jobs into Core via tasksubmission.
+// It never creates approvals, grants, agent runs, or tool calls.
 package scheduledtasks
 
 import (
@@ -70,8 +69,7 @@ func New(config Config) (*Runner, error) {
 	}, nil
 }
 
-// Run polls immediately, then at the configured interval. Capability or module
-// failures are additive degradation: Core keeps running and retries later.
+// Run polls immediately, then at the configured interval.
 func (r *Runner) Run(ctx context.Context) {
 	if ctx == nil {
 		return
@@ -116,41 +114,31 @@ func (r *Runner) RunOnce(ctx context.Context) error {
 }
 
 func (r *Runner) accept(ctx context.Context, request schedulerapi.TaskRequest) error {
-	if !request.RequiresPlan {
-		err := errors.New("scheduled task rejected because requires_plan is false")
-		ackErr := r.client.AcknowledgeScheduledTask(ctx, schedulerapi.AcknowledgeRequest{
-			RunID: request.RunID, LeaseID: request.LeaseID, Status: "cancelled", Error: err.Error(),
-		})
-		return errors.Join(err, ackErr)
+	mode := kernel.NormalizeExecutionMode(request.ExecutionMode)
+	if !mode.Valid() {
+		mode = kernel.ExecutionModeAgent
 	}
 	taskID := taskIDFor(request.IdempotencyKey)
 	result, err := r.submissions.Submit(ctx, tasksubmission.Request{
-		TaskID: taskID, SessionID: kernel.SessionID(request.SessionID), PlanID: planIDFor(taskID, 1),
-		Title: request.Title, Objective: request.Objective, EnsureSession: false, AllowExisting: true,
-		// Scheduler jobs are durable plan workflows, not multi-turn chat.
-		ExecutionMode: kernel.ExecutionModePlan,
+		TaskID:        taskID,
+		SessionID:     kernel.SessionID(request.SessionID),
+		Title:         request.Title,
+		Objective:     request.Objective,
+		SkillIDs:      append([]string(nil), request.SkillIDs...),
+		ExecutionMode: mode,
+		EnsureSession: false,
+		AllowExisting: true,
 	})
-	// ErrPlanning means the Core task is created and planning is in flight (or
-	// still pending). That is success for the scheduler hand-off; recovery /
-	// SSE drives the rest. Other errors fail the job run.
-	if err != nil && !errors.Is(err, tasksubmission.ErrPlanning) {
+	if err != nil {
 		ackErr := r.client.AcknowledgeScheduledTask(ctx, schedulerapi.AcknowledgeRequest{
 			RunID: request.RunID, LeaseID: request.LeaseID, Status: "failed", Error: err.Error(),
 		})
-		return errors.Join(fmt.Errorf("submit scheduled Core task: %w", err), ackErr)
-	}
-	task := result.Task
-	status := "task_created"
-	switch task.State {
-	case kernel.TaskWaitingApproval:
-		status = "waiting_approval"
-	case kernel.TaskPlanning:
-		status = "planning"
+		return errors.Join(fmt.Errorf("submit scheduled chat task: %w", err), ackErr)
 	}
 	if err := r.client.AcknowledgeScheduledTask(ctx, schedulerapi.AcknowledgeRequest{
-		RunID: request.RunID, LeaseID: request.LeaseID, CoreTaskID: string(task.ID), Status: status,
+		RunID: request.RunID, LeaseID: request.LeaseID, CoreTaskID: string(result.Task.ID), Status: "task_created",
 	}); err != nil {
-		return fmt.Errorf("acknowledge scheduled Core task %s: %w", task.ID, err)
+		return fmt.Errorf("acknowledge scheduled Core task %s: %w", result.Task.ID, err)
 	}
 	return nil
 }
@@ -158,9 +146,4 @@ func (r *Runner) accept(ctx context.Context, request schedulerapi.TaskRequest) e
 func taskIDFor(idempotencyKey string) kernel.TaskID {
 	digest := sha256.Sum256([]byte(strings.TrimSpace(idempotencyKey)))
 	return kernel.TaskID("scheduled_" + hex.EncodeToString(digest[:16]))
-}
-
-func planIDFor(taskID kernel.TaskID, revision uint64) kernel.PlanID {
-	digest := sha256.Sum256([]byte(fmt.Sprintf("%s/%d", strings.TrimSpace(string(taskID)), revision)))
-	return kernel.PlanID("scheduled_plan_" + hex.EncodeToString(digest[:16]))
 }

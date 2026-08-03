@@ -13,31 +13,28 @@ import (
 	"sync"
 
 	"autozeagent.local/autozeagent/internal/agent"
-	"autozeagent.local/autozeagent/internal/agentautostart"
 	"autozeagent.local/autozeagent/internal/app"
 	"autozeagent.local/autozeagent/internal/applicationerror"
 	"autozeagent.local/autozeagent/internal/approval"
-	"autozeagent.local/autozeagent/internal/approvalsubmission"
 	"autozeagent.local/autozeagent/internal/artifacts"
 	"autozeagent.local/autozeagent/internal/chatsession"
+	"autozeagent.local/autozeagent/internal/contextpack"
 	"autozeagent.local/autozeagent/internal/corequery"
 	"autozeagent.local/autozeagent/internal/daemonctl"
 	"autozeagent.local/autozeagent/internal/events"
 	"autozeagent.local/autozeagent/internal/gateway"
 	"autozeagent.local/autozeagent/internal/kernel"
 	"autozeagent.local/autozeagent/internal/modelstream"
-	"autozeagent.local/autozeagent/internal/planner"
-	"autozeagent.local/autozeagent/internal/planningrecovery"
 	"autozeagent.local/autozeagent/internal/platform/paths"
 	platformsignals "autozeagent.local/autozeagent/internal/platform/signals"
 	"autozeagent.local/autozeagent/internal/policy"
 	"autozeagent.local/autozeagent/internal/providerconfig"
 	"autozeagent.local/autozeagent/internal/providers"
-	"autozeagent.local/autozeagent/internal/runexecution"
 	"autozeagent.local/autozeagent/internal/scheduledtasks"
 	"autozeagent.local/autozeagent/internal/scheduler"
 	"autozeagent.local/autozeagent/internal/skillcatalog"
 	coresqlite "autozeagent.local/autozeagent/internal/store/sqlite"
+	"autozeagent.local/autozeagent/internal/taskcontrol"
 	"autozeagent.local/autozeagent/internal/tasksubmission"
 	"autozeagent.local/autozeagent/internal/tools"
 	"autozeagent.local/autozeagent/internal/version"
@@ -124,7 +121,7 @@ func run(args []string) error {
 	}); err != nil {
 		return err
 	}
-	allowedCapabilities, err := plannerCapabilities(toolBroker)
+	taskTool, err := tools.RegisterTaskTool(toolBroker, database.SQL(), nil)
 	if err != nil {
 		return err
 	}
@@ -147,21 +144,26 @@ func run(args []string) error {
 		slog.Info("provider config ready", "component", "daemon", "operation", "ensure_config", "result", "succeeded",
 			"config_path", ensureResult.Path)
 	}
-	providerRuntime, err := providerRuntimeFromConfig(layout.ConfigDir, kernelRepository, allowedCapabilities)
+	mcpConfig, err := providerconfig.LoadMCP(layout.ConfigDir)
+	if err != nil {
+		return fmt.Errorf("load mcp config: %w", err)
+	}
+	mcpRegistry, mcpToolNames, err := tools.RegisterMCP(context.Background(), toolBroker, mcpConfig)
 	if err != nil {
 		return err
 	}
-	var planningService *planner.Service
-	if providerRuntime != nil {
-		planningService = providerRuntime.planning
+	if mcpRegistry != nil {
+		defer mcpRegistry.Close()
+	}
+	if len(mcpToolNames) > 0 {
+		slog.Info("mcp tools ready", "component", "daemon", "operation", "mcp_register", "result", "succeeded",
+			"tools", len(mcpToolNames))
+	}
+	providerRuntime, err := providerRuntimeFromConfig(layout.ConfigDir)
+	if err != nil {
+		return err
 	}
 	queries, err := corequery.New(database.SQL())
-	if err != nil {
-		return err
-	}
-	approvalDecisionService, err := approvalsubmission.New(approvalsubmission.Config{
-		Plans: queries, Repository: approvalRepository,
-	})
 	if err != nil {
 		return err
 	}
@@ -170,45 +172,54 @@ func run(args []string) error {
 		return err
 	}
 	modelHub := modelstream.NewHub()
+	contextStore, err := contextpack.NewStore(database.SQL())
+	if err != nil {
+		return err
+	}
+	tokenCalibrator := contextpack.NewCalibrator()
+	var contextWindow int64
+	if providerRuntime != nil {
+		if resolved, resolveErr := providerconfig.ResolveModel(layout.ConfigDir, providerRuntime.selectedRef); resolveErr == nil && resolved != nil {
+			contextWindow = resolved.ContextWindow
+		}
+	}
+	chatCfg, chatErr := providerconfig.LoadChat(layout.ConfigDir)
+	if chatErr != nil {
+		return fmt.Errorf("load chat config: %w", chatErr)
+	}
+	maxIterations := chatCfg.MaxIterationsOrDefault()
+	compactionEnabled := chatCfg.CompactionEnabled()
+
 	var agentRunner *agent.Runner
 	if providerRuntime != nil {
 		agentRunner, err = agent.New(agent.Config{
 			Provider: providerRuntime.provider, Broker: toolBroker, Records: recordStore,
 			Model: providerRuntime.model, Stream: modelHub,
+			MaxIterations: maxIterations,
+			ContextWindow: contextWindow, Context: contextStore, Calibrator: tokenCalibrator,
 		})
 		if err != nil {
 			return err
 		}
+		taskTool.SetRunner(agentRunner)
 	}
-	var runService *runexecution.Service
-	if agentRunner != nil {
-		runService, err = runexecution.New(runexecution.Config{
-			DB: database.SQL(), Plans: queries, Approvals: approvalRepository, Repository: kernelRepository, Agent: agentRunner,
-			OnError: func(err error) {
-				slog.Error("run recovery failure", "component", "run", "operation", "recover", "result", "failed", "error", err)
-			},
-		})
-		if err != nil {
-			return err
-		}
-	}
-	// plan mode: after plan lands, human approves (agentautostart only for plan recovery paths).
-	// agent mode chat skips Planner via chatsession.
-	var planningSurface agentautostart.Planner
-	if planningService != nil {
-		// Keep auto-start wrapper for any residual agent-mode plans; new agent submits use chat.
-		if runService != nil {
-			planningSurface = agentautostart.Wrap(planningService, approvalDecisionService, runService)
-		} else {
-			planningSurface = planningService
-		}
-	}
+	// Chat first so ControlTask can interrupt in-flight chat runs (pause/cancel).
 	var chatService *chatsession.Service
 	if agentRunner != nil {
+		chatRoots := chatCfg.EffectiveRoots(workingDirectory)
+		if len(chatRoots) == 0 {
+			chatRoots = []string{workingDirectory}
+		}
+		writeCeiling := chatCfg.AgentWriteCeiling()
+		allowGit := chatCfg.AgentGitEnabled()
+		allowProcess := chatCfg.AgentProcessEnabled()
 		chatService, err = chatsession.New(chatsession.Config{
 			DB: database.SQL(), Repository: kernelRepository, Approvals: approvalRepository,
-			Agent: agentRunner, Transcript: queries, WorkspaceRoots: []string{workingDirectory},
-			AllowWrite: true,
+			Agent: agentRunner, Transcript: queries, WorkspaceRoots: chatRoots,
+			AllowWriteCeiling: &writeCeiling, AllowGit: allowGit, AllowProcess: allowProcess,
+			ExtraTools:    mcpToolNames,
+			ContextWindow: contextWindow, Context: contextStore, Compactor: agentRunner,
+			CompactionEnabled: &compactionEnabled, Calibrator: tokenCalibrator,
 			OnError: func(err error) {
 				slog.Error("chat session failure", "component", "chatsession", "operation", "execute", "result", "failed", "error", err)
 			},
@@ -216,11 +227,23 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
+		slog.Info("chat workspace configured", "component", "daemon", "operation", "chat_config", "result", "succeeded",
+			"roots", chatRoots, "agent_write_ceiling", writeCeiling, "agent_git", allowGit, "agent_process", allowProcess,
+			"context_window", contextWindow, "max_iterations", maxIterations, "compaction_enabled", compactionEnabled)
+	}
+	// Task control (pause/resume/cancel); chat interrupt when chat is configured.
+	// Assign chat only when non-nil so ChatInterrupter is a true nil interface (not typed nil).
+	var chatInterrupt taskcontrol.ChatInterrupter
+	if chatService != nil {
+		chatInterrupt = chatService
+	}
+	taskControl, err := taskcontrol.New(taskcontrol.Config{
+		DB: database.SQL(), Approvals: approvalRepository, Repository: kernelRepository, Chat: chatInterrupt,
+	})
+	if err != nil {
+		return err
 	}
 	taskSubmissionConfig := tasksubmission.Config{Repository: kernelRepository, Skills: skillCatalog}
-	if planningSurface != nil {
-		taskSubmissionConfig.Planner = planningSurface
-	}
 	if chatService != nil {
 		taskSubmissionConfig.Chat = chatsession.AsTaskChat(chatService)
 	}
@@ -228,41 +251,23 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	hostname, _ := os.Hostname()
-	if hostname == "" {
-		hostname = "localhost"
-	}
 	schedulerStore, err := scheduler.NewStore(database.SQL())
 	if err != nil {
 		return err
 	}
-	schedulerRunner, err := scheduledtasks.New(scheduledtasks.Config{
-		Client: schedulerStore, Submissions: taskSubmissionService,
-		Owner: fmt.Sprintf("autozeagentd/%s/%d", hostname, os.Getpid()),
+	var backgroundRunners []app.BackgroundRunner
+	jobRunner, err := scheduledtasks.New(scheduledtasks.Config{
+		Client:      schedulerStore,
+		Submissions: taskSubmissionService,
+		Owner:       "autozeagentd",
 		OnError: func(err error) {
-			slog.Error("scheduler failure", "component", "scheduler", "operation", "run", "result", "failed", "error", err)
+			slog.Error("scheduled job runner failure", "component", "scheduledtasks", "operation", "poll", "result", "failed", "error", err)
 		},
 	})
 	if err != nil {
 		return err
 	}
-	backgroundRunners := []app.BackgroundRunner{schedulerRunner}
-	if runService != nil {
-		backgroundRunners = append(backgroundRunners, runService)
-	}
-	if planningSurface != nil {
-		planningRecoveryRunner, err := planningrecovery.New(planningrecovery.Config{
-			Repository: kernelRepository,
-			Planner:    planningSurface,
-			OnError: func(err error) {
-				slog.Error("planning recovery failure", "component", "planner", "operation", "recover", "result", "failed", "error", err)
-			},
-		})
-		if err != nil {
-			return err
-		}
-		backgroundRunners = append(backgroundRunners, planningRecoveryRunner)
-	}
+	backgroundRunners = append(backgroundRunners, jobRunner)
 	core, err := app.New(app.Config{
 		Name:              "autozeagentd",
 		Version:           version.Version,
@@ -288,10 +293,6 @@ func run(args []string) error {
 		return nil
 	}
 
-	var runStarter gateway.RunStarter
-	if runService != nil {
-		runStarter = runService
-	}
 	modelConfig, err := gatewayModelConfig(layout.ConfigDir, providerRuntime)
 	if err != nil {
 		return err
@@ -299,13 +300,18 @@ func run(args []string) error {
 	var modelSwitcher gateway.ModelSwitcher
 	if providerRuntime != nil {
 		providerRuntime.agent = agentRunner
+		providerRuntime.chat = chatService
 		modelSwitcher = providerRuntime
+	}
+	var mcpStatus gateway.MCPStatusProvider
+	if mcpRegistry != nil {
+		mcpStatus = mcpStatusAdapter{registry: mcpRegistry}
 	}
 	gatewayAPI, err := gateway.NewAPI(gateway.APIConfig{
 		Queries: queries, TaskSubmissions: taskSubmissionService,
-		ApprovalDecisions: approvalDecisionService, RunStarts: runStarter, TaskControls: runService, Jobs: schedulerStore,
+		TaskControls: taskControl, Jobs: schedulerStore,
 		Core: core, Events: eventStore, Skills: skillCatalog, ModelConfig: modelConfig, ModelSwitcher: modelSwitcher,
-		ModelStream: modelHub,
+		ModelStream: modelHub, MCP: mcpStatus,
 	})
 	if err != nil {
 		return err
@@ -356,30 +362,15 @@ func discoverSkillCatalog(layout paths.Layout, workingDirectory string) (*skillc
 }
 
 type configuredProviderRuntime struct {
-	mu                  sync.Mutex
-	configDir           string
-	provider            providerapi.Provider
-	model               string
-	selectedRef         string
-	planning            *planner.Service
-	agent               *agent.Runner
-	allowedCapabilities map[string]policy.RiskLevel
+	mu          sync.Mutex
+	configDir   string
+	provider    providerapi.Provider
+	model       string
+	selectedRef string
+	agent       *agent.Runner
+	chat        *chatsession.Service
 }
 
-func plannerCapabilities(broker *tools.Broker) (map[string]policy.RiskLevel, error) {
-	capabilities := make(map[string]policy.RiskLevel)
-	for _, definition := range broker.Definitions() {
-		risk := policy.RiskLevel(definition.Risk)
-		if strings.TrimSpace(definition.Name) == "" || !risk.Valid() {
-			return nil, fmt.Errorf("tool %q has invalid planner risk %q", definition.Name, definition.Risk)
-		}
-		capabilities[definition.Name] = risk
-	}
-	if len(capabilities) == 0 {
-		return nil, errors.New("planner requires at least one registered tool")
-	}
-	return capabilities, nil
-}
 func gatewayModelConfig(configDir string, runtime *configuredProviderRuntime) (gateway.ModelConfig, error) {
 	selected, refs, err := providerconfig.ListModelRefs(configDir)
 	if err != nil {
@@ -409,10 +400,16 @@ func gatewayModelConfig(configDir string, runtime *configuredProviderRuntime) (g
 	for _, ref := range refs {
 		add(ref.ID)
 	}
-	return gateway.ModelConfig{Model: selected, Models: models}, nil
+	cfg := gateway.ModelConfig{Model: selected, Models: models}
+	if selected != "" {
+		if resolved, resolveErr := providerconfig.ResolveModel(configDir, selected); resolveErr == nil && resolved != nil {
+			cfg.ContextWindow = resolved.ContextWindow
+		}
+	}
+	return cfg, nil
 }
 
-func providerRuntimeFromConfig(configDir string, repository planner.TaskRepository, capabilities map[string]policy.RiskLevel) (*configuredProviderRuntime, error) {
+func providerRuntimeFromConfig(configDir string) (*configuredProviderRuntime, error) {
 	configured, err := providerconfig.Load(configDir)
 	if err != nil {
 		// Incomplete template (e.g. missing {env:…}) must not block gateway; model switch stays unavailable.
@@ -427,19 +424,10 @@ func providerRuntimeFromConfig(configDir string, repository planner.TaskReposito
 	if err != nil {
 		return nil, fmt.Errorf("configure provider: %w", err)
 	}
-	plannerEngine, err := planner.New(planner.Config{Provider: provider, Model: configured.ModelID, AllowedCapabilities: capabilities})
-	if err != nil {
-		return nil, fmt.Errorf("configure planner: %w", err)
-	}
-	service, err := planner.NewService(repository, plannerEngine)
-	if err != nil {
-		return nil, fmt.Errorf("configure planning service: %w", err)
-	}
 	selected := configured.ProviderID + "/" + configured.ModelID
 	return &configuredProviderRuntime{
 		configDir: configDir,
 		provider:  provider, model: configured.ModelID, selectedRef: selected,
-		planning: service, allowedCapabilities: capabilities,
 	}, nil
 }
 
@@ -468,16 +456,6 @@ func (r *configuredProviderRuntime) SelectModel(_ context.Context, ref string) (
 	if err != nil {
 		return gateway.ModelConfig{}, err
 	}
-	if r.planning != nil {
-		if plannerEngine := r.planning.Planner(); plannerEngine != nil {
-			if err := plannerEngine.SetProvider(provider); err != nil {
-				return gateway.ModelConfig{}, err
-			}
-			if err := plannerEngine.SetModel(resolved.ModelID); err != nil {
-				return gateway.ModelConfig{}, err
-			}
-		}
-	}
 	if r.agent != nil {
 		if err := r.agent.SetProvider(provider); err != nil {
 			return gateway.ModelConfig{}, err
@@ -485,11 +463,31 @@ func (r *configuredProviderRuntime) SelectModel(_ context.Context, ref string) (
 		if err := r.agent.SetModel(resolved.ModelID); err != nil {
 			return gateway.ModelConfig{}, err
 		}
+		r.agent.SetContextWindow(resolved.ContextWindow)
+	}
+	if r.chat != nil {
+		r.chat.SetContextWindow(resolved.ContextWindow)
 	}
 	r.provider = provider
 	r.model = resolved.ModelID
 	r.selectedRef = resolved.ProviderID + "/" + resolved.ModelID
 	slog.Info("model switched", "component", "daemon", "operation", "select_model", "result", "succeeded",
-		"model", r.selectedRef, "config_path", writtenPath)
+		"model", r.selectedRef, "context_window", resolved.ContextWindow, "config_path", writtenPath)
 	return gatewayModelConfig(r.configDir, r)
+}
+
+// mcpStatusAdapter maps tools.MCPRegistry to gateway.MCPStatusProvider.
+type mcpStatusAdapter struct {
+	registry *tools.MCPRegistry
+}
+
+func (a mcpStatusAdapter) MCPStatus() gateway.MCPStatus {
+	st := a.registry.Status()
+	return gateway.MCPStatus{
+		Enabled: st.Enabled,
+		Total:   st.Total,
+		OK:      st.OK,
+		Error:   st.Error,
+		Tools:   st.Tools,
+	}
 }

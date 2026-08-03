@@ -26,6 +26,90 @@ type File struct {
 	Schema   string              `json:"$schema,omitempty"`
 	Model    string              `json:"model"`
 	Provider map[string]Provider `json:"provider"`
+	// Chat configures agent-mode session chat workspace grants (optional).
+	Chat *ChatConfig `json:"chat,omitempty"`
+	// MCP configures stdio MCP servers (optional; ADR-040).
+	MCP *MCPConfig `json:"mcp,omitempty"`
+}
+
+// MCPConfig is the optional MCP servers section of autozeagent.json.
+type MCPConfig struct {
+	Servers map[string]MCPServer `json:"servers,omitempty"`
+}
+
+// MCPServer is one stdio MCP server process.
+type MCPServer struct {
+	Command string            `json:"command"`
+	Args    []string          `json:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+}
+
+// ChatConfig is the optional session chat workspace section of autozeagent.json.
+// Tab agent (build) vs plan (read-only) selects tools; this block sets roots,
+// agent write ceiling, and optional packing/loop limits (ADR-041).
+type ChatConfig struct {
+	// Roots are absolute workspace paths for default chat tool grants.
+	// Empty → daemon uses its working directory.
+	Roots []string `json:"roots,omitempty"`
+	// AllowWrite is a ceiling for agent (build) mode write tools.
+	// nil / omitted → true (agent may write). false → agent is also read-only.
+	// Plan mode is always read-only regardless of this field.
+	AllowWrite *bool `json:"allow_write,omitempty"`
+	// Tools opt-in high-risk agent tools (default all off). Plan mode never receives these.
+	Tools *ChatToolsConfig `json:"tools,omitempty"`
+	// Compaction controls session head summarization (ADR-041). Omit → enabled.
+	Compaction *ChatCompactionConfig `json:"compaction,omitempty"`
+	// MaxIterations caps agent tool-loop iterations per chat run (1–64). Omit → 8.
+	MaxIterations int `json:"max_iterations,omitempty"`
+}
+
+// ChatToolsConfig is the optional chat.tools allowlist for agent mode only.
+type ChatToolsConfig struct {
+	// Git enables git_status / git_diff / git_add / git_commit path-scoped grants (default false).
+	Git bool `json:"git,omitempty"`
+	// Process enables process_exec path-scoped grants (default false).
+	Process bool `json:"process,omitempty"`
+}
+
+// ChatCompactionConfig is the optional chat.compaction object.
+type ChatCompactionConfig struct {
+	// Enabled defaults true when Compaction is nil or Enabled is nil.
+	Enabled *bool `json:"enabled,omitempty"`
+}
+
+// AgentWriteCeiling reports whether agent mode may receive write grants.
+func (c ChatConfig) AgentWriteCeiling() bool {
+	if c.AllowWrite == nil {
+		return true
+	}
+	return *c.AllowWrite
+}
+
+// AgentGitEnabled reports whether agent mode may receive git_* grants (default false).
+func (c ChatConfig) AgentGitEnabled() bool {
+	return c.Tools != nil && c.Tools.Git
+}
+
+// AgentProcessEnabled reports whether agent mode may receive process_exec grants (default false).
+func (c ChatConfig) AgentProcessEnabled() bool {
+	return c.Tools != nil && c.Tools.Process
+}
+
+// CompactionEnabled reports whether LLM/extractive session compaction is on.
+// Default true when chat.compaction is omitted or enabled is omitted.
+func (c ChatConfig) CompactionEnabled() bool {
+	if c.Compaction == nil || c.Compaction.Enabled == nil {
+		return true
+	}
+	return *c.Compaction.Enabled
+}
+
+// MaxIterationsOrDefault returns MaxIterations or 8 when unset/zero.
+func (c ChatConfig) MaxIterationsOrDefault() int {
+	if c.MaxIterations == 0 {
+		return 8
+	}
+	return c.MaxIterations
 }
 
 type Provider struct {
@@ -46,11 +130,14 @@ type ProviderOptions struct {
 }
 
 type Model struct {
-	Name            string   `json:"name,omitempty"`
-	ResponseFormat  string   `json:"responseFormat,omitempty"`
-	Temperature     *float64 `json:"temperature,omitempty"`
-	MaxTokens       int64    `json:"maxTokens,omitempty"`
-	ReasoningEffort string   `json:"reasoningEffort,omitempty"`
+	Name           string   `json:"name,omitempty"`
+	ResponseFormat string   `json:"responseFormat,omitempty"`
+	Temperature    *float64 `json:"temperature,omitempty"`
+	MaxTokens      int64    `json:"maxTokens,omitempty"`
+	// ContextWindow is the model context length in tokens (not maxTokens output cap).
+	// Omit or 0 when unknown.
+	ContextWindow   int64  `json:"contextWindow,omitempty"`
+	ReasoningEffort string `json:"reasoningEffort,omitempty"`
 }
 
 type Resolved struct {
@@ -65,6 +152,7 @@ type Resolved struct {
 	ResponseFormat   string
 	Temperature      *float64
 	MaxTokens        int64
+	ContextWindow    int64
 	ReasoningEffort  string
 	AnthropicVersion string
 	Headers          map[string]string
@@ -156,6 +244,134 @@ func Load(configDir string) (*Resolved, error) {
 		return nil, err
 	}
 	return &resolved, nil
+}
+
+// LoadChat reads the optional chat section from the first resolvable config file.
+// Missing file or missing chat block returns a zero ChatConfig (empty roots; agent write allowed).
+// Secrets are not resolved; only structural validation runs.
+func LoadChat(configDir string) (ChatConfig, error) {
+	path, err := findConfigPath(configDir)
+	if err != nil {
+		return ChatConfig{}, err
+	}
+	if path == "" {
+		return ChatConfig{}, nil
+	}
+	file, err := decodeConfigFile(path)
+	if err != nil {
+		return ChatConfig{}, err
+	}
+	if file.Chat == nil {
+		return ChatConfig{}, nil
+	}
+	chat := *file.Chat
+	if err := chat.validate(); err != nil {
+		return ChatConfig{}, err
+	}
+	return chat, nil
+}
+
+// LoadMCP reads the optional mcp section. Missing file or mcp block returns zero config.
+// Env values may use {env:VAR} / {file:...} and are resolved relative to the config directory.
+func LoadMCP(configDir string) (MCPConfig, error) {
+	path, err := findConfigPath(configDir)
+	if err != nil {
+		return MCPConfig{}, err
+	}
+	if path == "" {
+		return MCPConfig{}, nil
+	}
+	file, err := decodeConfigFile(path)
+	if err != nil {
+		return MCPConfig{}, err
+	}
+	if file.MCP == nil {
+		return MCPConfig{}, nil
+	}
+	mcp := *file.MCP
+	if err := mcp.validate(); err != nil {
+		return MCPConfig{}, err
+	}
+	baseDir := filepath.Dir(path)
+	for name, server := range mcp.Servers {
+		env := make(map[string]string, len(server.Env))
+		for k, v := range server.Env {
+			resolved, err := resolveValue(v, baseDir)
+			if err != nil {
+				return MCPConfig{}, fmt.Errorf("mcp server %q env %q: %w", name, k, err)
+			}
+			env[k] = resolved
+		}
+		server.Env = env
+		mcp.Servers[name] = server
+	}
+	return mcp, nil
+}
+
+func (c MCPConfig) validate() error {
+	for name, server := range c.Servers {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return errors.New("mcp server name is required")
+		}
+		if !ValidMCPServerName(name) {
+			return fmt.Errorf("mcp server name %q must match [a-zA-Z0-9_-]+", name)
+		}
+		if strings.TrimSpace(server.Command) == "" {
+			return fmt.Errorf("mcp server %q: command is required", name)
+		}
+	}
+	return nil
+}
+
+// ValidMCPServerName matches tool name safe fragment for mcp_<server>_*.
+func ValidMCPServerName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// EffectiveRoots returns configured absolute roots, or fallback when roots are empty.
+func (c ChatConfig) EffectiveRoots(fallback string) []string {
+	var out []string
+	for _, root := range c.Roots {
+		root = strings.TrimSpace(root)
+		if root == "" {
+			continue
+		}
+		out = append(out, root)
+	}
+	if len(out) > 0 {
+		return out
+	}
+	fallback = strings.TrimSpace(fallback)
+	if fallback == "" {
+		return nil
+	}
+	return []string{fallback}
+}
+
+func (c ChatConfig) validate() error {
+	for i, root := range c.Roots {
+		root = strings.TrimSpace(root)
+		if root == "" {
+			continue
+		}
+		if !filepath.IsAbs(root) {
+			return fmt.Errorf("chat.roots[%d] must be an absolute path", i)
+		}
+	}
+	if c.MaxIterations != 0 && (c.MaxIterations < 1 || c.MaxIterations > 64) {
+		return fmt.Errorf("chat.max_iterations must be between 1 and 64 (or omit for default 8)")
+	}
+	return nil
 }
 
 // ResolveModel loads configuration and resolves provider/model for the given ref.
@@ -496,6 +712,9 @@ func resolveFromFile(path string, config File, providerID, modelID string) (Reso
 	if modelConfig.MaxTokens < 0 {
 		return Resolved{}, fmt.Errorf("model %q maxTokens must not be negative", modelID)
 	}
+	if modelConfig.ContextWindow < 0 {
+		return Resolved{}, fmt.Errorf("model %q contextWindow must not be negative", modelID)
+	}
 	reasoningEffort := strings.TrimSpace(modelConfig.ReasoningEffort)
 	if reasoningEffort != "" && protocol != ProtocolOpenAIChat && protocol != ProtocolOpenAIResponses {
 		return Resolved{}, fmt.Errorf("model %q reasoningEffort is only supported by OpenAI-compatible protocols", modelID)
@@ -512,6 +731,7 @@ func resolveFromFile(path string, config File, providerID, modelID string) (Reso
 		ResponseFormat:  responseFormat,
 		Temperature:     modelConfig.Temperature,
 		MaxTokens:       modelConfig.MaxTokens,
+		ContextWindow:   modelConfig.ContextWindow,
 		ReasoningEffort: reasoningEffort,
 
 		AnthropicVersion: strings.TrimSpace(provider.Options.AnthropicVersion),

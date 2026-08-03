@@ -110,10 +110,7 @@ func (p *Provider) Complete(ctx context.Context, request providerapi.CompletionR
 	if err := json.Unmarshal(payload, &decoded); err != nil {
 		return providerapi.CompletionResponse{}, providerhttp.Protocol(p.name, errors.New("invalid JSON response"))
 	}
-	result := providerapi.CompletionResponse{FinishReason: decoded.Status, Usage: providerapi.Usage{
-		InputTokens: providerapi.TokenCount(decoded.Usage.InputTokens), OutputTokens: providerapi.TokenCount(decoded.Usage.OutputTokens),
-		TotalTokens: providerapi.TokenCount(decoded.Usage.TotalTokens),
-	}}
+	result := providerapi.CompletionResponse{FinishReason: decoded.Status, Usage: usageFromResponses(decoded.Usage)}
 	for index, item := range decoded.Output {
 		switch item.Type {
 		case "message":
@@ -342,9 +339,31 @@ type responsesResponse struct {
 			Text string `json:"text"`
 		} `json:"content"`
 	} `json:"output"`
-	Usage struct {
-		InputTokens  int64 `json:"input_tokens"`
-		OutputTokens int64 `json:"output_tokens"`
-		TotalTokens  int64 `json:"total_tokens"`
-	} `json:"usage"`
+	Usage responsesUsage `json:"usage"`
+}
+
+type responsesUsage struct {
+	InputTokens        int64 `json:"input_tokens"`
+	OutputTokens       int64 `json:"output_tokens"`
+	TotalTokens        int64 `json:"total_tokens"`
+	InputTokensDetails *struct {
+		CachedTokens int64 `json:"cached_tokens"`
+	} `json:"input_tokens_details,omitempty"`
+}
+
+func usageFromResponses(u responsesUsage) providerapi.Usage {
+	var cacheRead int64
+	if u.InputTokensDetails != nil {
+		cacheRead = u.InputTokensDetails.CachedTokens
+	}
+	uncached := u.InputTokens
+	if cacheRead > 0 && cacheRead <= u.InputTokens {
+		uncached = u.InputTokens - cacheRead
+	}
+	return providerapi.Usage{
+		InputTokens:     providerapi.TokenCount(uncached),
+		OutputTokens:    providerapi.TokenCount(u.OutputTokens),
+		TotalTokens:     providerapi.TokenCount(u.TotalTokens),
+		CacheReadTokens: providerapi.TokenCount(cacheRead),
+	}
 }

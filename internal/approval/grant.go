@@ -488,11 +488,27 @@ func grantMatchesRequest(grant CapabilityGrant, request GrantRequest) error {
 	if !pathAllowed(grant.Scope.Paths, request.Path) {
 		return fmt.Errorf("%w: path is outside grant", ErrGrantDenied)
 	}
-	if grant.Scope.Command != strings.TrimSpace(request.Command) || !slices.Equal(grant.Scope.Arguments, request.Arguments) {
-		return fmt.Errorf("%w: command or arguments do not match", ErrGrantDenied)
+	// Scheme A (P4.3): empty grant command/args = any request command/args within path scope.
+	// Non-empty grant command must match exactly; non-empty grant args must match exactly.
+	if err := commandArgsMatch(grant.Scope.Command, grant.Scope.Arguments, request.Command, request.Arguments); err != nil {
+		return err
 	}
 	if !domainAllowed(grant.Scope.NetworkDomains, request.NetworkDomain) {
 		return fmt.Errorf("%w: network domain is outside grant", ErrGrantDenied)
+	}
+	return nil
+}
+
+// commandArgsMatch implements grant command/args rules for scheme A:
+// empty grant command accepts any request command; empty grant args accept any request args.
+// When grant command is set it must equal the request; when grant args is non-empty it must equal request args.
+func commandArgsMatch(grantCmd string, grantArgs []string, requestCmd string, requestArgs []string) error {
+	requestCmd = strings.TrimSpace(requestCmd)
+	if grantCmd != "" && grantCmd != requestCmd {
+		return fmt.Errorf("%w: command or arguments do not match", ErrGrantDenied)
+	}
+	if len(grantArgs) > 0 && !slices.Equal(grantArgs, requestArgs) {
+		return fmt.Errorf("%w: command or arguments do not match", ErrGrantDenied)
 	}
 	return nil
 }

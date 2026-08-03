@@ -1,6 +1,6 @@
-// Package agent executes provider tool calls through the mandatory Tool Broker.
-// Planning remains owned by internal/planner; this package only executes an
-// already selected plan step.
+// Package agent runs the provider tool loop through the mandatory Tool Broker.
+// Chat dual-track orchestration lives in chatsession (ADR-038); child Runs via
+// the task tool are ADR-039 (implementation backlog).
 package agent
 
 import (
@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"autozeagent.local/autozeagent/internal/contextpack"
+	"autozeagent.local/autozeagent/internal/runmeta"
 	"autozeagent.local/autozeagent/pkg/providerapi"
 	"autozeagent.local/autozeagent/pkg/toolapi"
 )
@@ -47,18 +49,31 @@ type Config struct {
 	Records       *RecordStore
 	Model         string
 	MaxIterations int
+	// MaxToolResultRunes caps tool/assistant Content length on provider
+	// requests only. Zero uses DefaultMaxToolResultRunes. Records stay full.
+	MaxToolResultRunes int
+	// ContextWindow is the model context length in tokens; 0 = unknown (pack still L1-trims).
+	ContextWindow int64
 	// Stream is optional; when set, CollectStream events are teed for local UI.
 	Stream StreamObserver
+	// Context is optional; when set, each successful provider iteration updates pressure snapshot.
+	Context *contextpack.Store
+	// Calibrator is optional; when set, post-flight usage calibrates estimates.
+	Calibrator *contextpack.Calibrator
 }
 
 type Runner struct {
-	mu            sync.RWMutex
-	provider      StreamingProvider
-	broker        ToolBroker
-	records       *RecordStore
-	model         string
-	maxIterations int
-	stream        StreamObserver
+	mu                 sync.RWMutex
+	provider           StreamingProvider
+	broker             ToolBroker
+	records            *RecordStore
+	model              string
+	maxIterations      int
+	maxToolResultRunes int
+	contextWindow      int64
+	stream             StreamObserver
+	contextStore       *contextpack.Store
+	calibrator         *contextpack.Calibrator
 }
 
 type RunRequest struct {
@@ -82,6 +97,10 @@ type RunRequest struct {
 	MaxCostMicros     int64
 	Temperature       *float64
 	ToolTimeoutMillis int64
+	// ContextWindow overrides runner default when > 0.
+	ContextWindow int64
+	// Depth is 0 for top-level chat runs; child task tools increment (ADR-039).
+	Depth int
 }
 
 type Result struct {
@@ -106,10 +125,73 @@ func New(config Config) (*Runner, error) {
 	if maxIterations < 1 || maxIterations > 64 {
 		return nil, errors.New("agent maximum iterations must be between 1 and 64")
 	}
+	maxToolResultRunes := config.MaxToolResultRunes
+	if maxToolResultRunes <= 0 {
+		maxToolResultRunes = DefaultMaxToolResultRunes
+	}
+	cal := config.Calibrator
+	if cal == nil {
+		cal = contextpack.NewCalibrator()
+	}
 	return &Runner{
 		provider: config.Provider, broker: config.Broker, records: config.Records,
-		model: model, maxIterations: maxIterations, stream: config.Stream,
+		model: model, maxIterations: maxIterations, maxToolResultRunes: maxToolResultRunes,
+		contextWindow: config.ContextWindow, stream: config.Stream,
+		contextStore: config.Context, calibrator: cal,
 	}, nil
+}
+
+// SetContextWindow updates the model context length used for packing.
+func (r *Runner) SetContextWindow(n int64) {
+	if n < 0 {
+		n = 0
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.contextWindow = n
+}
+
+// ContextWindow returns the configured model context length (0 = unknown).
+func (r *Runner) ContextWindow() int64 {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.contextWindow
+}
+
+// CompactSummary asks the model for a short head summary (no tools). Used by chat compaction.
+func (r *Runner) CompactSummary(ctx context.Context, head []providerapi.Message) (string, error) {
+	if ctx == nil {
+		return "", fmt.Errorf("%w: context is required", ErrInvalidRequest)
+	}
+	if len(head) == 0 {
+		return "", nil
+	}
+	provider, model := r.snapshot()
+	body := contextpack.ExtractiveSummary(head, 12_000)
+	req := providerapi.CompletionRequest{
+		Model: model,
+		Messages: []providerapi.Message{
+			{Role: providerapi.RoleSystem, Content: "Summarize the prior coding-agent conversation for continued work. " +
+				"Keep: goals, decisions, files touched, failures/tests, open TODOs. Omit tool dumps. Max ~400 words."},
+			{Role: providerapi.RoleUser, Content: body},
+		},
+		MaxOutputTokens: 1024,
+	}
+	var content strings.Builder
+	err := provider.Stream(ctx, req, func(ev providerapi.StreamEvent) error {
+		if ev.Type == providerapi.StreamDelta {
+			content.WriteString(ev.ContentDelta)
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	out := strings.TrimSpace(content.String())
+	if out == "" {
+		return contextpack.ExtractiveSummary(head, 4_000), nil
+	}
+	return out, nil
 }
 
 // SetProvider replaces the streaming provider used by subsequent runs.
@@ -199,10 +281,11 @@ func (r *Runner) Run(ctx context.Context, request RunRequest) (Result, error) {
 				maxOutputTokens = remaining
 			}
 		}
+		packed, packRaw, packEst, usable := r.packForProvider(messages, definitions, request, model, maxOutputTokens)
 		providerStartedAt := time.Now()
 		response, attempts, err := r.collectProviderResponse(ctx, provider, providerapi.CompletionRequest{
 			Model:           model,
-			Messages:        messages,
+			Messages:        packed,
 			Tools:           definitions,
 			MaxOutputTokens: maxOutputTokens,
 			Temperature:     request.Temperature,
@@ -227,11 +310,13 @@ func (r *Runner) Run(ctx context.Context, request RunRequest) (Result, error) {
 			slog.Error("provider iteration failed", logArgs...)
 			return result, err
 		}
+		r.observeUsage(ctx, request, model, response.Usage, packRaw, packEst, usable, len(packed))
 		slog.Info("provider iteration completed",
 			"component", "provider", "operation", "stream", "result", "succeeded",
 			"run_id", request.RunID, "task_id", request.TaskID, "plan_id", request.PlanID, "step_id", request.StepID, "trace_id", request.TraceID,
 			"iteration", result.Iterations, "provider_attempts", attempts, "model", model, "duration_ms", durationMillis,
 			"input_tokens", response.Usage.InputTokens, "output_tokens", response.Usage.OutputTokens, "total_tokens", response.Usage.TotalTokens,
+			"prompt_tokens", response.Usage.PromptTokens(), "estimate_tokens", packEst, "usable_tokens", usable,
 			"tool_calls", len(response.ToolCalls), "finish_reason", response.FinishReason,
 		)
 
@@ -272,7 +357,17 @@ func (r *Runner) Run(ctx context.Context, request RunRequest) (Result, error) {
 		}
 		messages = append(messages, assistant)
 		for _, call := range response.ToolCalls {
-			toolResponse, err := r.broker.Execute(ctx, toolapi.Request{
+			toolCtx := runmeta.With(ctx, runmeta.Context{
+				RunID: request.RunID, TaskID: request.TaskID, SessionID: request.SessionID,
+				PlanID: request.PlanID, PlanHash: request.PlanHash, StepID: request.StepID,
+				Actor: request.Actor, TraceID: request.TraceID,
+				AllowedTools:       append([]string(nil), request.AllowedTools...),
+				CapabilityGrantIDs: cloneGrantMap(request.CapabilityGrantIDs),
+				MaxOutputTokens:    request.MaxOutputTokens, MaxTotalTokens: request.MaxTotalTokens,
+				MaxCostMicros: request.MaxCostMicros, ToolTimeoutMillis: request.ToolTimeoutMillis,
+				Depth: request.Depth, CallID: call.ID,
+			})
+			toolResponse, err := r.broker.Execute(toolCtx, toolapi.Request{
 				CallID: call.ID, RunID: request.RunID, TaskID: request.TaskID,
 				PlanID: request.PlanID, PlanHash: request.PlanHash, StepID: request.StepID,
 				CapabilityGrantID: request.CapabilityGrantID, CapabilityGrantIDs: append([]string(nil), request.CapabilityGrantIDs[call.Name]...),
@@ -439,6 +534,104 @@ func validateRunRequest(request RunRequest) error {
 	return nil
 }
 
+func (r *Runner) packForProvider(
+	messages []providerapi.Message,
+	definitions []providerapi.ToolDefinition,
+	request RunRequest,
+	model string,
+	maxOutputTokens int64,
+) (packed []providerapi.Message, rawEstimate, estimate, usable int64) {
+	window := request.ContextWindow
+	if window <= 0 {
+		r.mu.RLock()
+		window = r.contextWindow
+		r.mu.RUnlock()
+	}
+	toolEst := contextpack.EstimateTools(definitions)
+	usable = contextpack.UsableWindow(window, maxOutputTokens, 0)
+	budget := int64(0)
+	if usable > 0 {
+		budget = usable - toolEst
+		if budget < 1024 {
+			budget = 1024
+		}
+		// Use calibrated budget so packing targets real window fill.
+		if r.calibrator != nil {
+			ratio := r.calibrator.Ratio(model)
+			if ratio > 0 {
+				// If estimate overshoots, shrink budget so raw*ratio ≈ usable.
+				budget = int64(float64(budget)/ratio + 0.5)
+				if budget < 1024 {
+					budget = 1024
+				}
+			}
+		}
+	}
+	res := contextpack.Pack(messages, contextpack.PackOptions{
+		Budget:             budget,
+		Model:              model,
+		MaxToolResultRunes: r.maxToolResultRunes,
+	})
+	rawEstimate = res.EstimateTokens + toolEst
+	estimate = rawEstimate
+	if r.calibrator != nil {
+		estimate = r.calibrator.Apply(model, rawEstimate)
+	}
+	return res.Messages, rawEstimate, estimate, usable
+}
+
+func (r *Runner) observeUsage(
+	ctx context.Context,
+	request RunRequest,
+	model string,
+	usage providerapi.Usage,
+	rawEstimate, estimate, usable int64,
+	historyMsgs int,
+) {
+	prompt := int64(usage.PromptTokens())
+	if r.calibrator != nil && rawEstimate > 0 && prompt > 0 {
+		r.calibrator.Observe(model, rawEstimate, prompt)
+	}
+	if r.contextStore == nil || strings.TrimSpace(request.TaskID) == "" {
+		return
+	}
+	window := request.ContextWindow
+	if window <= 0 {
+		r.mu.RLock()
+		window = r.contextWindow
+		r.mu.RUnlock()
+	}
+	ratio := 1.0
+	calibrated := false
+	if r.calibrator != nil {
+		ratio = r.calibrator.Ratio(model)
+		calibrated = ratio != 1
+	}
+	snap := contextpack.Snapshot{
+		TaskID:           request.TaskID,
+		SessionID:        request.SessionID,
+		Model:            model,
+		ContextWindow:    window,
+		MaxOutputTokens:  request.MaxOutputTokens,
+		UsableTokens:     usable,
+		LastPromptTokens: prompt,
+		LastOutputTokens: int64(usage.OutputTokens),
+		EstimateTokens:   estimate,
+		CacheReadTokens:  int64(usage.CacheReadTokens),
+		CacheWriteTokens: int64(usage.CacheWriteTokens),
+		Source:           contextpack.SourceProviderUsage,
+		EstimateSource:   contextpack.SourceLocalEstimate,
+		Ratio:            ratio,
+		Calibrated:       calibrated,
+		HistoryMessages:  historyMsgs,
+		UpdatedAt:        time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if err := r.contextStore.Upsert(ctx, snap); err != nil {
+		slog.Warn("context snapshot upsert failed", "component", "agent", "operation", "context_snapshot",
+			"result", "warning", "task_id", request.TaskID, "error", err)
+	}
+}
+
 func selectDefinitions(all []toolapi.Definition, allowed []string) ([]providerapi.ToolDefinition, map[string]struct{}, error) {
 	available := make(map[string]toolapi.Definition, len(all))
 	for _, definition := range all {
@@ -539,12 +732,25 @@ func addUsage(total *providerapi.Usage, next providerapi.Usage) {
 	total.InputTokens += next.InputTokens
 	total.OutputTokens += next.OutputTokens
 	total.TotalTokens += next.TotalTokens
+	total.CacheReadTokens += next.CacheReadTokens
+	total.CacheWriteTokens += next.CacheWriteTokens
 	if total.Cost.Currency == "" || total.Cost.Currency == next.Cost.Currency {
 		if total.Cost.Currency == "" {
 			total.Cost.Currency = next.Cost.Currency
 		}
 		total.Cost.Micros += next.Cost.Micros
 	}
+}
+
+func cloneGrantMap(in map[string][]string) map[string][]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string][]string, len(in))
+	for k, v := range in {
+		out[k] = append([]string(nil), v...)
+	}
+	return out
 }
 
 const (

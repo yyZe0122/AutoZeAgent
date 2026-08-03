@@ -1,10 +1,9 @@
 package gatewayclient
 
 import (
-	"autozeagent.local/autozeagent/internal/approvalsubmission"
 	"autozeagent.local/autozeagent/internal/corequery"
 	"autozeagent.local/autozeagent/internal/kernel"
-	"autozeagent.local/autozeagent/internal/runexecution"
+	"autozeagent.local/autozeagent/internal/taskcontrol"
 )
 
 // Identity aliases — client-facing IDs without importing kernel.
@@ -20,6 +19,7 @@ type (
 type (
 	Task               = corequery.Task
 	TaskUsage          = corequery.TaskUsage
+	TaskContext        = corequery.TaskContext
 	Plan               = corequery.Plan
 	Step               = corequery.Step
 	Run                = corequery.Run
@@ -29,36 +29,23 @@ type (
 	TranscriptToolCall = corequery.TranscriptToolCall
 )
 
-// Approval interaction types.
+// Task control types (pause/resume/cancel).
 type (
-	Action           = approvalsubmission.Action
-	Prompt           = approvalsubmission.Prompt
-	PromptBudget     = approvalsubmission.PromptBudget
-	PromptStep       = approvalsubmission.PromptStep
-	PromptCapability = approvalsubmission.PromptCapability
-	ActionOption     = approvalsubmission.ActionOption
+	TaskAction = taskcontrol.TaskAction
 )
 
-// Run / task control types.
-type (
-	TaskAction  = runexecution.TaskAction
-	StartResult = runexecution.StartResult
-)
-
-// Approval action constants.
-const (
-	ActionAllowOnce      = approvalsubmission.ActionAllowOnce
-	ActionAllowLimited   = approvalsubmission.ActionAllowLimited
-	ActionAllowPlan      = approvalsubmission.ActionAllowPlan
-	ActionReject         = approvalsubmission.ActionReject
-	ActionRequestChanges = approvalsubmission.ActionRequestChanges
-)
+// StartResult is the legacy JSON body shape for POST /v1/runs (HTTP 410 Gone).
+type StartResult struct {
+	TaskID TaskID  `json:"task_id"`
+	PlanID PlanID  `json:"plan_id"`
+	RunIDs []RunID `json:"run_ids"`
+}
 
 // Task control action constants.
 const (
-	TaskActionPause  = runexecution.TaskActionPause
-	TaskActionResume = runexecution.TaskActionResume
-	TaskActionCancel = runexecution.TaskActionCancel
+	TaskActionPause  = taskcontrol.TaskActionPause
+	TaskActionResume = taskcontrol.TaskActionResume
+	TaskActionCancel = taskcontrol.TaskActionCancel
 )
 
 // Task state strings as returned by the gateway (corequery uses plain strings).
@@ -74,7 +61,7 @@ const (
 	TaskStateCancelled       = string(kernel.TaskCancelled)
 )
 
-// Task execution mode (permission posture for the task).
+// Task execution mode (permission posture: agent=build write, plan=read-only chat).
 const (
 	ExecutionModeAgent = string(kernel.ExecutionModeAgent)
 	ExecutionModePlan  = string(kernel.ExecutionModePlan)

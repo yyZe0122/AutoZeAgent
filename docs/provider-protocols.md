@@ -97,6 +97,7 @@ Generation options belong to each entry in `models`, so models sharing a provide
 
 - `temperature` is used when the request does not already specify a temperature.
 - `maxTokens` is a model-level output-token cap. It fills an unset request limit, caps a larger request limit, and preserves a smaller request limit.
+- `contextWindow` is the model context length in tokens (optional). It is **not** the same as `maxTokens` (output cap). Used for **provider-view packing and TUI pressure** (ADR-041): usable window ≈ `contextWindow − maxOutput − reserve`. Omit or `0` when unknown (packing falls back to L1 trim only); do not copy run budgets into this field.
 - `reasoningEffort` is used when the request does not already specify an effort. It currently maps to `reasoning_effort` for OpenAI-compatible Chat Completions and to `reasoning.effort` for OpenAI Responses.
 - Request-level values take precedence over model defaults, except that `maxTokens` always remains an upper bound.
 - Configure only options supported by the selected model and endpoint. AutoZeAgent rejects `reasoningEffort` for the Anthropic and Gemini adapters rather than silently ignoring it.

@@ -1,11 +1,37 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"autozeagent.local/autozeagent/internal/gatewayclient"
 )
+
+// planBudget matches approval.PlanBudget JSON on plan documents
+// (max_duration_ms — not PromptBudget's max_duration_millis).
+type planBudget struct {
+	MaxTokens         int64 `json:"max_tokens"`
+	MaxCostMicros     int64 `json:"max_cost_micros"`
+	MaxDurationMillis int64 `json:"max_duration_ms"`
+}
+
+func planBudgetOf(plan *gatewayclient.Plan) (planBudget, bool) {
+	if plan == nil || len(plan.Document) == 0 {
+		return planBudget{}, false
+	}
+	var doc struct {
+		Budget planBudget `json:"budget"`
+	}
+	if err := json.Unmarshal(plan.Document, &doc); err != nil {
+		return planBudget{}, false
+	}
+	b := doc.Budget
+	if b.MaxTokens == 0 && b.MaxCostMicros == 0 && b.MaxDurationMillis == 0 {
+		return planBudget{}, false
+	}
+	return b, true
+}
 
 // MCPStatus is the future MCP adapter summary for the Metrics panel.
 // Enabled is false until Tool Broker exposes MCP status.
@@ -17,21 +43,23 @@ type MCPStatus struct {
 	Detail  string
 }
 
-// SessionMetrics is the TUI chrome surface for usage / model / MCP indicators.
+// SessionMetrics is the TUI chrome surface for usage / model indicators.
 // Implementations may return ok=false when the underlying service is missing.
+// Cache/MCP panels render only when data is present (never permanent "—").
 type SessionMetrics interface {
 	// TaskTokenUsage returns used tokens and optional budget max for the focused task.
 	TaskTokenUsage() (used, max int64, ok bool)
-	// ContextWindow is the model context length when known.
+	// ContextWindow is the model context length when known (from ModelConfig).
 	ContextWindow() (n int, ok bool)
+	// ContextPressure is last prompt fill vs usable window [0,1+] when known.
+	ContextPressure() (pressure float64, ok bool)
 	// CacheHitRate is provider cache hit ratio in [0,1] when known.
 	CacheHitRate() (rate float64, ok bool)
-	// MCPStatus summarizes MCP servers (placeholder until Broker wires adapters).
+	// MCPStatus summarizes MCP servers when Tool Broker exposes adapters.
 	MCPStatus() MCPStatus
 }
 
 // modelMetrics is the production SessionMetrics backed by model fields.
-// Context / cache / MCP stay unavailable until daemon surfaces them.
 type modelMetrics struct {
 	m *model
 }
@@ -41,22 +69,61 @@ func (s modelMetrics) TaskTokenUsage() (used, max int64, ok bool) {
 		return 0, 0, false
 	}
 	used = s.m.usage.TotalTokens
-	if s.m.prompt != nil && s.m.prompt.Budget.MaxTokens > 0 {
-		max = s.m.prompt.Budget.MaxTokens
+	if b, okBudget := planBudgetOf(s.m.plan); okBudget && b.MaxTokens > 0 {
+		max = b.MaxTokens
 	}
 	return used, max, true
 }
 
 func (s modelMetrics) ContextWindow() (int, bool) {
-	return 0, false
+	if s.m == nil || s.m.contextWindow <= 0 {
+		return 0, false
+	}
+	return int(s.m.contextWindow), true
+}
+
+func (s modelMetrics) ContextPressure() (float64, bool) {
+	if s.m == nil || !s.m.contextOK {
+		return 0, false
+	}
+	p := s.m.taskContext.Pressure
+	if p <= 0 && s.m.taskContext.UsableTokens > 0 {
+		fill := s.m.taskContext.LastPromptTokens
+		if fill <= 0 {
+			fill = s.m.taskContext.EstimateTokens
+		}
+		if fill > 0 {
+			p = float64(fill) / float64(s.m.taskContext.UsableTokens)
+		}
+	}
+	if p <= 0 && s.m.taskContext.Source == "none" {
+		return 0, false
+	}
+	return p, true
 }
 
 func (s modelMetrics) CacheHitRate() (float64, bool) {
-	return 0, false
+	if s.m == nil || !s.m.usageOK {
+		return 0, false
+	}
+	return s.m.usage.CacheHitRate()
 }
 
 func (s modelMetrics) MCPStatus() MCPStatus {
-	return MCPStatus{Enabled: false}
+	if s.m == nil || !s.m.mcpOK {
+		return MCPStatus{Enabled: false}
+	}
+	st := s.m.mcpStatus
+	if !st.Enabled {
+		return MCPStatus{Enabled: false}
+	}
+	return MCPStatus{
+		Enabled: true,
+		Total:   st.Total,
+		OK:      st.OK,
+		Error:   st.Error,
+		Detail:  fmt.Sprintf("%d tools", st.Tools),
+	}
 }
 
 func (m *model) metrics() SessionMetrics {

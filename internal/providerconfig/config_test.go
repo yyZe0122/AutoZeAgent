@@ -284,3 +284,136 @@ func TestLoadResolvesHeaderPlaceholders(t *testing.T) {
 		t.Fatalf("resolved = %+v", resolved)
 	}
 }
+
+func TestLoadChatDefaults(t *testing.T) {
+	root := t.TempDir()
+	chat, err := LoadChat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if chat.AllowWrite != nil || len(chat.Roots) != 0 {
+		t.Fatalf("empty dir chat = %+v", chat)
+	}
+	if !chat.AgentWriteCeiling() {
+		t.Fatal("missing chat must allow agent write by default")
+	}
+	writeConfig(t, filepath.Join(root, Filename), "p/m", "https://example.com")
+	chat, err = LoadChat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !chat.AgentWriteCeiling() {
+		t.Fatal("missing chat block must default agent write ceiling true")
+	}
+	if roots := chat.EffectiveRoots("/fallback"); len(roots) != 1 || roots[0] != "/fallback" {
+		t.Fatalf("EffectiveRoots = %v", roots)
+	}
+}
+
+func TestLoadChatParsesAndValidates(t *testing.T) {
+	root := t.TempDir()
+	config := `{
+  "model": "deepseek/deepseek-chat",
+  "provider": {
+    "deepseek": {
+      "type": "openai-compatible",
+      "options": {"baseURL": "https://api.deepseek.com"},
+      "models": {"deepseek-chat": {}}
+    }
+  },
+  "chat": {
+    "roots": ["/abs/workspace"],
+    "allow_write": true,
+    "tools": {"git": true, "process": false}
+  }
+}`
+	if err := os.WriteFile(filepath.Join(root, Filename), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := LoadChat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if chat.AllowWrite == nil || !*chat.AllowWrite || len(chat.Roots) != 1 || chat.Roots[0] != "/abs/workspace" {
+		t.Fatalf("chat = %+v", chat)
+	}
+	if !chat.AgentWriteCeiling() {
+		t.Fatal("allow_write true must raise ceiling")
+	}
+	if !chat.AgentGitEnabled() || chat.AgentProcessEnabled() {
+		t.Fatalf("tools flags: git=%v process=%v", chat.AgentGitEnabled(), chat.AgentProcessEnabled())
+	}
+	if roots := chat.EffectiveRoots("/fallback"); len(roots) != 1 || roots[0] != "/abs/workspace" {
+		t.Fatalf("EffectiveRoots = %v", roots)
+	}
+	if !chat.CompactionEnabled() || chat.MaxIterationsOrDefault() != 8 {
+		t.Fatalf("defaults: compaction=%v max_iter=%d", chat.CompactionEnabled(), chat.MaxIterationsOrDefault())
+	}
+
+	bad := `{
+  "model": "deepseek/deepseek-chat",
+  "provider": {
+    "deepseek": {
+      "type": "openai-compatible",
+      "options": {"baseURL": "https://api.deepseek.com"},
+      "models": {"deepseek-chat": {}}
+    }
+  },
+  "chat": {"roots": ["relative/path"]}
+}`
+	if err := os.WriteFile(filepath.Join(root, Filename), []byte(bad), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadChat(root); err == nil {
+		t.Fatal("expected relative roots error")
+	}
+}
+
+func TestLoadChatCompactionAndMaxIterations(t *testing.T) {
+	root := t.TempDir()
+	config := `{
+  "model": "deepseek/deepseek-chat",
+  "provider": {
+    "deepseek": {
+      "type": "openai-compatible",
+      "options": {"baseURL": "https://api.deepseek.com"},
+      "models": {"deepseek-chat": {}}
+    }
+  },
+  "chat": {
+    "compaction": {"enabled": false},
+    "max_iterations": 16
+  }
+}`
+	if err := os.WriteFile(filepath.Join(root, Filename), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := LoadChat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if chat.CompactionEnabled() {
+		t.Fatal("expected compaction disabled")
+	}
+	if chat.MaxIterationsOrDefault() != 16 {
+		t.Fatalf("max_iterations = %d", chat.MaxIterationsOrDefault())
+	}
+
+	badIter := `{
+  "model": "deepseek/deepseek-chat",
+  "provider": {
+    "deepseek": {
+      "type": "openai-compatible",
+      "options": {"baseURL": "https://api.deepseek.com"},
+      "models": {"deepseek-chat": {}}
+    }
+  },
+  "chat": {"max_iterations": 100}
+}`
+	if err := os.WriteFile(filepath.Join(root, Filename), []byte(badIter), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadChat(root); err == nil {
+		t.Fatal("expected max_iterations range error")
+	}
+}

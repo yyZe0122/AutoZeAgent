@@ -33,9 +33,9 @@ make build
 2. Add or update tests for behavior changes.
 3. Preserve existing policy, approval, capability, path, timeout, and audit boundaries.
 4. Use explicit errors and deterministic recovery behavior.
-5. Add a numbered ADR under `docs/architecture/` for a significant architectural decision (this directory is the project design knowledge base).
+5. Add a numbered ADR under `docs/architecture/` for a significant architectural decision; update `docs/architecture/README.md` index when adding one.
 6. Keep the living optimization backlog only in `docs/optimization/current.md` — do not create parallel optimization notes.
-7. Update public documentation and configuration examples when user-facing behavior changes.
+7. Update public documentation (especially `README.md` dual-track / `chat` / TUI) and configuration examples when user-facing behavior changes.
 8. Do not edit generated or runtime files unless the change specifically concerns their generator or format.
 
 ## Code style

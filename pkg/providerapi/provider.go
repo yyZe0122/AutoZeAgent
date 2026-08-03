@@ -61,10 +61,39 @@ type Cost struct {
 }
 
 type Usage struct {
+	// InputTokens is non-cache / uncached input tokens when the provider
+	// distinguishes cache (used with CacheReadTokens for hit rate).
 	InputTokens  TokenCount `json:"input_tokens"`
 	OutputTokens TokenCount `json:"output_tokens"`
 	TotalTokens  TokenCount `json:"total_tokens"`
-	Cost         Cost       `json:"cost"`
+	// CacheReadTokens is input served from provider prompt cache (optional).
+	CacheReadTokens TokenCount `json:"cache_read_tokens,omitempty"`
+	// CacheWriteTokens is input written into provider prompt cache (optional).
+	CacheWriteTokens TokenCount `json:"cache_write_tokens,omitempty"`
+	// Cost is optional; most providers leave it zero (billing is vendor-side).
+	Cost Cost `json:"cost"`
+}
+
+// PromptTokens is the full prompt size for context packing and pressure:
+// uncached input + cache read + cache write. Prefer this over InputTokens alone
+// when measuring window fill (Anthropic reports uncached-only in InputTokens).
+func (u Usage) PromptTokens() TokenCount {
+	return u.InputTokens + u.CacheReadTokens + u.CacheWriteTokens
+}
+
+// CacheHitRate is cache_read / (cache_read + uncached_input).
+// ok is false when there is no cache activity or the denominator is zero.
+func (u Usage) CacheHitRate() (rate float64, ok bool) {
+	read := int64(u.CacheReadTokens)
+	uncached := int64(u.InputTokens)
+	if read <= 0 && int64(u.CacheWriteTokens) <= 0 {
+		return 0, false
+	}
+	den := read + uncached
+	if den <= 0 {
+		return 0, false
+	}
+	return float64(read) / float64(den), true
 }
 
 type ToolCall struct {

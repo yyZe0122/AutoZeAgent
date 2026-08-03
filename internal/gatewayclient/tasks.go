@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"autozeagent.local/autozeagent/internal/approval"
-	"autozeagent.local/autozeagent/internal/runexecution"
+	"autozeagent.local/autozeagent/internal/taskcontrol"
 )
 
 type TaskSubmissionRequest struct {
@@ -45,15 +45,8 @@ func (c *Client) SubmitTask(ctx context.Context, request TaskSubmissionRequest) 
 		mode = ExecutionModeAgent
 	}
 	request.ExecutionMode = mode
-	// Client-generated plan IDs are only for plan-mode async planning.
-	// Agent chat owns its synthetic plan inside the daemon.
-	if request.PlanID == "" && mode == ExecutionModePlan {
-		planID, err := RandomID("plan-")
-		if err != nil {
-			return TaskSubmissionResponse{}, err
-		}
-		request.PlanID = PlanID(planID)
-	}
+	// Both modes use daemon-owned synthetic chat plans; ignore client plan IDs.
+	request.PlanID = ""
 	var response TaskSubmissionResponse
 	if err := c.inner.DoJSON(ctx, http.MethodPost, "/v1/tasks", request, &response); err != nil {
 		return TaskSubmissionResponse{}, fmt.Errorf("create task: %w", err)
@@ -81,6 +74,26 @@ func (c *Client) TaskUsage(ctx context.Context, taskID TaskID) (TaskUsage, error
 	return usage, nil
 }
 
+// TaskContext returns window-fill pressure for a task (not lifetime token spend).
+func (c *Client) TaskContext(ctx context.Context, taskID TaskID) (TaskContext, error) {
+	var item TaskContext
+	path := "/v1/tasks/" + url.PathEscape(string(taskID)) + "/context"
+	if err := c.inner.DoJSON(ctx, http.MethodGet, path, nil, &item); err != nil {
+		return TaskContext{}, fmt.Errorf("task context: %w", err)
+	}
+	return item, nil
+}
+
+// SessionContext returns the latest context snapshot for a session.
+func (c *Client) SessionContext(ctx context.Context, sessionID SessionID) (TaskContext, error) {
+	var item TaskContext
+	path := "/v1/sessions/" + url.PathEscape(string(sessionID)) + "/context"
+	if err := c.inner.DoJSON(ctx, http.MethodGet, path, nil, &item); err != nil {
+		return TaskContext{}, fmt.Errorf("session context: %w", err)
+	}
+	return item, nil
+}
+
 func (c *Client) ListTasks(ctx context.Context, limit int) ([]Task, error) {
 	path := "/v1/tasks"
 	if limit > 0 {
@@ -95,7 +108,7 @@ func (c *Client) ListTasks(ctx context.Context, limit int) ([]Task, error) {
 
 func (c *Client) ControlTask(ctx context.Context, taskID TaskID, action TaskAction, expectedVersion uint64, reason string) (Task, error) {
 	var updated Task
-	if err := c.inner.DoJSON(ctx, http.MethodPost, "/v1/tasks/"+url.PathEscape(string(taskID))+"/actions", runexecution.TaskActionRequest{
+	if err := c.inner.DoJSON(ctx, http.MethodPost, "/v1/tasks/"+url.PathEscape(string(taskID))+"/actions", taskcontrol.TaskActionRequest{
 		ExpectedVersion: expectedVersion,
 		Action:          action,
 		Reason:          strings.TrimSpace(reason),

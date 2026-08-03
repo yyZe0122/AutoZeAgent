@@ -52,6 +52,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.modelName = msg.model.Model
 			}
 			m.models = msg.model.Models
+			m.contextWindow = msg.model.ContextWindow
+			if msg.mcpOK {
+				m.mcpStatus = msg.mcp
+				m.mcpOK = true
+			}
 			if msg.health.Core.Runtime.DataDir != "" {
 				m.dataDir = msg.health.Core.Runtime.DataDir
 			}
@@ -125,7 +130,6 @@ func (m model) applyRefresh(msg refreshDoneMsg) (tea.Model, tea.Cmd) {
 			if msg.plan != nil {
 				m.planID = msg.plan.ID
 			}
-			m.prompt = msg.prompt
 			m.runs = msg.runs
 			if msg.messages != nil {
 				m.messages = msg.messages
@@ -134,9 +138,6 @@ func (m model) applyRefresh(msg refreshDoneMsg) (tea.Model, tea.Cmd) {
 			if msg.plan != nil {
 				m.plan = msg.plan
 				m.planID = msg.plan.ID
-			}
-			if msg.prompt != nil {
-				m.prompt = msg.prompt
 			}
 			if msg.runs != nil {
 				m.runs = msg.runs
@@ -149,23 +150,23 @@ func (m model) applyRefresh(msg refreshDoneMsg) (tea.Model, tea.Cmd) {
 			m.usage = msg.usage
 			m.usageOK = true
 		}
+		if msg.contextOK {
+			m.taskContext = msg.taskContext
+			m.contextOK = true
+		}
 		// Authoritative transcript clears live typewriter draft.
 		if msg.messages != nil {
 			m.liveContent = ""
 			m.liveThinking = ""
 			m.liveRunID = ""
 		}
-		m.timeline = buildChatTimeline(m.messages, m.task, m.plan, m.prompt, m.runs)
+		m.timeline = buildChatTimeline(m.messages, m.task, m.plan, m.runs)
 		if m.liveContent != "" || m.liveThinking != "" {
 			m.timeline = appendLiveDraft(m.timeline, m.liveThinking, m.liveContent)
 		}
 		m.lastRunPoll = time.Now()
 		if n := m.listLen(); n > 0 && m.selectedIdx >= n {
 			m.selectedIdx = n - 1
-		}
-		if m.waitingApproval() {
-			m.approvalOpen = true
-			m.statusMsg = "waiting approval — a allow · r reject · Esc hide panel"
 		}
 	}
 	m.layout()
@@ -197,12 +198,6 @@ func (m model) applyCommand(msg commandDoneMsg) (tea.Model, tea.Cmd) {
 		m.syncViewport(true)
 		return m, nil
 	}
-	if msg.toggleDetails {
-		m.planDetails = !m.planDetails
-		m.statusMsg = "plan details " + map[bool]string{true: "on", false: "off"}[m.planDetails]
-		m.syncViewport(true)
-		return m, nil
-	}
 	if msg.toggleTheme {
 		next := toggleTheme(m.theme)
 		if err := saveTheme(m.mode, next); err != nil {
@@ -218,6 +213,7 @@ func (m model) applyCommand(msg commandDoneMsg) (tea.Model, tea.Cmd) {
 	}
 	if msg.modelName != "" {
 		m.modelName = msg.modelName
+		m.contextWindow = msg.contextWindow
 	}
 	if msg.models != nil {
 		m.models = msg.models
@@ -225,19 +221,25 @@ func (m model) applyCommand(msg commandDoneMsg) (tea.Model, tea.Cmd) {
 	if msg.jobs != nil {
 		m.jobs = msg.jobs
 	}
+	if msg.skills != nil {
+		m.skills = msg.skills
+	}
+	if msg.skillIDs != nil {
+		m.selectedSkillIDs = append([]string(nil), msg.skillIDs...)
+	}
 	if msg.clearTask {
 		m.sessionID = ""
 		m.task = nil
 		m.plan = nil
 		m.planID = ""
-		m.prompt = nil
 		m.runs = nil
 		m.messages = nil
 		m.timeline = nil
 		m.tlCache = timelineRenderCache{}
 		m.usage = gatewayclient.TaskUsage{}
 		m.usageOK = false
-		m.approvalOpen = false
+		m.taskContext = gatewayclient.TaskContext{}
+		m.contextOK = false
 		m.viewportContent = ""
 	}
 	if msg.sessions != nil {
@@ -261,7 +263,7 @@ func (m model) applyCommand(msg commandDoneMsg) (tea.Model, tea.Cmd) {
 		// placeholder task id so refresh does not focus a non-existent task.
 		if m.task != nil && m.task.ID == "…" {
 			m.task = nil
-			m.timeline = buildChatTimeline(m.messages, nil, m.plan, m.prompt, m.runs)
+			m.timeline = buildChatTimeline(m.messages, nil, m.plan, m.runs)
 		}
 	} else {
 		m.errMsg = ""
@@ -340,7 +342,7 @@ func (m model) applyModelStream(env modelstream.Envelope) (tea.Model, tea.Cmd) {
 			m.liveThinking += env.Event.ThinkingDelta
 		}
 	}
-	m.timeline = buildChatTimeline(m.messages, m.task, m.plan, m.prompt, m.runs)
+	m.timeline = buildChatTimeline(m.messages, m.task, m.plan, m.runs)
 	m.timeline = appendLiveDraft(m.timeline, m.liveThinking, m.liveContent)
 	m.syncViewport(true)
 	return m, nil
@@ -367,20 +369,6 @@ func (m model) applySSE(envelope eventapi.Envelope) (tea.Model, tea.Cmd) {
 }
 
 func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Approval shortcuts when input empty and no picker competing.
-	if m.waitingApproval() && strings.TrimSpace(m.input.Value()) == "" && !m.completer.visible && m.list == listNone {
-		switch msg.String() {
-		case "a":
-			m.busy = true
-			m.approvalOpen = true
-			return m, m.approveCmd(string(gatewayclient.ActionAllowPlan))
-		case "r":
-			m.busy = true
-			m.approvalOpen = true
-			return m, m.approveCmd(string(gatewayclient.ActionReject))
-		}
-	}
-
 	switch msg.Type {
 	case tea.KeyCtrlC:
 		m.input.SetValue("")
@@ -403,11 +391,6 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.list != listNone {
 			m.closeList()
-			m.layout()
-			return m, nil
-		}
-		if m.approvalOpen {
-			m.approvalOpen = false
 			m.layout()
 			return m, nil
 		}
@@ -574,19 +557,14 @@ func (m *model) optimisticNew(line string) (tea.Cmd, bool) {
 		m.messages = nil
 		m.plan = nil
 		m.planID = ""
-		m.prompt = nil
 		m.runs = nil
 	}
-	// Agent = chat turn (not Planner). Plan mode shows planning until approve.
-	optimisticState := gatewayclient.TaskStateRunning
-	if execMode == gatewayclient.ExecutionModePlan {
-		optimisticState = gatewayclient.TaskStatePlanning
-	}
+	// Both agent (build) and plan (read-only) are chat turns.
 	m.task = &gatewayclient.Task{
 		ID:            "…",
 		Title:         gatewayclient.TaskTitle(objective),
 		Objective:     objective,
-		State:         optimisticState,
+		State:         gatewayclient.TaskStateRunning,
 		ExecutionMode: execMode,
 		CreatedAt:     now,
 		UpdatedAt:     now,
@@ -595,7 +573,6 @@ func (m *model) optimisticNew(line string) (tea.Cmd, bool) {
 		sid := m.sessionID
 		m.task.SessionID = &sid
 	}
-	m.approvalOpen = false
 	// Append optimistic user bubble to chat transcript.
 	m.messages = append(m.messages, gatewayclient.TranscriptMessage{
 		ID:        "local-user:" + now,
@@ -604,7 +581,7 @@ func (m *model) optimisticNew(line string) (tea.Cmd, bool) {
 		Content:   objective,
 		CreatedAt: now,
 	})
-	m.timeline = buildChatTimeline(m.messages, m.task, m.plan, m.prompt, m.runs)
+	m.timeline = buildChatTimeline(m.messages, m.task, m.plan, m.runs)
 	if m.sessionID != "" {
 		m.statusMsg = "sending…"
 	} else {
@@ -672,9 +649,6 @@ func (m *model) layout() {
 		n := min(overlayMaxLines, max(1, m.listLen()))
 		footer += n + 3
 	}
-	if m.approvalOpen && m.waitingApproval() {
-		footer += 6
-	}
 	h := m.height - header - footer
 	if h < 5 {
 		h = 5
@@ -712,16 +686,4 @@ func (m *model) needsRunPoll() bool {
 		}
 	}
 	return false
-}
-
-func (m *model) handleSSE(envelope eventapi.Envelope) {
-	// Kept for tests; production routes through applySSE.
-	if envelope.Sequence > m.sseAfter {
-		m.sseAfter = envelope.Sequence
-	}
-	typ := envelope.Type
-	if strings.HasPrefix(typ, "task.") || strings.HasPrefix(typ, "plan.") ||
-		strings.HasPrefix(typ, "approval.") || strings.HasPrefix(typ, "run.") {
-		m.dirty = true
-	}
 }

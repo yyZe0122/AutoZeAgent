@@ -29,6 +29,90 @@ func (f *fakeAgent) Run(_ context.Context, request agent.RunRequest) (agent.Resu
 	return agent.Result{Content: "你好！", Iterations: 1}, nil
 }
 
+// blockingAgent waits until ctx is canceled (ControlTask interrupt path).
+type blockingAgent struct {
+	started chan struct{}
+}
+
+func (b *blockingAgent) Run(ctx context.Context, _ agent.RunRequest) (agent.Result, error) {
+	close(b.started)
+	<-ctx.Done()
+	return agent.Result{}, ctx.Err()
+}
+
+func TestStartChatInjectsSkillSnapshot(t *testing.T) {
+	ctx := context.Background()
+	database, err := storesqlite.Open(ctx, t.TempDir()+"/core.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	db := database.SQL()
+	repo, err := kernel.NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvals, err := approval.NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queries, err := corequery.New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
+	session, err := repo.CreateSession(ctx, "session-skill", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	instructions := `<skill id="demo" name="Demo" description="d" source="user">
+Use conventional commits.
+</skill>
+`
+	task, err := repo.CreateTaskWithSkillSnapshot(ctx, "task-skill", session.ID, "hi", "hi",
+		[]string{"demo"}, instructions, kernel.ExecutionModeAgent, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeAgent{done: make(chan struct{})}
+	svc, err := New(Config{
+		DB: db, Repository: repo, Approvals: approvals, Agent: fake, Transcript: queries,
+		WorkspaceRoots: []string{t.TempDir()}, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.StartChat(ctx, StartRequest{Task: task, Actor: "test", UserText: "hi"}); err != nil {
+		t.Fatalf("StartChat: %v", err)
+	}
+	select {
+	case <-fake.done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("agent.Run not called")
+	}
+	fake.mu.Lock()
+	req := fake.request
+	fake.mu.Unlock()
+	if len(req.Messages) != 3 {
+		t.Fatalf("messages len=%d want 3: %#v", len(req.Messages), req.Messages)
+	}
+	if req.Messages[0].Role != providerapi.RoleSystem {
+		t.Fatalf("msg0 role=%s", req.Messages[0].Role)
+	}
+	if req.Messages[1].Role != providerapi.RoleSystem {
+		t.Fatalf("msg1 role=%s want system skill", req.Messages[1].Role)
+	}
+	if !strings.Contains(req.Messages[1].Content, skillSystemPreamble) {
+		t.Fatalf("skill preamble missing: %q", req.Messages[1].Content)
+	}
+	if !strings.Contains(req.Messages[1].Content, "Use conventional commits") {
+		t.Fatalf("skill body missing: %q", req.Messages[1].Content)
+	}
+	if req.Messages[2].Role != providerapi.RoleUser || req.Messages[2].Content != "hi" {
+		t.Fatalf("user message = %#v", req.Messages[2])
+	}
+}
+
 func TestStartChatSkipsPlannerShape(t *testing.T) {
 	ctx := context.Background()
 	database, err := storesqlite.Open(ctx, t.TempDir()+"/core.db")
@@ -249,5 +333,464 @@ func TestStartChatTwiceDoesNotCollideStepID(t *testing.T) {
 	case <-fake2.done:
 	case <-time.After(3 * time.Second):
 		t.Fatal("second agent not called")
+	}
+}
+
+func TestInterruptCancelsActiveChatRun(t *testing.T) {
+	ctx := context.Background()
+	database, err := storesqlite.Open(ctx, t.TempDir()+"/core.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	db := database.SQL()
+	repo, err := kernel.NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvals, err := approval.NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queries, err := corequery.New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
+	session, err := repo.CreateSession(ctx, "session-interrupt", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := repo.CreateTaskWithSkillSnapshot(ctx, "task-interrupt", session.ID, "hold", "hold", nil, "", kernel.ExecutionModeAgent, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocker := &blockingAgent{started: make(chan struct{})}
+	svc, err := New(Config{
+		DB: db, Repository: repo, Approvals: approvals, Agent: blocker, Transcript: queries,
+		WorkspaceRoots: []string{t.TempDir()}, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := svc.StartChat(ctx, StartRequest{Task: task, Actor: "test", UserText: "hold"})
+	if err != nil {
+		t.Fatalf("StartChat: %v", err)
+	}
+	select {
+	case <-blocker.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("agent did not start")
+	}
+
+	// Simulate ControlTask cancel: transition task then interrupt chat.
+	task, err = repo.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancelled, err := repo.CancelTask(ctx, task.ID, task.Version, "operator cancel", now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("CancelTask: %v", err)
+	}
+	if cancelled.State != kernel.TaskCancelled {
+		t.Fatalf("task state = %s", cancelled.State)
+	}
+	svc.Interrupt(task.ID)
+
+	deadline := time.Now().Add(3 * time.Second)
+	var runState string
+	for time.Now().Before(deadline) {
+		if err := db.QueryRowContext(ctx, "SELECT state FROM runs WHERE run_id = ?", result.RunID).Scan(&runState); err != nil {
+			t.Fatal(err)
+		}
+		if runState == string(kernel.RunCancelled) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if runState != string(kernel.RunCancelled) {
+		t.Fatalf("run state = %s, want cancelled", runState)
+	}
+	// Task must stay cancelled (cancelChat must not overwrite).
+	got, err := repo.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != kernel.TaskCancelled {
+		t.Fatalf("task state after interrupt = %s, want cancelled", got.State)
+	}
+}
+
+func TestInterruptPauseLeavesRunRecoverable(t *testing.T) {
+	ctx := context.Background()
+	database, err := storesqlite.Open(ctx, t.TempDir()+"/core.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	db := database.SQL()
+	repo, err := kernel.NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvals, err := approval.NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queries, err := corequery.New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
+	session, err := repo.CreateSession(ctx, "session-pause", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := repo.CreateTaskWithSkillSnapshot(ctx, "task-pause", session.ID, "hold", "hold", nil, "", kernel.ExecutionModeAgent, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocker := &blockingAgent{started: make(chan struct{})}
+	svc, err := New(Config{
+		DB: db, Repository: repo, Approvals: approvals, Agent: blocker, Transcript: queries,
+		WorkspaceRoots: []string{t.TempDir()}, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := svc.StartChat(ctx, StartRequest{Task: task, Actor: "test", UserText: "hold"})
+	if err != nil {
+		t.Fatalf("StartChat: %v", err)
+	}
+	select {
+	case <-blocker.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("agent did not start")
+	}
+	task, err = repo.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paused, err := repo.TransitionTask(ctx, task.ID, task.Version, kernel.TaskPaused, "operator pause", now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+	if paused.State != kernel.TaskPaused {
+		t.Fatalf("task = %s", paused.State)
+	}
+	svc.Interrupt(task.ID)
+
+	// Wait for agent goroutine to observe cancel and exit without failing the run.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		svc.activeMu.Lock()
+		_, active := svc.active[task.ID]
+		svc.activeMu.Unlock()
+		if !active {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	var runState string
+	if err := db.QueryRowContext(ctx, "SELECT state FROM runs WHERE run_id = ?", result.RunID).Scan(&runState); err != nil {
+		t.Fatal(err)
+	}
+	if runState != string(kernel.RunRunning) && runState != string(kernel.RunCreated) {
+		t.Fatalf("paused chat run state = %s, want running|created (recoverable)", runState)
+	}
+	got, err := repo.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != kernel.TaskPaused {
+		t.Fatalf("task state = %s, want paused", got.State)
+	}
+}
+
+func TestStartChatPlanModeReadOnlyGrants(t *testing.T) {
+	ctx := context.Background()
+	database, err := storesqlite.Open(ctx, t.TempDir()+"/core.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	db := database.SQL()
+	repo, err := kernel.NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvals, err := approval.NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queries, err := corequery.New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	session, err := repo.CreateSession(ctx, "session-plan-ro", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := repo.CreateTaskWithSkillSnapshot(ctx, "task-plan-ro", session.ID, "analyze", "analyze", nil, "", kernel.ExecutionModePlan, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeAgent{done: make(chan struct{})}
+	svc, err := New(Config{
+		DB: db, Repository: repo, Approvals: approvals, Agent: fake, Transcript: queries,
+		WorkspaceRoots: []string{t.TempDir()}, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.StartChat(ctx, StartRequest{Task: task, Actor: "test", UserText: "analyze"}); err != nil {
+		t.Fatalf("StartChat: %v", err)
+	}
+	select {
+	case <-fake.done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("agent.Run not called")
+	}
+	fake.mu.Lock()
+	req := fake.request
+	fake.mu.Unlock()
+	for _, name := range req.AllowedTools {
+		switch name {
+		case "fs_read", "fs_list", "fs_stat", "task":
+		default:
+			t.Fatalf("plan mode must not allow %q; tools=%v", name, req.AllowedTools)
+		}
+	}
+	if len(req.AllowedTools) != 4 {
+		t.Fatalf("plan tools = %v, want read/list/stat/task", req.AllowedTools)
+	}
+	if len(req.Messages) < 1 || req.Messages[0].Role != providerapi.RoleSystem {
+		t.Fatalf("messages = %#v", req.Messages)
+	}
+	if !strings.Contains(req.Messages[0].Content, "plan mode") {
+		t.Fatalf("system prompt missing plan mode: %q", req.Messages[0].Content)
+	}
+	if strings.Contains(req.Messages[0].Content, "build mode") {
+		t.Fatal("plan mode used agent build prompt")
+	}
+	// Never planning / waiting_approval.
+	got, err := repo.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State == kernel.TaskPlanning || got.State == kernel.TaskWaitingApproval {
+		t.Fatalf("plan chat entered legacy planner states: %s", got.State)
+	}
+}
+
+func TestStartChatAgentHighRiskToolsConfig(t *testing.T) {
+	ctx := context.Background()
+	database, err := storesqlite.Open(ctx, t.TempDir()+"/core.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	db := database.SQL()
+	repo, err := kernel.NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvals, err := approval.NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queries, err := corequery.New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
+	session, err := repo.CreateSession(ctx, "session-hr", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := repo.CreateTaskWithSkillSnapshot(ctx, "task-hr", session.ID, "run", "run", nil, "", kernel.ExecutionModeAgent, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeAgent{done: make(chan struct{})}
+	svc, err := New(Config{
+		DB: db, Repository: repo, Approvals: approvals, Agent: fake, Transcript: queries,
+		WorkspaceRoots: []string{t.TempDir()}, AllowGit: true, AllowProcess: true,
+		Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.StartChat(ctx, StartRequest{Task: task, Actor: "test", UserText: "run"}); err != nil {
+		t.Fatalf("StartChat: %v", err)
+	}
+	select {
+	case <-fake.done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("agent.Run not called")
+	}
+	fake.mu.Lock()
+	tools := append([]string(nil), fake.request.AllowedTools...)
+	fake.mu.Unlock()
+	want := map[string]bool{
+		"git_status": true, "git_diff": true, "git_add": true, "git_commit": true,
+		"process_exec": true,
+	}
+	for _, name := range tools {
+		delete(want, name)
+	}
+	if len(want) > 0 {
+		t.Fatalf("missing high-risk tools %v; got %v", want, tools)
+	}
+
+	// Plan mode with same flags must still deny high-risk.
+	fake2 := &fakeAgent{done: make(chan struct{})}
+	svc2, err := New(Config{
+		DB: db, Repository: repo, Approvals: approvals, Agent: fake2, Transcript: queries,
+		WorkspaceRoots: []string{t.TempDir()}, AllowGit: true, AllowProcess: true,
+		Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	planTask, err := repo.CreateTaskWithSkillSnapshot(ctx, "task-hr-plan", session.ID, "ro", "ro", nil, "", kernel.ExecutionModePlan, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc2.StartChat(ctx, StartRequest{Task: planTask, Actor: "test", UserText: "ro"}); err != nil {
+		t.Fatalf("StartChat plan: %v", err)
+	}
+	select {
+	case <-fake2.done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("plan agent.Run not called")
+	}
+	fake2.mu.Lock()
+	planTools := fake2.request.AllowedTools
+	fake2.mu.Unlock()
+	for _, name := range planTools {
+		if name == "process_exec" || strings.HasPrefix(name, "git_") {
+			t.Fatalf("plan mode must not allow %q; tools=%v", name, planTools)
+		}
+	}
+}
+
+func TestStartChatAgentModeWriteGrants(t *testing.T) {
+	ctx := context.Background()
+	database, err := storesqlite.Open(ctx, t.TempDir()+"/core.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	db := database.SQL()
+	repo, err := kernel.NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvals, err := approval.NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queries, err := corequery.New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	session, err := repo.CreateSession(ctx, "session-agent-rw", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := repo.CreateTaskWithSkillSnapshot(ctx, "task-agent-rw", session.ID, "edit", "edit", nil, "", kernel.ExecutionModeAgent, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeAgent{done: make(chan struct{})}
+	svc, err := New(Config{
+		DB: db, Repository: repo, Approvals: approvals, Agent: fake, Transcript: queries,
+		WorkspaceRoots: []string{t.TempDir()}, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.StartChat(ctx, StartRequest{Task: task, Actor: "test", UserText: "edit"}); err != nil {
+		t.Fatalf("StartChat: %v", err)
+	}
+	select {
+	case <-fake.done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("agent.Run not called")
+	}
+	fake.mu.Lock()
+	req := fake.request
+	fake.mu.Unlock()
+	want := map[string]bool{"fs_read": true, "fs_list": true, "fs_stat": true, "fs_write": true, "fs_patch": true, "fs_mkdir": true, "task": true}
+	got := map[string]bool{}
+	for _, name := range req.AllowedTools {
+		got[name] = true
+	}
+	for name := range want {
+		if !got[name] {
+			t.Fatalf("agent tools missing %q: %v", name, req.AllowedTools)
+		}
+	}
+	if len(req.Messages) < 1 || !strings.Contains(req.Messages[0].Content, "build mode") {
+		t.Fatalf("agent system prompt = %#v", req.Messages)
+	}
+}
+
+func TestStartChatAgentWriteCeilingFalse(t *testing.T) {
+	ctx := context.Background()
+	database, err := storesqlite.Open(ctx, t.TempDir()+"/core.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	db := database.SQL()
+	repo, err := kernel.NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvals, err := approval.NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queries, err := corequery.New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	session, err := repo.CreateSession(ctx, "session-ceiling", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := repo.CreateTaskWithSkillSnapshot(ctx, "task-ceiling", session.ID, "ro", "ro", nil, "", kernel.ExecutionModeAgent, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeAgent{done: make(chan struct{})}
+	ceiling := false
+	svc, err := New(Config{
+		DB: db, Repository: repo, Approvals: approvals, Agent: fake, Transcript: queries,
+		WorkspaceRoots: []string{t.TempDir()}, AllowWriteCeiling: &ceiling, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.StartChat(ctx, StartRequest{Task: task, Actor: "test", UserText: "ro"}); err != nil {
+		t.Fatalf("StartChat: %v", err)
+	}
+	select {
+	case <-fake.done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("agent.Run not called")
+	}
+	fake.mu.Lock()
+	req := fake.request
+	fake.mu.Unlock()
+	for _, name := range req.AllowedTools {
+		if name == "fs_write" || name == "fs_patch" || name == "fs_mkdir" {
+			t.Fatalf("write ceiling false still allowed %q: %v", name, req.AllowedTools)
+		}
 	}
 }

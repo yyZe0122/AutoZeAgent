@@ -22,6 +22,7 @@ func TestLoadResolvesSelectedModelOptions(t *testing.T) {
           "name": "DeepSeek V4 Flash",
           "temperature": 0.25,
           "maxTokens": 2048,
+          "contextWindow": 65536,
           "reasoningEffort": "high"
         }
       }
@@ -38,7 +39,7 @@ func TestLoadResolvesSelectedModelOptions(t *testing.T) {
 	if resolved.Temperature == nil || *resolved.Temperature != 0.25 {
 		t.Fatalf("temperature = %v", resolved.Temperature)
 	}
-	if resolved.MaxTokens != 2048 || resolved.ReasoningEffort != "high" {
+	if resolved.MaxTokens != 2048 || resolved.ContextWindow != 65536 || resolved.ReasoningEffort != "high" {
 		t.Fatalf("resolved model options = %+v", resolved)
 	}
 	if resolved.ResponseFormat != "" {
@@ -55,6 +56,7 @@ func TestLoadRejectsInvalidSelectedModelOptions(t *testing.T) {
 	}{
 		{name: "temperature", provider: "openai-compatible", modelBlock: `"temperature": 2.1`, want: "temperature"},
 		{name: "max tokens", provider: "openai-compatible", modelBlock: `"maxTokens": -1`, want: "maxTokens"},
+		{name: "context window", provider: "openai-compatible", modelBlock: `"contextWindow": -1`, want: "contextWindow"},
 		{name: "unsupported reasoning", provider: "anthropic", modelBlock: `"reasoningEffort": "high"`, want: "reasoningEffort"},
 	}
 	for _, test := range tests {

@@ -31,13 +31,20 @@ func TestCoreStoreClaimsAndAcknowledgesDueJob(t *testing.T) {
 	now := time.Now().UTC()
 	request := schedulerapi.CreateRequest{
 		Name: "heartbeat", SessionID: "session-jobs", TaskTitle: "Heartbeat",
-		TaskObjective: "Inspect progress", IntervalSeconds: 60, NextRunAt: now.Add(-time.Second).Format(time.RFC3339Nano),
+		TaskObjective: "Inspect progress", ExecutionMode: schedulerapi.ExecutionModeAgent,
+		SkillIDs: []string{"demo"}, IntervalSeconds: 60, NextRunAt: now.Add(-time.Second).Format(time.RFC3339Nano),
 		TimeoutSeconds: 300, MaxRetries: 2, BackoffSeconds: 1,
 		MisfirePolicy: schedulerapi.MisfireRunOnce, IdempotencyKey: "heartbeat/session-jobs",
 	}
 	job, err := store.Create(ctx, request)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if job.ExecutionMode != schedulerapi.ExecutionModeAgent {
+		t.Fatalf("execution_mode = %q", job.ExecutionMode)
+	}
+	if len(job.SkillIDs) != 1 || job.SkillIDs[0] != "demo" {
+		t.Fatalf("skill_ids = %v", job.SkillIDs)
 	}
 	duplicate, err := store.Create(ctx, request)
 	if err != nil {
@@ -53,8 +60,11 @@ func TestCoreStoreClaimsAndAcknowledgesDueJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tasks) != 1 || !tasks[0].RequiresPlan || tasks[0].SessionID != "session-jobs" {
+	if len(tasks) != 1 || tasks[0].SessionID != "session-jobs" || tasks[0].ExecutionMode != schedulerapi.ExecutionModeAgent {
 		t.Fatalf("claimed tasks = %+v", tasks)
+	}
+	if len(tasks[0].SkillIDs) != 1 || tasks[0].SkillIDs[0] != "demo" {
+		t.Fatalf("claimed skill_ids = %v", tasks[0].SkillIDs)
 	}
 	again, err := store.ClaimDue(ctx, schedulerapi.ClaimDueRequest{
 		Owner: "test-daemon", Now: now.Format(time.RFC3339Nano), Limit: 10, LeaseSeconds: 30,
@@ -66,7 +76,7 @@ func TestCoreStoreClaimsAndAcknowledgesDueJob(t *testing.T) {
 		t.Fatalf("second claim = %+v, want none while lease is active", again)
 	}
 	if _, err := store.Acknowledge(ctx, schedulerapi.AcknowledgeRequest{
-		RunID: tasks[0].RunID, LeaseID: tasks[0].LeaseID, CoreTaskID: "task-created", Status: "waiting_approval",
+		RunID: tasks[0].RunID, LeaseID: tasks[0].LeaseID, CoreTaskID: "task-created", Status: "task_created",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +84,7 @@ func TestCoreStoreClaimsAndAcknowledgesDueJob(t *testing.T) {
 	if err := database.SQL().QueryRowContext(ctx, "SELECT status FROM job_runs WHERE run_id = ?", tasks[0].RunID).Scan(&status); err != nil {
 		t.Fatal(err)
 	}
-	if status != "waiting_approval" {
+	if status != "task_created" {
 		t.Fatalf("job run status = %q", status)
 	}
 	var leases int
@@ -83,6 +93,45 @@ func TestCoreStoreClaimsAndAcknowledgesDueJob(t *testing.T) {
 	}
 	if leases != 0 {
 		t.Fatalf("lease count = %d, want 0", leases)
+	}
+}
+
+func TestCoreStoreDefaultsExecutionModeAgent(t *testing.T) {
+	ctx := context.Background()
+	database, err := coresqlite.Open(ctx, t.TempDir()+"/core.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	repository, _ := kernel.NewRepository(database.SQL())
+	_, _ = repository.CreateSession(ctx, "session-default", time.Now().UTC())
+	store, _ := NewStore(database.SQL())
+	job, err := store.Create(ctx, schedulerapi.CreateRequest{
+		Name: "default", SessionID: "session-default", TaskTitle: "T", TaskObjective: "O",
+		IntervalSeconds: 60, IdempotencyKey: "default-mode",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.ExecutionMode != schedulerapi.ExecutionModeAgent {
+		t.Fatalf("execution_mode = %q", job.ExecutionMode)
+	}
+}
+
+func TestCoreStoreRejectsMissingSession(t *testing.T) {
+	ctx := context.Background()
+	database, err := coresqlite.Open(ctx, t.TempDir()+"/core.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	store, _ := NewStore(database.SQL())
+	_, err = store.Create(ctx, schedulerapi.CreateRequest{
+		Name: "missing", SessionID: "no-such", TaskTitle: "T", TaskObjective: "O",
+		IntervalSeconds: 60, IdempotencyKey: "missing-session",
+	})
+	if err == nil || err.Error() != "session not found" {
+		t.Fatalf("err = %v", err)
 	}
 }
 

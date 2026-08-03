@@ -2,7 +2,8 @@
 
 ## 状态
 
-Accepted，2026-07-16。
+Accepted，2026-07-16。  
+**部分 supersede（2026-07-30/31）：** 交互 Planner → `waiting_approval` → 人批路径已删除（ADR-038）。`tasksubmission` + `corequery` 边界仍有效；chat 写入经 `chatsession`，控制经 `taskcontrol`。文中 `approvalsubmission` / Planner 状态机描述为历史。
 
 ## 背景
 
@@ -19,39 +20,36 @@ Gateway 和 Scheduler 都需要把外部请求转换为 Core Task。若每个适
 3. 在用户入口需要时确保 Session 存在且仍为 active；
 4. 通过 Kernel Repository 创建 Task；
 5. 对客户端指定的 Task ID 提供内容一致的幂等重试，并拒绝冲突复用；
-6. 在 Planner 可用时调用现有 Planner Service；
-7. 规划失败时保留已提交的 `planning` Task，并返回可识别的 `ErrPlanning`，供调用方决定重试和响应方式。
+6. 按 `execution_mode` 将运行委托给 `chatsession`（agent 写 / plan 只读）；不再调用交互 Planner。
 
-该服务不复制 Kernel 状态机，不生成 Plan 内容，也不写 SQL。Kernel Repository 继续拥有事务、版本控制和事件追加；Planner Service 继续拥有 `created -> planning -> waiting_approval` 过程。
+该服务不复制 Kernel 状态机，也不写 SQL。Kernel Repository 继续拥有事务、版本控制和事件追加；PlanDocument 与 workspace grant 由 `chatsession` 按 mode 构造（见 ADR-038）。
 
-本地 Gateway 的 `POST /v1/tasks` 与 Scheduler Core bridge 都调用该服务。Scheduler 继续使用幂等键派生稳定 Task/Plan ID，并保持 ACK 丢失和 Provider 暂时失败时的重投语义。
+本地 Gateway 的 `POST /v1/tasks` 调用该服务。定时 Job 经 `scheduledtasks` → 本服务提交 chat task（ADR-042）。
 
 ### 查询应用层
 
-`internal/corequery.Store` 是 Core 本地读模型。它只执行查询和 `PRAGMA quick_check`，公开 Task、Plan、Plan Step、Approval、Run 与已存 Plan Document 的窄 DTO/方法。DTO 与单资源查询使用 `internal/coreidentity` 的强类型 ID，避免在应用边界把 Task、Plan、Step、Run 与 Approval 标识退化为可互换字符串。列表查询接受资源专用的 options 类型，统一复用有上限的 offset 分页与 `asc`/`desc` 排序，并只开放固定的 state 或 decision 过滤字段；详细契约见 ADR 027。
+`internal/corequery.Store` 是 Core 本地读模型。它只执行查询和 `PRAGMA quick_check`，公开 Task、Plan、Plan Step、Approval、Run、TaskUsage 与已存 Plan Document 的窄 DTO/方法。DTO 与单资源查询使用 `internal/coreidentity` 的强类型 ID。列表查询接受资源专用的 options 类型，统一复用有上限的 offset 分页与 `asc`/`desc` 排序；详细契约见 ADR 027。
 
-查询 DTO 的时间字段在 Store 读取时严格解析为 RFC3339Nano，并规范输出为 UTC；合法的历史 offset 值会被转换，非法值返回错误。Gateway 不负责选择展示时区，CLI/UI/client 在展示边缘转换，完整契约见 ADR 029。
+查询 DTO 的时间字段在 Store 读取时严格解析为 RFC3339Nano，并规范输出为 UTC。Gateway 不负责选择展示时区；CLI/UI 在展示边缘转换，见 ADR 029。
 
-Gateway 只依赖自己声明的 `QueryService` 接口，不再持有 `*sql.DB`，也不再了解 Core 表结构。查询层只返回数据库中存储的 revision、hash 和 document；Plan Document 的解析、Hash 复核与 Approval 决策编排由 `internal/approvalsubmission.Service` 执行，最终写入仍由 Approval Repository 拥有。详见 ADR 023。
+Gateway 只依赖自己声明的 `QueryService` 接口，不再持有 `*sql.DB`。查询层返回 revision、hash 和 document；交互人批编排（`approvalsubmission`）已删除，见 ADR 023 状态与 ADR-038。
 
 ### 组合根
 
 `cmd/autozeagentd` 负责构造并连接：
 
 ```text
-SQLite -> Kernel Repository -> TaskSubmission Service <- Planner Service (optional)
+SQLite -> Kernel Repository -> TaskSubmission Service -> ChatSession
 SQLite -> CoreQuery Store     -> Gateway
-                         -> ApprovalSubmission Service
 TaskSubmission Service        -> Gateway POST /v1/tasks
-TaskSubmission Service        -> ScheduledTasks Runner
-ApprovalSubmission Service    -> Gateway POST /v1/approvals
+TaskControl Service           -> Gateway task pause/resume/cancel
 ```
 
 不引入容器式 DI、ORM、通用 Repository 或事件溯源框架。当前接口均围绕真实用例定义。
 
 ### 应用错误边界
 
-TaskSubmission 与 ApprovalSubmission 使用 `internal/applicationerror` 对已知用例结果附加稳定错误码和可重试属性，同时通过错误链保留 Kernel、Approval 和 CoreQuery 原因。Gateway 只依赖该应用分类并拥有 HTTP 映射，不再枚举领域或持久化 sentinel；未知错误保持未分类并 fail closed。完整规则见 ADR 026。
+TaskSubmission 等应用服务使用 `internal/applicationerror` 对已知用例结果附加稳定错误码和可重试属性。Gateway 只依赖该应用分类并拥有 HTTP 映射；未知错误保持未分类并 fail closed。完整规则见 ADR 026。
 
 ## 自动边界
 

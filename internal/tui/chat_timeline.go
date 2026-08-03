@@ -13,7 +13,6 @@ func buildChatTimeline(
 	messages []gatewayclient.TranscriptMessage,
 	task *gatewayclient.Task,
 	plan *gatewayclient.Plan,
-	prompt *gatewayclient.Prompt,
 	runs []gatewayclient.Run,
 ) []timelineItem {
 	if len(messages) > 0 {
@@ -30,24 +29,17 @@ func buildChatTimeline(
 				})
 			case gatewayclient.TaskStateWaitingApproval:
 				items = append(items, timelineItem{
-					Kind: tlSystem, At: task.UpdatedAt, Title: "waiting approval", State: task.State,
+					Kind: tlSystem, At: task.UpdatedAt, Title: "historical: waiting_approval", State: task.State,
 				})
 			case gatewayclient.TaskStateRunning:
 				items = append(items, timelineItem{
 					Kind: tlSystem, At: task.UpdatedAt, Title: "running", State: task.State,
 				})
 			}
-			if prompt != nil {
-				items = append(items, timelineItem{
-					Kind: tlPlan, Title: fmt.Sprintf("plan %s", prompt.PlanID),
-					Body:  fmt.Sprintf("rev=%d · %d step(s)", prompt.Revision, len(prompt.Steps)),
-					State: "ready",
-				})
-			}
 		}
 		return items
 	}
-	return buildTimeline(task, plan, prompt, runs)
+	return buildTimeline(task, plan, runs)
 }
 
 // appendLiveDraft adds an in-progress assistant bubble for typewriter UI.

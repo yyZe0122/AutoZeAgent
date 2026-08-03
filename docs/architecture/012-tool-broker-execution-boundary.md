@@ -2,10 +2,11 @@
 
 - 状态：Accepted
 - 日期：2026-07-13
+- 更新：2026-07-30
 
 ## 背景
 
-AutoZeAgent 允许 Planner、Gateway 和可选模块提出工具调用，但这些组件不能因为获得了一个 Skill、提示词或模型返回的 Tool Call 就直接产生副作用。执行前必须由代码统一校验 Plan、Policy、Capability Grant、超时和审计要求；否则“先执行后确认”会重新出现。
+AutoZeAgent 允许 Planner、Agent Runner 和 Gateway 触发的执行路径提出工具调用，但这些组件不能因为获得了一个 Skill、提示词或模型返回的 Tool Call 就直接产生副作用。执行前必须由代码统一校验 Plan、Policy、Capability Grant、超时和审计要求；否则“先执行后确认”会重新出现。
 
 ## 决策
 
@@ -13,7 +14,7 @@ AutoZeAgent 允许 Planner、Gateway 和可选模块提出工具调用，但这�
 
 Core 中所有内置工具只通过 `internal/tools.RegisterBuiltins` 创建并注册到 Tool Broker。文件、进程、Git 和 HTTP 工具的构造函数保持包内不可见，外部包不能取得内置 Tool 实例后直接调用 `Execute`。
 
-低层进程执行器位于 `internal/tools/internal/executor`。Go 的嵌套 `internal` 导入规则在编译期禁止 Planner、Gateway、可选模块和其他 Core 包导入该执行器。`RegisterBuiltins` 接收公开的 `ExecutorConfig`，但具体 Runner 只在 tools 包内部创建和持有。
+低层进程执行器位于 `internal/tools/internal/executor`。Go 的嵌套 `internal` 导入规则在编译期禁止 Planner、Gateway、Agent 和其它 Core 包导入该执行器。`RegisterBuiltins` 接收公开的 `ExecutorConfig`，但具体 Runner 只在 tools 包内部创建和持有。
 
 因此，正常 Core 调用链固定为：
 
@@ -60,13 +61,14 @@ HTTP 工具只允许 `http` 和 `https`，禁止 URL userinfo 和自动重定向
 
 路径预检查与实际打开文件之间仍存在 TOCTOU 窗口。当前实现降低了常见 `..` 和 symlink 逃逸风险，但不能替代操作系统级 mount namespace、只读 bind mount 或基于文件句柄的安全打开策略。
 
-Go 的导入边界阻止 Core 代码误用低层执行器，但不能约束一个已经获得任意本机代码执行权限的恶意进程。可选模块必须继续采用独立进程、独立数据库和最小 OS 权限；不能把不可信模块链接进 Core 进程。
+Go 的导入边界阻止 Core 代码误用低层执行器，但不能约束已经获得任意本机代码执行权限的恶意进程。生产路径**不**加载第三方模块进程；不可信代码不得链接进 `autozeagentd`。历史上的进程外模块方案已删除（见 ADR-001）。
 
 HTTP 当前限制审批域名，不等同于完整 SSRF 防护。后续还需要 DNS/IP 策略、私网地址策略和连接阶段的地址复核。
 
 ## 结果
 
-- Planner 和可选模块在编译期无法导入进程执行器。
+- Planner、Gateway 与 Agent 在编译期无法导入进程执行器。
 - 内置副作用工具只能由 Broker 拥有的注册流程创建。
 - Plan、Policy、Grant、Audit、Timeout 和 Artifact 形成统一强制链路。
-- Memory、Skills、Scheduler、Evolution 不参与执行授权，删除这些模块不会改变 Core 的安全边界。
+- Skill 目录与进程内 Scheduler 不参与执行授权；删除它们不会削弱 Broker 边界。
+- Session chat 预授权（ADR-038）仍走本链路，仅改变 Grant 如何签发，不改变执行校验。

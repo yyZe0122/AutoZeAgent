@@ -670,12 +670,26 @@ type tokenUsage struct {
 	PromptTokens     int64 `json:"prompt_tokens"`
 	CompletionTokens int64 `json:"completion_tokens"`
 	TotalTokens      int64 `json:"total_tokens"`
+	// PromptTokensDetails carries optional cache metrics (OpenAI-compatible).
+	PromptTokensDetails *struct {
+		CachedTokens int64 `json:"cached_tokens"`
+	} `json:"prompt_tokens_details,omitempty"`
 }
 
 func usageFrom(value tokenUsage) providerapi.Usage {
+	var cacheRead int64
+	if value.PromptTokensDetails != nil {
+		cacheRead = value.PromptTokensDetails.CachedTokens
+	}
+	// InputTokens = uncached prompt tokens when cache is reported as part of prompt_tokens.
+	uncached := value.PromptTokens
+	if cacheRead > 0 && cacheRead <= value.PromptTokens {
+		uncached = value.PromptTokens - cacheRead
+	}
 	return providerapi.Usage{
-		InputTokens:  providerapi.TokenCount(value.PromptTokens),
-		OutputTokens: providerapi.TokenCount(value.CompletionTokens),
-		TotalTokens:  providerapi.TokenCount(value.TotalTokens),
+		InputTokens:     providerapi.TokenCount(uncached),
+		OutputTokens:    providerapi.TokenCount(value.CompletionTokens),
+		TotalTokens:     providerapi.TokenCount(value.TotalTokens),
+		CacheReadTokens: providerapi.TokenCount(cacheRead),
 	}
 }

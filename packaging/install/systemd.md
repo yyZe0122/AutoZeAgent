@@ -1,6 +1,6 @@
 # AutoZeAgent systemd 安装与运维
 
-正式单元文件为 `packaging/systemd/autozeagent.service`。systemd 只管理一个长期运行的 `autozeagentd`；`autozeagent` 是按需执行的本地 CLI。Task、Run 和 Job 都是 `core.db` 中的逻辑对象，不需要额外 systemd unit。
+正式单元文件为 `packaging/systemd/autozeagent.service`（服务名 `autozeagent`，`ExecStart` 为 `autozeagentd`）。仓库中若另有 `autozeagentd.service` 样例，**安装脚本不使用**；以 `autozeagent.service` 为准。systemd 只管理一个长期运行的 `autozeagentd`；`autozeagent` 是按需执行的本地 CLI。Task、Run 和 Job 都是 `core.db` 中的逻辑对象，不需要额外 systemd unit。
 
 ## 构建发布目录
 

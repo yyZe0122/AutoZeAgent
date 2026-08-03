@@ -2,7 +2,9 @@
 
 ## 状态
 
-Accepted，2026-07-16。
+**Superseded（交互路径）** — 2026-07-30：`approvalsubmission` 与人批 Gateway 写入已移除（HTTP 410）。见 ADR-038。  
+Approval **领域**（`internal/approval`：PlanDocument、Grant、hash 绑定）与 Tool Broker 校验仍有效。  
+原状态：Accepted，2026-07-16。
 
 ## 背景
 

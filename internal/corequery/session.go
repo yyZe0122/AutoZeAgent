@@ -268,7 +268,7 @@ func skipTranscriptRecord(msg TranscriptMessage, existing []TranscriptMessage) b
 	return false
 }
 
-// isInternalStepPrompt detects runexecution.executionMessages user templates and
+// isInternalStepPrompt detects legacy plan-step user templates and
 // similar internal scaffolding that leaked into agent_run_records as role=user.
 func isInternalStepPrompt(content string) bool {
 	if !strings.Contains(content, "Task objective:") {

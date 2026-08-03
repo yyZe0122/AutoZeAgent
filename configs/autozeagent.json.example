@@ -12,7 +12,8 @@
         "deepseek-chat": {
           "name": "DeepSeek Chat",
           "temperature": 0.2,
-          "maxTokens": 4096
+          "maxTokens": 4096,
+          "contextWindow": 65536
         }
       }
     },
@@ -53,5 +54,15 @@
         }
       }
     }
+  },
+  "chat": {
+    "roots": [],
+    "allow_write": true,
+    "tools": {
+      "git": false,
+      "process": false
+    },
+    "compaction": { "enabled": true },
+    "max_iterations": 8
   }
 }

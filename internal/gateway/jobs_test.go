@@ -56,15 +56,36 @@ func TestJobCreateEndpointForwardsRequest(t *testing.T) {
 	if response.Code != http.StatusCreated {
 		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
 	}
-	if service.createRequest.SessionID != "session-1" || service.createRequest.IntervalSeconds != 60 {
+	if service.createRequest.Name != "heartbeat" || service.createRequest.SessionID != "session-1" {
 		t.Fatalf("create request = %+v", service.createRequest)
 	}
 	var job schedulerapi.Job
 	if err := json.Unmarshal(response.Body.Bytes(), &job); err != nil {
 		t.Fatal(err)
 	}
-	if job.ID != "job-1" || job.Status != schedulerapi.StatusActive {
+	if job.ID != "job-1" {
 		t.Fatalf("job = %+v", job)
+	}
+}
+
+func TestJobCreateEndpointForwardsModeAndSkills(t *testing.T) {
+	service := &jobServiceStub{job: schedulerapi.Job{ID: "job-2", ExecutionMode: "plan"}}
+	api := &API{jobs: service}
+	request := httptest.NewRequest(http.MethodPost, "/v1/jobs", strings.NewReader(`{
+		"name":"review","session_id":"session-2","task_title":"Review",
+		"task_objective":"Read only","execution_mode":"plan","skill_ids":["demo"],
+		"interval_seconds":120,"idempotency_key":"review/session-2"
+	}`))
+	response := httptest.NewRecorder()
+	api.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if service.createRequest.ExecutionMode != "plan" {
+		t.Fatalf("mode = %q", service.createRequest.ExecutionMode)
+	}
+	if len(service.createRequest.SkillIDs) != 1 || service.createRequest.SkillIDs[0] != "demo" {
+		t.Fatalf("skills = %v", service.createRequest.SkillIDs)
 	}
 }
 

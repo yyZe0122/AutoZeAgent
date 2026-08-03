@@ -25,7 +25,7 @@ type timelineItem struct {
 	State string
 }
 
-func buildTimeline(task *gatewayclient.Task, plan *gatewayclient.Plan, prompt *gatewayclient.Prompt, runs []gatewayclient.Run) []timelineItem {
+func buildTimeline(task *gatewayclient.Task, plan *gatewayclient.Plan, runs []gatewayclient.Run) []timelineItem {
 	if task == nil {
 		return nil
 	}
@@ -51,7 +51,7 @@ func buildTimeline(task *gatewayclient.Task, plan *gatewayclient.Plan, prompt *g
 		})
 	case gatewayclient.TaskStateWaitingApproval:
 		items = append(items, timelineItem{
-			Kind: tlSystem, At: task.UpdatedAt, Title: "waiting approval", State: task.State,
+			Kind: tlSystem, At: task.UpdatedAt, Title: "historical: waiting_approval", State: task.State,
 		})
 	case gatewayclient.TaskStateRunning:
 		items = append(items, timelineItem{
@@ -75,25 +75,7 @@ func buildTimeline(task *gatewayclient.Task, plan *gatewayclient.Plan, prompt *g
 		})
 	}
 
-	if prompt != nil {
-		body := fmt.Sprintf("rev=%d · %d step(s)", prompt.Revision, len(prompt.Steps))
-		if len(prompt.Steps) > 0 {
-			maxRisk := ""
-			for _, s := range prompt.Steps {
-				r := string(s.Risk)
-				if riskRank(r) >= riskRank(maxRisk) {
-					maxRisk = r
-				}
-			}
-			if maxRisk != "" {
-				body += " · max risk=" + maxRisk
-			}
-		}
-		items = append(items, timelineItem{
-			Kind: tlPlan, At: "", Title: fmt.Sprintf("plan %s", prompt.PlanID),
-			Body: body, State: "ready",
-		})
-	} else if plan != nil {
+	if plan != nil {
 		items = append(items, timelineItem{
 			Kind: tlPlan, At: plan.UpdatedAt, Title: fmt.Sprintf("plan %s", plan.ID),
 			Body:  fmt.Sprintf("rev=%d state=%s · %d step(s)", plan.Revision, plan.State, len(plan.Steps)),
@@ -126,8 +108,8 @@ func buildTimeline(task *gatewayclient.Task, plan *gatewayclient.Plan, prompt *g
 	return items
 }
 
-// foldBody truncates large run output so the viewport stays cheap to rebuild
-// (Crush-style: cache/fold expensive message bodies; expand via /details later).
+// foldBody truncates large run output so the viewport stays cheap to rebuild.
+// Expansion of folded bodies is not wired yet; /details toggles plan capabilities only.
 func foldBody(s string) string {
 	if s == "" {
 		return s
@@ -145,24 +127,9 @@ func foldBody(s string) string {
 		truncated = true
 	}
 	if truncated {
-		out = strings.TrimRight(out, "\n") + "\n… (truncated · /details)"
+		out = strings.TrimRight(out, "\n") + "\n… (truncated)"
 	}
 	return out
-}
-
-func riskRank(r string) int {
-	switch strings.ToLower(r) {
-	case "critical":
-		return 4
-	case "high":
-		return 3
-	case "medium", "moderate":
-		return 2
-	case "low":
-		return 1
-	default:
-		return 0
-	}
 }
 
 func shortID(id string) string {

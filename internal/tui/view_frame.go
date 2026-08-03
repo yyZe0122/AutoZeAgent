@@ -39,9 +39,6 @@ func (m model) View() string {
 			floatParts = append(floatParts, stylePickerBox.Width(max(40, width-2)).Render(c))
 		}
 	}
-	if ov := renderApprovalOverlay(&m, width); ov != "" {
-		floatParts = append(floatParts, ov)
-	}
 
 	strip := m.renderContextStrip()
 	status := m.renderStatusLine()
@@ -69,12 +66,12 @@ func (m model) renderInputBox(width int) string {
 	modeColor := colorModeAgent
 	modeLabel := "agent"
 	modeStyle := styleModeAgent
-	hint := "Tab · agent (chat + tools)"
+	hint := "Tab · agent (build · read+write)"
 	if m.draftMode == modePlan {
 		modeColor = colorModePlan
 		modeLabel = "plan"
 		modeStyle = styleModePlan
-		hint = "Tab · plan (plan → approve → execute)"
+		hint = "Tab · plan (read-only · no edits)"
 	}
 	busy := ""
 	if m.busy {
@@ -115,6 +112,9 @@ func (m model) renderContextStrip() string {
 	ctxPart := "ctx —"
 	if n, ok := m.metrics().ContextWindow(); ok {
 		ctxPart = fmt.Sprintf("ctx %s", formatTokens(int64(n)))
+		if p, okP := m.metrics().ContextPressure(); okP {
+			ctxPart = fmt.Sprintf("ctx %s %d%%", formatTokens(int64(n)), int(p*100+0.5))
+		}
 	}
 	parts = append(parts, ctxPart)
 
@@ -156,25 +156,57 @@ func (m model) renderMetricsPanel(height int) string {
 			b.WriteString(styleDim.Render(fmt.Sprintf("  in %s · out %s\n",
 				formatTokens(m.usage.InputTokens), formatTokens(m.usage.OutputTokens))))
 		}
+		if m.usage.CostMicros > 0 {
+			b.WriteString(styleDim.Render(fmt.Sprintf("  cost %dµ\n", m.usage.CostMicros)))
+		}
+	} else {
+		b.WriteString(styleDim.Render("  —") + "\n")
+	}
+	if p, ok := m.metrics().ContextPressure(); ok {
+		b.WriteString(styleDim.Render(fmt.Sprintf("  window %d%%", int(p*100+0.5))))
+		if m.contextOK && m.taskContext.LastPromptTokens > 0 {
+			b.WriteString(styleDim.Render(fmt.Sprintf(" · prompt %s", formatTokens(m.taskContext.LastPromptTokens))))
+		}
+		if m.contextOK && m.taskContext.Compacted {
+			b.WriteString(styleDim.Render(" · compacted"))
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+
+	b.WriteString(stylePanelLabel.Render("budget") + "\n")
+	if summary := m.budgetSummary(); summary != "" {
+		b.WriteString("  " + summary + "\n")
 	} else {
 		b.WriteString(styleDim.Render("  —") + "\n")
 	}
 	b.WriteString("\n")
 
-	b.WriteString(stylePanelLabel.Render("cache") + "\n")
+	b.WriteString(stylePanelLabel.Render("data") + "\n")
+	if m.dataDir != "" {
+		b.WriteString("  " + truncate(m.dataDir, 36) + "\n")
+	} else {
+		b.WriteString(styleDim.Render("  —") + "\n")
+	}
+
+	// cache / MCP only when daemon surfaces real data (no permanent "—" placeholders).
 	if rate, ok := m.metrics().CacheHitRate(); ok {
-		b.WriteString(fmt.Sprintf("  %.0f%%\n", rate*100))
-	} else {
-		b.WriteString(styleDim.Render("  —") + "\n")
+		b.WriteString("\n")
+		b.WriteString(stylePanelLabel.Render("cache") + "\n")
+		b.WriteString(fmt.Sprintf("  hit %.0f%%\n", rate*100))
+		if m.usage.CacheReadTokens > 0 || m.usage.CacheWriteTokens > 0 {
+			b.WriteString(styleDim.Render(fmt.Sprintf("  read %s · write %s\n",
+				formatTokens(m.usage.CacheReadTokens), formatTokens(m.usage.CacheWriteTokens))))
+		}
 	}
-	b.WriteString("\n")
-
-	b.WriteString(stylePanelLabel.Render("MCP") + "\n")
-	mcp := m.metrics().MCPStatus()
-	if !mcp.Enabled {
-		b.WriteString(styleDim.Render("  —") + "\n")
-	} else {
-		b.WriteString(fmt.Sprintf("  %d ok · %d err · %d total\n", mcp.OK, mcp.Error, mcp.Total))
+	if mcp := m.metrics().MCPStatus(); mcp.Enabled {
+		b.WriteString("\n")
+		b.WriteString(stylePanelLabel.Render("MCP") + "\n")
+		line := fmt.Sprintf("  %d ok · %d err · %d total", mcp.OK, mcp.Error, mcp.Total)
+		if mcp.Detail != "" {
+			line += " · " + mcp.Detail
+		}
+		b.WriteString(line + "\n")
 	}
 
 	content := strings.TrimRight(b.String(), "\n")
@@ -190,11 +222,8 @@ func (m model) renderContextPanel(height int) string {
 }
 
 func (m model) budgetSummary() string {
-	if m.prompt == nil {
-		return ""
-	}
-	b := m.prompt.Budget
-	if b.MaxTokens == 0 && b.MaxCostMicros == 0 && b.MaxDurationMillis == 0 {
+	b, ok := planBudgetOf(m.plan)
+	if !ok {
 		return ""
 	}
 	return fmt.Sprintf("tok=%d cost_µ=%d dur_ms=%d", b.MaxTokens, b.MaxCostMicros, b.MaxDurationMillis)
@@ -215,7 +244,7 @@ func (m model) renderStatusLine() string {
 		}
 		return styleStatus.Render(truncate(line, width))
 	}
-	return styleStatus.Render("Tab mode · / help · /theme · a/r approve · PgUp scroll")
+	return styleStatus.Render("Tab mode · / help · /skills · /theme · PgUp scroll")
 }
 
 // syncViewport rebuilds the main conversation content.

@@ -12,7 +12,8 @@
       "type": "object",
       "minProperties": 1,
       "additionalProperties": {"$ref": "#/$defs/provider"}
-    }
+    },
+    "chat": {"$ref": "#/$defs/chat"}
   },
   "$defs": {
     "provider": {
@@ -63,8 +64,70 @@
         "name": {"type": "string"},
         "responseFormat": {"enum": ["auto", "json_schema", "json_object"]},
         "temperature": {"type": "number", "minimum": 0, "maximum": 2},
-        "maxTokens": {"type": "integer", "minimum": 1},
+        "maxTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Model-level output-token cap (not context length)."
+        },
+        "contextWindow": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Model context length in tokens for UI/metrics. Omit or 0 when unknown. Not maxTokens."
+        },
         "reasoningEffort": {"type": "string", "minLength": 1}
+      }
+    },
+    "chat": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Session chat workspace. Tab agent=build (write) vs plan=read-only. allow_write is agent ceiling only.",
+      "properties": {
+        "roots": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "description": "Absolute workspace roots for chat tool grants. Empty = daemon working directory."
+        },
+        "allow_write": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ceiling for agent (build) write tools. Omit = true. Plan mode is always read-only."
+        },
+        "tools": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Opt-in high-risk tools for agent mode only (default all false). Plan never receives these.",
+          "properties": {
+            "git": {
+              "type": "boolean",
+              "default": false,
+              "description": "Pre-authorize git_status/diff/add/commit under chat roots (agent only)."
+            },
+            "process": {
+              "type": "boolean",
+              "default": false,
+              "description": "Pre-authorize process_exec under chat roots (agent only)."
+            }
+          }
+        },
+        "compaction": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Session head summarization (ADR-041). Omit = enabled.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true,
+              "description": "Enable session compaction. Omit = true."
+            }
+          }
+        },
+        "max_iterations": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64,
+          "default": 8,
+          "description": "Agent tool-loop cap per chat run (1–64). Omit = 8."
+        }
       }
     }
   }

@@ -355,8 +355,8 @@ func (r *Repository) CreatePlanForApproval(
 }
 
 // CreateApprovedWorkspacePlan persists a synthetic workspace plan already approved
-// for agent-mode session chat. Task goes created → running only (never planning /
-// waiting_approval). Plan is draft → approved in memory and stored as approved.
+// for session chat (agent or plan mode). Task goes created → running only (never
+// planning / waiting_approval). Plan is draft → approved in memory and stored as approved.
 func (r *Repository) CreateApprovedWorkspacePlan(
 	ctx context.Context,
 	id PlanID,
@@ -420,8 +420,9 @@ func (r *Repository) CreateApprovedWorkspacePlan(
 	if task.Version != expectedTaskVersion {
 		return Plan{}, Task{}, versionConflict("task", string(taskID), expectedTaskVersion, task.Version)
 	}
-	if task.ExecutionMode != ExecutionModeAgent {
-		return Plan{}, Task{}, fmt.Errorf("%w: approved workspace plan requires agent execution_mode", ErrInvalidAggregate)
+	mode := NormalizeExecutionMode(string(task.ExecutionMode))
+	if mode != ExecutionModeAgent && mode != ExecutionModePlan {
+		return Plan{}, Task{}, fmt.Errorf("%w: approved workspace plan requires agent or plan execution_mode", ErrInvalidAggregate)
 	}
 	if task.State != TaskCreated {
 		return Plan{}, Task{}, fmt.Errorf("%w: approved workspace plan requires task state created (got %s)", ErrInvalidAggregate, task.State)

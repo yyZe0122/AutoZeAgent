@@ -13,16 +13,16 @@ import (
 	"autozeagent.local/autozeagent/internal/applicationerror"
 	"autozeagent.local/autozeagent/internal/corequery"
 	"autozeagent.local/autozeagent/internal/kernel"
-	"autozeagent.local/autozeagent/internal/runexecution"
+	"autozeagent.local/autozeagent/internal/taskcontrol"
 )
 
 type taskControllerStub struct {
-	request runexecution.TaskActionRequest
+	request taskcontrol.TaskActionRequest
 	task    kernel.Task
 	err     error
 }
 
-func (s *taskControllerStub) ControlTask(_ context.Context, request runexecution.TaskActionRequest) (kernel.Task, error) {
+func (s *taskControllerStub) ControlTask(_ context.Context, request taskcontrol.TaskActionRequest) (kernel.Task, error) {
 	s.request = request
 	return s.task, s.err
 }
@@ -41,7 +41,7 @@ func TestTaskActionEndpointForwardsVersionedAction(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
 	}
-	if controller.request.TaskID != "task-1" || controller.request.ExpectedVersion != 3 || controller.request.Action != runexecution.TaskActionPause {
+	if controller.request.TaskID != "task-1" || controller.request.ExpectedVersion != 3 || controller.request.Action != taskcontrol.TaskActionPause {
 		t.Fatalf("request = %+v", controller.request)
 	}
 	var task corequery.Task

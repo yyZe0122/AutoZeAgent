@@ -37,9 +37,15 @@ func TestCanonicalAliases(t *testing.T) {
 
 func TestHelpTextListsCommands(t *testing.T) {
 	text := helpText()
-	for _, want := range []string{"/new", "/tasks", "/approve", "/cron", "/model", "/theme", "Tab"} {
+	for _, want := range []string{"/new", "/tasks", "/cron", "/model", "/skills", "/theme", "Tab", "every"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("help missing %q", want)
 		}
+	}
+	if strings.Contains(text, "/approve") {
+		t.Fatal("help should not list removed /approve")
+	}
+	if strings.Contains(text, "a / r") || strings.Contains(text, "approve → run") {
+		t.Fatal("help should not advertise removed approval keys/workflow")
 	}
 }

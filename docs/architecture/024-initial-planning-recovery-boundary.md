@@ -1,6 +1,7 @@
 # ADR-024：初始规划恢复应用边界
 
-- 状态：Accepted
+- 状态：**Superseded** — 2026-07-30：`planningrecovery` 与交互 Planner 已删除。见 ADR-038。
+- 原状态：Accepted
 - 日期：2026-07-16
 
 ## 背景

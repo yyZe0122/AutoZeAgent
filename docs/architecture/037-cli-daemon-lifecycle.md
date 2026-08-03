@@ -35,4 +35,4 @@ autozeagent daemon start|stop|status [--mode user|system]
 
 ## 与 TUI 的关系
 
-TUI 在 `ensureDaemon` 成功后调用 `tui.Run`；UI 内所有读写经 `gatewayclient` 打 Gateway。退出 TUI（仅 `/quit` 等斜杠）不停止 daemon。交互优化与包边界收紧见 `docs/optimization/current.md` §P4 / §5.1。
+TUI 在 `ensureDaemon` 成功后调用 `tui.Run`；UI 内所有读写经 `gatewayclient`（`tui.Gateway`）打 Gateway。退出 TUI（仅 `/quit` 等斜杠）不停止 daemon。包边界与 backlog 见 `docs/optimization/current.md`。

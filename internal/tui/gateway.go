@@ -18,15 +18,17 @@ type Gateway interface {
 	Health(ctx context.Context) (gatewayclient.Health, error)
 	ModelConfig(ctx context.Context) (gatewayclient.ModelConfig, error)
 	SetModelConfig(ctx context.Context, model string) (gatewayclient.ModelConfig, error)
+	MCPStatus(ctx context.Context) (gatewayclient.MCPStatus, error)
+	ListSkills(ctx context.Context) ([]gatewayclient.Skill, error)
 
 	ListSessions(ctx context.Context, limit int) ([]gatewayclient.Session, error)
-	GetSession(ctx context.Context, id gatewayclient.SessionID) (gatewayclient.Session, error)
 	SessionMessages(ctx context.Context, id gatewayclient.SessionID, limit int) ([]gatewayclient.TranscriptMessage, error)
 	TaskMessages(ctx context.Context, id gatewayclient.TaskID, limit int) ([]gatewayclient.TranscriptMessage, error)
 
 	ListTasks(ctx context.Context, limit int) ([]gatewayclient.Task, error)
 	GetTask(ctx context.Context, id gatewayclient.TaskID) (gatewayclient.Task, error)
 	TaskUsage(ctx context.Context, id gatewayclient.TaskID) (gatewayclient.TaskUsage, error)
+	TaskContext(ctx context.Context, id gatewayclient.TaskID) (gatewayclient.TaskContext, error)
 	SubmitTask(ctx context.Context, req gatewayclient.TaskSubmissionRequest) (gatewayclient.TaskSubmissionResponse, error)
 	ControlTask(ctx context.Context, id gatewayclient.TaskID, action gatewayclient.TaskAction, expectedVersion uint64, reason string) (gatewayclient.Task, error)
 
@@ -34,10 +36,10 @@ type Gateway interface {
 	FindPlanForTask(ctx context.Context, taskID gatewayclient.TaskID) (gatewayclient.Plan, error)
 
 	ListRuns(ctx context.Context, taskID gatewayclient.TaskID, limit int) ([]gatewayclient.Run, error)
-	StartRuns(ctx context.Context, req gatewayclient.RunStartRequest) (gatewayclient.StartResult, error)
-
-	ApprovalPrompt(ctx context.Context, planID gatewayclient.PlanID, stepID gatewayclient.StepID) (gatewayclient.Prompt, error)
-	DecideApproval(ctx context.Context, prompt gatewayclient.Prompt, stepID gatewayclient.StepID, action gatewayclient.Action, decidedBy, reason string) (gatewayclient.Approval, error)
 
 	ListJobs(ctx context.Context, includeArchived bool) ([]schedulerapi.Job, error)
+	CreateJob(ctx context.Context, request schedulerapi.CreateRequest) (schedulerapi.Job, error)
 }
+
+// Compile-time check: production client satisfies the TUI surface.
+var _ Gateway = (*gatewayclient.Client)(nil)
