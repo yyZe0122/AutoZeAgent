@@ -60,7 +60,27 @@ Script: [`scripts/publish-release.sh`](../scripts/publish-release.sh)
 
 Requires `docs/changelog/vX.Y.Z.md` and `GITHUB_TOKEN` for the default path.
 
-If the Release page only shows **Source code** zip/tar.gz, Actions never uploaded binaries (e.g. *account locked due to billing issue*). Use the default local upload path, not `--via-actions`.
+### GITHUB_TOKEN (local upload)
+
+Create at https://github.com/settings/tokens (do not commit the value).
+
+| Type | Required access |
+| --- | --- |
+| **Fine-grained** (recommended) | This repo only; **Contents: Read and write**; Metadata: Read. Org + SAML → **Authorize** token for the org. |
+| **Classic** | Scope **`repo`** (private repositories). |
+
+```bash
+export GITHUB_TOKEN='…'   # paste once; then unset when done
+# quick probe (expect 200):
+curl -sS -o /dev/null -w "%{http_code}\n" \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -H "Accept: application/vnd.github+json" \
+  https://api.github.com/repos/yyZe0122/AutoZeAgent
+```
+
+`403 Resource not accessible by personal access token` on `POST .../releases` means the token lacks **Contents write** (or wrong repo/owner, or SSO not authorized)—not a GoReleaser packaging bug. Rebuild is fine; re-run with `--upload-only --skip-check --skip-snapshot` after fixing the token.
+
+If the Release page only shows **Source code** zip/tar.gz, binaries were never uploaded (Actions billing lock and/or failed local token). Use local upload with a correct PAT, not `--via-actions`, until billing is healthy.
 
 ### Optional: GitHub Actions / 可选 CI
 

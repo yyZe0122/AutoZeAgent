@@ -397,7 +397,7 @@ fi
 [[ -n "$GR" ]] || GR=$(find_goreleaser) || die "goreleaser not found (install: go install github.com/goreleaser/goreleaser/v2@latest)"
 
 if [[ -z "${GITHUB_TOKEN:-}" ]]; then
-  die "GITHUB_TOKEN is required for local upload (PAT with repo/contents write). export GITHUB_TOKEN=... then re-run. Or use --via-actions if Actions billing works."
+  die "GITHUB_TOKEN is required for local upload. Create a PAT (see docs/release.md), export GITHUB_TOKEN=..., re-run. Or --via-actions if Actions billing works."
 fi
 
 log "local goreleaser release + upload ($GR)"
@@ -407,7 +407,38 @@ else
   # Tag must be reachable; goreleaser uses git describe
   git describe --tags --exact-match HEAD >/dev/null 2>&1 \
     || die "HEAD is not exactly tag ${TAG}; checkout the tagged commit"
+  set +e
   "$GR" release --clean --parallelism "$PARALLELISM" --release-notes="$NOTES"
+  gr_ec=$?
+  set -e
+  if [[ "$gr_ec" -ne 0 ]]; then
+    cat <<'EOF' >&2
+
+error: goreleaser upload failed (often HTTP 403 on POST .../releases).
+
+Fix the token, then re-run (packaging already works):
+  ./scripts/publish-release.sh vX.Y.Z --upload-only --skip-check --skip-snapshot
+
+Token checklist:
+  Fine-grained PAT (recommended):
+    - Resource owner = your user (or org that owns the repo)
+    - Repository access = Only select → this repo
+    - Permissions → Repository → Contents: Read and write
+    - Permissions → Repository → Metadata: Read-only (default)
+    - If the org uses SAML SSO: Authorize the token for that org
+  Classic PAT:
+    - Scope: repo (full) for private repos
+  Do not use a read-only or Actions-only token.
+  Do not paste the token into git or chat.
+
+Test API access (should return 200, not 403/401):
+  curl -sS -o /dev/null -w "%{http_code}\n" \
+    -H "Authorization: Bearer $GITHUB_TOKEN" \
+    -H "Accept: application/vnd.github+json" \
+    https://api.github.com/repos/yyZe0122/AutoZeAgent
+EOF
+    exit "$gr_ec"
+  fi
 fi
 
 cat <<EOF
