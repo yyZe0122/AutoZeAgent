@@ -57,6 +57,30 @@
           "name": "Gemini model"
         }
       }
+    },
+    "literal-key-example": {
+      "type": "openai-compatible",
+      "options": {
+        "baseURL": "https://api.example.com",
+        "apiKey": "sk-replace-with-your-key"
+      },
+      "models": {
+        "demo": {
+          "name": "Literal apiKey example (optional; prefer env or file)"
+        }
+      }
+    },
+    "file-key-example": {
+      "type": "openai-compatible",
+      "options": {
+        "baseURL": "https://api.example.com",
+        "apiKey": "{file:secrets/demo.key}"
+      },
+      "models": {
+        "demo": {
+          "name": "File-ref apiKey example (path relative to config dir)"
+        }
+      }
     }
   },
   "chat": {

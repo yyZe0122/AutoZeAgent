@@ -33,4 +33,54 @@ if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload
 fi
 
-echo "AutoZeAgent installed. Run: systemctl enable --now autozeagent"
+# Seed system config + env when missing (do not overwrite).
+if [ ! -f "$SYSCONFDIR/autozeagent.json" ] && [ ! -f "$SYSCONFDIR/autozeagent.local.json" ]; then
+  EXAMPLE="$SOURCE_DIR/configs/autozeagent.json.example"
+  if [ -f "$EXAMPLE" ]; then
+    if command -v sed >/dev/null 2>&1; then
+      sed '/"\$schema"/d' "$EXAMPLE" >"$SYSCONFDIR/autozeagent.json"
+    else
+      cp "$EXAMPLE" "$SYSCONFDIR/autozeagent.json"
+    fi
+  else
+    cat >"$SYSCONFDIR/autozeagent.json" <<'EOF'
+{
+  "model": "deepseek/deepseek-chat",
+  "provider": {
+    "deepseek": {
+      "type": "openai-compatible",
+      "options": {
+        "baseURL": "https://api.deepseek.com",
+        "apiKey": "{env:DEEPSEEK_API_KEY}"
+      },
+      "models": {
+        "deepseek-chat": { "name": "DeepSeek Chat" }
+      }
+    }
+  }
+}
+EOF
+  fi
+  chown root:autozeagent "$SYSCONFDIR/autozeagent.json"
+  chmod 0640 "$SYSCONFDIR/autozeagent.json"
+  echo "config: created $SYSCONFDIR/autozeagent.json"
+fi
+
+if [ ! -f "$SYSCONFDIR/env" ]; then
+  cat >"$SYSCONFDIR/env" <<'EOF'
+# Optional KEY=value for system mode (daemon loads; does not override process env).
+# Or put a literal apiKey in autozeagent.json / use {file:…}.
+DEEPSEEK_API_KEY=
+OPENAI_API_KEY=
+ANTHROPIC_API_KEY=
+GEMINI_API_KEY=
+EOF
+  chown root:autozeagent "$SYSCONFDIR/env"
+  chmod 0640 "$SYSCONFDIR/env"
+  echo "env: created $SYSCONFDIR/env"
+fi
+
+echo "AutoZeAgent installed."
+echo "  binaries: $PREFIX/bin/{autozeagent,aze,autozeagentd}"
+echo "  config:   $SYSCONFDIR (edit apiKey via env file, {env:}, {file:}, or literal JSON)"
+echo "  service:  systemctl enable --now autozeagent"

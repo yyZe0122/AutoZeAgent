@@ -12,6 +12,9 @@ import (
 )
 
 func ListModelRefs(configDir string) (selected string, models []ModelRef, err error) {
+	if err := LoadEnvFromConfigDir(configDir); err != nil {
+		return "", nil, err
+	}
 	path, err := findConfigPath(configDir)
 	if err != nil {
 		return "", nil, err
@@ -76,7 +79,11 @@ func listModelRefsFromFile(path string) (string, []ModelRef, error) {
 
 // Load reads provider configuration only from configDir
 // (autozeagent.local.json, then autozeagent.json). Project directories are not searched.
+// Optional ConfigDir/env is loaded first (does not override existing process env).
 func Load(configDir string) (*Resolved, error) {
+	if err := LoadEnvFromConfigDir(configDir); err != nil {
+		return nil, err
+	}
 	path, err := findConfigPath(configDir)
 	if err != nil {
 		return nil, err
@@ -95,6 +102,9 @@ func Load(configDir string) (*Resolved, error) {
 // Missing file or missing chat block returns a zero ChatConfig (empty roots; agent write allowed).
 // Secrets are not resolved; only structural validation runs.
 func LoadChat(configDir string) (ChatConfig, error) {
+	if err := LoadEnvFromConfigDir(configDir); err != nil {
+		return ChatConfig{}, err
+	}
 	path, err := findConfigPath(configDir)
 	if err != nil {
 		return ChatConfig{}, err
@@ -119,6 +129,9 @@ func LoadChat(configDir string) (ChatConfig, error) {
 // LoadMCP reads the optional mcp section. Missing file or mcp block returns zero config.
 // Env values may use {env:VAR} / {file:...} and are resolved relative to the config directory.
 func LoadMCP(configDir string) (MCPConfig, error) {
+	if err := LoadEnvFromConfigDir(configDir); err != nil {
+		return MCPConfig{}, err
+	}
 	path, err := findConfigPath(configDir)
 	if err != nil {
 		return MCPConfig{}, err

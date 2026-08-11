@@ -29,11 +29,14 @@ Design KB: [`docs/architecture/`](docs/architecture/) · living backlog: [`docs/
 
 ## Install / 安装
 
-**Prebuilt (recommended):** [Releases](https://github.com/yyZe0122/AutoZeAgent/releases) — each archive holds **`autozeagent` + `aze` + `autozeagentd`**, plus configs/scripts and `checksums.txt`.
+**Prebuilt (recommended):** use the **one-line installer** (installs binaries onto PATH).  
+Do **not** treat the GitHub Release zip/tar as a “project folder” — that archive is a **portable bundle** (bins + README/configs for packaging). The installer copies **only** the three executables into a user tools directory.
 
-Naming: `autozeagent_{version}_{os}_{arch}.tar.gz` / `.zip` (version without leading `v`). Example for **v0.1.0**:
+**推荐一键安装**（装到 PATH）。Release 上的 zip/tar 是**便携归档**（含二进制 + 说明/配置示例），不是要打开的项目目录；安装脚本只会把三个 exe 拷到用户工具目录。
 
-| Platform | AMD64 | ARM64 |
+Naming: `autozeagent_{version}_{os}_{arch}.…` — **`amd64` = x64 / x86_64**. Example **v0.1.0**:
+
+| Platform | AMD64 (x64) | ARM64 |
 | --- | --- | --- |
 | Windows | `autozeagent_0.1.0_windows_amd64.zip` | `autozeagent_0.1.0_windows_arm64.zip` |
 | Linux | `autozeagent_0.1.0_linux_amd64.tar.gz` | `autozeagent_0.1.0_linux_arm64.tar.gz` |
@@ -41,30 +44,32 @@ Naming: `autozeagent_{version}_{os}_{arch}.tar.gz` / `.zip` (version without lea
 
 Release notes: [`docs/changelog/`](docs/changelog/) · publication: [`docs/release.md`](docs/release.md).
 
-### One-line (public releases) / 一键安装（公开 Release）
+### One-line install / 一键安装（装到系统用户目录）
 
-Pin a tag when the release is **Pre-release** (`latest` may not point at it):
-
-Pre-release 时请固定版本（`latest` 可能不指向该 tag）：
+**Windows** (no admin) → `%LOCALAPPDATA%\Programs\AutoZeAgent\bin` + user **PATH**:
 
 ```powershell
-# Windows (user PATH; no admin)
+# Pin Pre-release tags (or omit AUTOZEAGENT_VERSION when a non-prerelease "latest" exists)
 $env:AUTOZEAGENT_VERSION = 'v0.1.0'
 irm "https://raw.githubusercontent.com/yyZe0122/AutoZeAgent/main/packaging/scripts/install.ps1" | iex
+# new terminal, then:
+aze
+autozeagent version
 ```
 
+**Linux / macOS** → `~/.local/bin`:
+
 ```bash
-# Linux / macOS → ~/.local/bin
 export AUTOZEAGENT_VERSION=v0.1.0
 curl -fsSL "https://raw.githubusercontent.com/yyZe0122/AutoZeAgent/main/packaging/scripts/install-user.sh" | sh
 export PATH="$HOME/.local/bin:$PATH"
+aze
+autozeagent version && autozeagentd --check
 ```
 
 Optional: `AUTOZEAGENT_INSTALL_DIR`, `AUTOZEAGENT_REPOSITORY`.
 
-```bash
-autozeagent version && autozeagentd --check
-```
+**Manual zip:** only if you want a portable folder — extract and put `autozeagent.exe` / `aze.exe` / `autozeagentd.exe` on PATH yourself. Prefer the one-liner above.
 
 ### From source / 源码
 
@@ -84,22 +89,29 @@ Systemd / machine-wide install and **release publication**: [`docs/release.md`](
 
 ## Configure / 配置
 
-Provider config lives in the **OS config directory only** (not project cwd):
+Provider config lives in the **OS config directory only** (not project cwd). One-line installers seed templates when missing.
 
 | Mode | Linux | Windows |
 | --- | --- | --- |
 | user | `~/.config/autozeagent/` | `%APPDATA%\AutoZeAgent\` |
 | system | `/etc/autozeagent/` | `%ProgramData%\AutoZeAgent\config\` |
 
-Lookup: `autozeagent.local.json` then `autozeagent.json`. Prefer `{env:VAR}` / `{file:…}` over literal keys.
+Lookup: `autozeagent.local.json` then `autozeagent.json`. Optional `env` file (`KEY=value`) is loaded by daemon/CLI (does not override already-set process env).
+
+**API key — pick any (not forced):**
+
+1. `{env:DEEPSEEK_API_KEY}` + system env or ConfigDir `env` file (**recommended**)  
+2. `{file:relative-or-abs-path}`  
+3. Literal `"apiKey": "sk-..."` in JSON (local only; protect permissions)
 
 ```bash
-mkdir -p ~/.config/autozeagent
-cp configs/autozeagent.json.example ~/.config/autozeagent/autozeagent.json
-chmod 600 ~/.config/autozeagent/autozeagent*.json
-export DEEPSEEK_API_KEY='…'   # match your provider block
+# after install, or manually:
+# edit ~/.config/autozeagent/env   OR   export DEEPSEEK_API_KEY=...
+# OR put a literal apiKey in autozeagent.json
 autozeagent config validate --mode user
 ```
+
+Full multi-provider example: [`configs/autozeagent.json.example`](configs/autozeagent.json.example).
 
 Minimal shape:
 

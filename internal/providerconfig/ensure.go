@@ -55,6 +55,13 @@ func EnsureConfig(configDir string, migrateFromDirs ...string) (EnsureResult, er
 	if err := os.MkdirAll(configDir, 0o750); err != nil {
 		return EnsureResult{}, fmt.Errorf("create config directory %s: %w", configDir, err)
 	}
+	// Optional ConfigDir/env (installers may seed it). Never fails the ensure path on load errors beyond I/O.
+	if err := LoadEnvFromConfigDir(configDir); err != nil {
+		return EnsureResult{}, err
+	}
+	if _, _, err := EnsureEnvFile(configDir); err != nil {
+		return EnsureResult{}, err
+	}
 	existing, err := findConfigPath(configDir)
 	if err != nil {
 		return EnsureResult{}, err

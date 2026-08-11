@@ -6,13 +6,47 @@ Configuration is loaded **only** from the OS config directory (`paths.Layout.Con
 
 1. `<config-dir>/autozeagent.local.json` (machine-local; preferred)
 2. `<config-dir>/autozeagent.json`
+3. Optional `<config-dir>/env` — `KEY=value` lines loaded into the process before resolving `{env:…}` (does **not** override variables already set in the environment)
 
 | Mode | Linux | Windows | macOS |
 | --- | --- | --- | --- |
 | user | `~/.config/autozeagent` (`XDG_CONFIG_HOME`) | `%APPDATA%\AutoZeAgent` | Application Support path from `paths` |
 | system | `/etc/autozeagent` | `ProgramData\AutoZeAgent\config` | system path from `paths` |
 
-On first start, if ConfigDir has no file, the daemon may **migrate** once from the process working directory or data dir (legacy project `autozeagent.local.json`), otherwise it writes a default template with `{env:…}` placeholders (no secrets). Project directories are **not** searched for ongoing loads.
+On first start, if ConfigDir has no file, the daemon may **migrate** once from the process working directory or data dir (legacy project `autozeagent.local.json`), otherwise it writes a default template with `{env:…}` placeholders (no secrets) and may seed an empty `env` template. Installers do the same without overwriting existing files. Project directories are **not** searched for ongoing loads.
+
+## API keys (choose any; nothing is forced)
+
+`options.apiKey` supports three forms:
+
+| Form | Example | Notes |
+| --- | --- | --- |
+| Environment placeholder | `"{env:DEEPSEEK_API_KEY}"` | **Recommended.** Value from process env and/or ConfigDir `env` file |
+| File reference | `"{file:secrets/key.txt}"` | Path relative to ConfigDir, or absolute |
+| Literal string | `"sk-..."` | Allowed for local convenience; protect file permissions; never commit |
+
+Examples:
+
+```json
+"apiKey": "{env:DEEPSEEK_API_KEY}"
+```
+
+```json
+"apiKey": "{file:secrets/deepseek.key}"
+```
+
+```json
+"apiKey": "sk-your-key-here"
+```
+
+Optional ConfigDir `env` file:
+
+```bash
+# ~/.config/autozeagent/env  (chmod 600)
+DEEPSEEK_API_KEY=sk-...
+```
+
+See also [`configs/autozeagent.json.example`](../configs/autozeagent.json.example) (includes env / file / literal illustrations).
 
 The top-level `model` must use `provider-id/model-id` format. It is the **main** chat model.
 

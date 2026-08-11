@@ -46,6 +46,9 @@ func LoadModelRoles(configDir string) (main string, roles map[string]string, err
 // ResolveModel loads configuration and resolves provider/model for the given ref.
 // ref must be provider/model. The selected top-level model field is overridden.
 func ResolveModel(configDir, ref string) (*Resolved, error) {
+	if err := LoadEnvFromConfigDir(configDir); err != nil {
+		return nil, err
+	}
 	ref = strings.TrimSpace(ref)
 	providerID, modelID, ok := strings.Cut(ref, "/")
 	providerID, modelID = strings.TrimSpace(providerID), strings.TrimSpace(modelID)
