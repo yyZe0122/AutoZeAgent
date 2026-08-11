@@ -6,7 +6,7 @@
 
 ## 决策
 
-AutoZeAgent 的生产核心是一个 `autozeagentd` 进程、一个 `autozeagent` CLI（含 TUI）和一个 `core.db`。Core 直接组合 Kernel、Chat Session（agent/plan 双轨）、Agent Runner、Policy、Approval/Grant 领域、Tool Broker、Scheduler（in-process store + chat-native `scheduledtasks` runner）、Event、Audit、Skill Catalog、MCP（经 Broker）、Gateway 以及窄应用服务（`tasksubmission` / `chatsession` / `taskcontrol` / `corequery`）。双轨见 ADR-038；定时 Job 见 ADR-042。
+YunmengZe 的生产核心是一个 `ymzd` 进程、一个 `ymz` CLI（含 TUI）和一个 `core.db`。Core 直接组合 Kernel、Chat Session（agent/plan 双轨）、Agent Runner、Policy、Approval/Grant 领域、Tool Broker、Scheduler（in-process store + chat-native `scheduledtasks` runner）、Event、Audit、Skill Catalog、MCP（经 Broker）、Gateway 以及窄应用服务（`tasksubmission` / `chatsession` / `taskcontrol` / `corequery`）。双轨见 ADR-038；定时 Job 见 ADR-042。
 
 Task、Plan、Run 和 Job 是持久化领域对象，不是操作系统进程。需要并发时优先使用受 `context.Context` 控制的 goroutine；只有实际 Tool 执行需要时才启动外部进程。
 
@@ -18,7 +18,7 @@ Gateway 不直接拼装领域状态：任务提交与 chat 运行进入窄应用
 
 ## Go 实现原则
 
-- 组合根集中在 `cmd/autozeagentd`，使用具体类型和小接口；
+- 组合根集中在 `cmd/ymzd`，使用具体类型和小接口；
 - 状态机和不变量留在领域包与仓储中；
 - 不引入 ORM、通用 Repository、容器式 DI 或事件总线框架；
 - 新抽象必须由当前用户故事证明，而不是为假设中的扩展预留。

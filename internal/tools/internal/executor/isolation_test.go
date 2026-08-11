@@ -28,15 +28,15 @@ func TestNormalizeIsolationConfigOff(t *testing.T) {
 
 func TestIsolationUnitName(t *testing.T) {
 	name := isolationUnitName("call/abc.def")
-	if !strings.HasPrefix(name, "autozeagent-tool-") || !strings.HasSuffix(name, ".scope") {
+	if !strings.HasPrefix(name, "ymz-tool-") || !strings.HasSuffix(name, ".scope") {
 		t.Fatalf("unit name = %q", name)
 	}
-	body := strings.TrimSuffix(strings.TrimPrefix(name, "autozeagent-tool-"), ".scope")
+	body := strings.TrimSuffix(strings.TrimPrefix(name, "ymz-tool-"), ".scope")
 	if strings.ContainsAny(body, "./") {
 		t.Fatalf("unit body not sanitized: %q", body)
 	}
 	empty := isolationUnitName("")
-	if !strings.HasPrefix(empty, "autozeagent-tool-ephemeral-") {
+	if !strings.HasPrefix(empty, "ymz-tool-ephemeral-") {
 		t.Fatalf("empty call id unit = %q", empty)
 	}
 }

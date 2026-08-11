@@ -6,7 +6,7 @@
 #
 # Usage (as root):
 #   export GITHUB_TOKEN=ghp_...    # repo scope; never commit
-#   cd /home/yyze/projects/AutoZeAgent
+#   cd /home/yyze/projects/AutoZeAgent   # or YunmengZe-Agent after local rename
 #   ./scripts/publish-release.sh v0.1.0
 #   ./scripts/publish-release.sh v0.1.0 --commit-paths release
 #   ./scripts/publish-release.sh v0.1.0 --upload-only      # tag already on HEAD
@@ -23,7 +23,7 @@ REMOTE="origin"
 BRANCH="main"
 GIT_USER_NAME="yyZe"
 GIT_USER_EMAIL="yyze@debianze.local"
-GITHUB_REPO_SLUG="yyZe0122/AutoZeAgent"
+GITHUB_REPO_SLUG="yyZe0122/YunmengZe-Agent"
 
 TAG=""
 COMMIT_PATHS="" # empty | release | all
@@ -51,7 +51,7 @@ One-shot release (root only). Default: local GoReleaser upload via GITHUB_TOKEN.
   ./scripts/publish-release.sh v0.1.0 --dry-run
 
 Options:
-  --repo DIR            Repository root (default: /home/yyze/projects/AutoZeAgent)
+  --repo DIR            Repository root (default: /home/yyze/projects/YunmengZe)
   --commit-paths MODE   release = whitelist; all = full tree (needs --yes)
   --message TEXT        Commit message when committing
   --tag-message TEXT    Annotated tag message
@@ -71,7 +71,7 @@ Environment:
                           (Contents R/W on yyZe0122/homebrew-tap and scoop-bucket).
                           Falls back to GITHUB_TOKEN if unset (only works if that
                           token can write both affiliate repos).
-  GITHUB_REPOSITORY       Optional owner/name (default yyZe0122/AutoZeAgent)
+  GITHUB_REPOSITORY       Optional owner/name (default yyZe0122/YunmengZe-Agent)
   GORELEASER_PARALLELISM  Default 1
 EOF
 }
@@ -270,7 +270,7 @@ if [[ "$SKIP_SNAPSHOT" -eq 0 && -n "$GR" ]]; then
   else
     "$GR" release --snapshot --clean --parallelism "$PARALLELISM"
     log "snapshot archives:"
-    ls -1 dist/autozeagent_* 2>/dev/null | head -20 || true
+    ls -1 dist/ymz_* 2>/dev/null | head -20 || true
   fi
 elif [[ "$SKIP_SNAPSHOT" -eq 0 ]]; then
   log "goreleaser not found; skip snapshot preflight"
@@ -299,7 +299,7 @@ ensure_tag_on_head() {
       return 0
     fi
   fi
-  TAG_MSG=${TAG_MSG:-"AutoZeAgent ${TAG}"}
+  TAG_MSG=${TAG_MSG:-"YunmengZe ${TAG}"}
   log "create annotated tag ${TAG}"
   run "git tag -a \"$TAG\" -m \"$TAG_MSG\""
 }
@@ -349,7 +349,7 @@ else
         [[ "$YES" -eq 1 ]] || die "tag ${TAG} is on $tag_commit, HEAD is $head; --force-tag requires --yes"
         log "move tag ${TAG} to HEAD and push"
         run "git tag -d \"$TAG\""
-        TAG_MSG=${TAG_MSG:-"AutoZeAgent ${TAG}"}
+        TAG_MSG=${TAG_MSG:-"YunmengZe ${TAG}"}
         run "git tag -a \"$TAG\" -m \"$TAG_MSG\""
         if git ls-remote --tags "$REMOTE" "refs/tags/${TAG}" 2>/dev/null | grep -q .; then
           run "git push \"$REMOTE\" \":refs/tags/${TAG}\""
@@ -363,7 +363,7 @@ else
     fi
   else
     if [[ "$FORCE_TAG" -eq 1 ]] || [[ "$YES" -eq 1 ]]; then
-      TAG_MSG=${TAG_MSG:-"AutoZeAgent ${TAG}"}
+      TAG_MSG=${TAG_MSG:-"YunmengZe ${TAG}"}
       log "create tag ${TAG} on HEAD (upload-only)"
       run "git tag -a \"$TAG\" -m \"$TAG_MSG\""
       run "git push \"$REMOTE\" \"$TAG\""
@@ -388,12 +388,12 @@ if [[ "$VIA_ACTIONS" -eq 1 ]]; then
   (e.g. billing lock). Prefer default local upload instead of --via-actions.
 
   Expected assets after a green Release job:
-    autozeagent_${VER_NUM}_linux_amd64.tar.gz
-    autozeagent_${VER_NUM}_linux_arm64.tar.gz
-    autozeagent_${VER_NUM}_darwin_amd64.tar.gz
-    autozeagent_${VER_NUM}_darwin_arm64.tar.gz
-    autozeagent_${VER_NUM}_windows_amd64.zip
-    autozeagent_${VER_NUM}_windows_arm64.zip
+    ymz_${VER_NUM}_linux_amd64.tar.gz
+    ymz_${VER_NUM}_linux_arm64.tar.gz
+    ymz_${VER_NUM}_darwin_amd64.tar.gz
+    ymz_${VER_NUM}_darwin_arm64.tar.gz
+    ymz_${VER_NUM}_windows_amd64.zip
+    ymz_${VER_NUM}_windows_arm64.zip
     checksums.txt
 EOF
   exit 0
@@ -455,15 +455,15 @@ Fix the token, then re-run (packaging already works):
 Token checklist:
   Fine-grained PAT (recommended):
     - Resource owner = your user (or org that owns the repo)
-    - Repository access = Only select → AutoZeAgent + homebrew-tap + scoop-bucket
+    - Repository access = Only select → YunmengZe + homebrew-tap + scoop-bucket
     - Permissions → Repository → Contents: Read and write
     - Permissions → Repository → Workflows: Read and write
-      (REQUIRED on AutoZeAgent if the tagged commit changes .github/workflows/*;
+      (REQUIRED on YunmengZe if the tagged commit changes .github/workflows/*;
        otherwise POST /releases returns 403 "Resource not accessible...")
     - Permissions → Repository → Metadata: Read-only (default)
     - If the org uses SAML SSO: Authorize the token for that org
   Or split tokens:
-    - GITHUB_TOKEN → AutoZeAgent (Contents + Workflows)
+    - GITHUB_TOKEN → YunmengZe (Contents + Workflows)
     - PACKAGE_GITHUB_TOKEN → homebrew-tap + scoop-bucket (Contents R/W)
   Classic PAT:
     - Scopes: repo + workflow  (workflow is not optional when release.yml changed)
@@ -474,7 +474,7 @@ Token checklist:
     curl -sS -o /tmp/rel_probe.json -w "%{http_code}\\n" \\
       -X POST -H "Authorization: Bearer $GITHUB_TOKEN" \\
       -H "Accept: application/vnd.github+json" \\
-      https://api.github.com/repos/yyZe0122/AutoZeAgent/releases \\
+      https://api.github.com/repos/yyZe0122/YunmengZe-Agent/releases \\
       -d '{"tag_name":"v0.0.0-permcheck","name":"permcheck","draft":true,"prerelease":true}'
     # 201 = ok (then DELETE the draft); 403 = fix token; 422 = often tag/name clash but auth ok
 
@@ -482,7 +482,7 @@ Test API access (should return 200, not 403/401):
   curl -sS -o /dev/null -w "%{http_code}\n" \
     -H "Authorization: Bearer $GITHUB_TOKEN" \
     -H "Accept: application/vnd.github+json" \
-    https://api.github.com/repos/yyZe0122/AutoZeAgent
+    https://api.github.com/repos/yyZe0122/YunmengZe-Agent
 EOF
     exit "$gr_ec"
   fi
@@ -493,23 +493,23 @@ cat <<EOF
 ==> local publish finished for ${TAG}
 
   Release:  https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}
-  Homebrew: https://github.com/yyZe0122/homebrew-tap (Casks/autozeagent.rb)
-  Scoop:    https://github.com/yyZe0122/scoop-bucket (autozeagent.json)
+  Homebrew: https://github.com/yyZe0122/homebrew-tap (Casks/ymz.rb)
+  Scoop:    https://github.com/yyZe0122/scoop-bucket (agent.json)
 
   Assets (Pre-release):
-    autozeagent_${VER_NUM}_linux_amd64.tar.gz
-    autozeagent_${VER_NUM}_linux_arm64.tar.gz
-    autozeagent_${VER_NUM}_darwin_amd64.tar.gz
-    autozeagent_${VER_NUM}_darwin_arm64.tar.gz
-    autozeagent_${VER_NUM}_windows_amd64.zip
-    autozeagent_${VER_NUM}_windows_arm64.zip
+    ymz_${VER_NUM}_linux_amd64.tar.gz
+    ymz_${VER_NUM}_linux_arm64.tar.gz
+    ymz_${VER_NUM}_darwin_amd64.tar.gz
+    ymz_${VER_NUM}_darwin_arm64.tar.gz
+    ymz_${VER_NUM}_windows_amd64.zip
+    ymz_${VER_NUM}_windows_arm64.zip
     checksums.txt
 
   Body: ${NOTES}
   Install (recommended):
-    brew install --cask yyZe0122/tap/autozeagent
-    scoop bucket add autozeagent https://github.com/yyZe0122/scoop-bucket && scoop install autozeagent
-  Fallback installer: AUTOZEAGENT_VERSION=${TAG}
+    brew install --cask yyZe0122/tap/ymz
+    scoop bucket add ymz https://github.com/yyZe0122/scoop-bucket && scoop install ymz
+  Fallback installer: YMZ_VERSION=${TAG}
 
   unset GITHUB_TOKEN PACKAGE_GITHUB_TOKEN   # when done
 EOF

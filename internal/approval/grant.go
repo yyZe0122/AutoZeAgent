@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/kernel"
-	"autozeagent.local/autozeagent/internal/platform/pathsecurity"
-	"autozeagent.local/autozeagent/pkg/eventapi"
-	"autozeagent.local/autozeagent/pkg/sqliteerror"
+	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
+	"github.com/yyZe0122/yunmengze-agent/internal/platform/pathsecurity"
+	"github.com/yyZe0122/yunmengze-agent/pkg/eventapi"
+	"github.com/yyZe0122/yunmengze-agent/pkg/sqliteerror"
 )
 
 var (

@@ -13,7 +13,7 @@ ADR-035 规定文件/Git/Process/HTTP 以及未来 MCP/LSP 必须收敛到 Tool 
 
 ### 配置
 
-写在 ConfigDir 的 `autozeagent.json` / `autozeagent.local.json` 顶层 **`mcp`** 键（与 provider 配置同文件）：
+写在 ConfigDir 的 `agent.json` / `agent.local.json` 顶层 **`mcp`** 键（与 provider 配置同文件）：
 
 ```json
 "mcp": {
@@ -28,12 +28,12 @@ ADR-035 规定文件/Git/Process/HTTP 以及未来 MCP/LSP 必须收敛到 Tool 
 ```
 
 - 仅 **stdio** 传输（首版）。
-- `autozeagent config validate` 校验结构与 command 非空；不打印 secrets。
+- `ymz config validate` 校验结构与 command 非空；不打印 secrets。
 - 环境变量引用沿用现有 `{env:VAR}` 约定（若 daemon 已支持）。
 
 ### 生命周期
 
-- daemon（`autozeagentd`）在组合根启动 MCP 子进程、initialize、`tools/list`。
+- daemon（`ymzd`）在组合根启动 MCP 子进程、initialize、`tools/list`。
 - 工具名注册为 **`mcp_<server>_<tool>`**，避免与 builtins 冲突。
 - shutdown / 崩溃：干净终止子进程；单 server 失败不拖垮 daemon，该 server 工具不可用（fail-closed）。
 

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"autozeagent.local/autozeagent/pkg/eventapi"
+	"github.com/yyZe0122/yunmengze-agent/pkg/eventapi"
 )
 
 const MaxListLimit = 1000

@@ -5,7 +5,7 @@
 
 ## 决策
 
-Gateway 是 `autozeagentd` 的本地控制面。`autozeagent` 的 **CLI 子命令**与 **TUI** 都只是它的客户端，经 `internal/gatewayclient` 访问 Gateway；二者并列，TUI **不** exec CLI。**TUI 为主产品路径**，CLI 为脚本/自动化次要入口。Gateway 不执行 Tool、不直接调用 Provider，也不能发行 Grant。
+Gateway 是 `ymzd` 的本地控制面。`ymz` 的 **CLI 子命令**与 **TUI** 都只是它的客户端，经 `internal/gatewayclient` 访问 Gateway；二者并列，TUI **不** exec CLI。**TUI 为主产品路径**，CLI 为脚本/自动化次要入口。Gateway 不执行 Tool、不直接调用 Provider，也不能发行 Grant。
 
 Linux/macOS 在 RuntimeDir 使用受文件权限保护的 Unix Domain Socket；Windows 使用仅监听 loopback 的随机端口和随机 Bearer Token。endpoint、Token 或 Socket 路径通过受限 discovery 文件发布。
 
@@ -34,7 +34,7 @@ Gateway 不持有通用 `*sql.DB` 业务能力。只读查询进入 `internal/co
 ## 客户端包边界
 
 ```text
-cmd/autozeagent          flag / daemon ensure / 子命令与 tui.Run 入口
+cmd/ymz          flag / daemon ensure / 子命令与 tui.Run 入口
 internal/tui             Bubble Tea UI；消费窄 `tui.Gateway`（由 gatewayclient 满足）；主 UX
 internal/gatewayclient   共享 HTTP/SSE 外观 + transport（不 import gateway server）
 internal/gateway         服务端 only：路由 / handlers / LocalRunner

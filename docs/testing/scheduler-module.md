@@ -1,18 +1,18 @@
 # 进程内 Scheduler 验证
 
-Scheduler 直接运行在 daemon 内并使用 `core.db`；不存在独立 `scheduler.db` 或 `autozeagent-scheduler` 二进制。产品语义见 ADR-042（chat-native Job）。
+Scheduler 直接运行在 daemon 内并使用 `core.db`；不存在独立 `scheduler.db` 或 `ymz-scheduler` 二进制。产品语义见 ADR-042（chat-native Job）。
 
 Windows 验证：
 
 ```powershell
-go test -count=1 ./internal/scheduler ./internal/scheduledtasks ./internal/gateway ./cmd/autozeagent ./cmd/autozeagentd
+go test -count=1 ./internal/scheduler ./internal/scheduledtasks ./internal/gateway ./cmd/ymz ./cmd/ymzd
 ./scripts/dev.ps1 -Action all
 ```
 
 Linux/macOS：
 
 ```bash
-go test -count=1 ./internal/scheduler ./internal/scheduledtasks ./internal/gateway ./cmd/autozeagent ./cmd/autozeagentd
+go test -count=1 ./internal/scheduler ./internal/scheduledtasks ./internal/gateway ./cmd/ymz ./cmd/ymzd
 make check
 ```
 

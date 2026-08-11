@@ -7,9 +7,9 @@ import (
 	"log/slog"
 	"sync"
 
-	"autozeagent.local/autozeagent/internal/runmeta"
-	"autozeagent.local/autozeagent/pkg/providerapi"
-	"autozeagent.local/autozeagent/pkg/toolapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/runmeta"
+	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
+	"github.com/yyZe0122/yunmengze-agent/pkg/toolapi"
 )
 
 // readOnlyParallelTools may run in the same provider step concurrently.

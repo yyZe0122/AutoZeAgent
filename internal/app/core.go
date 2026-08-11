@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/platform/paths"
+	"github.com/yyZe0122/yunmengze-agent/internal/platform/paths"
 )
 
 type State string
@@ -44,7 +44,7 @@ type Core struct {
 
 func New(config Config) (*Core, error) {
 	if config.Name == "" {
-		config.Name = "autozeagent"
+		config.Name = "yunmengze"
 	}
 	if config.Version == "" {
 		config.Version = "unknown"

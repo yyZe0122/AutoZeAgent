@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"autozeagent.local/autozeagent/internal/policy"
-	"autozeagent.local/autozeagent/internal/tools/internal/executor"
-	"autozeagent.local/autozeagent/pkg/toolapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/policy"
+	"github.com/yyZe0122/yunmengze-agent/internal/tools/internal/executor"
+	"github.com/yyZe0122/yunmengze-agent/pkg/toolapi"
 )
 
 type gitTool struct {

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/tools"
+	"github.com/yyZe0122/yunmengze-agent/internal/tools"
 )
 
 // Gate adapts Service to tools.PermissionGate.

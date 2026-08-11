@@ -60,12 +60,12 @@ func TestWrapCommandBuildsSystemdRun(t *testing.T) {
 	if name != "/usr/bin/systemd-run" {
 		t.Fatalf("name = %q", name)
 	}
-	if unit != "autozeagent-tool-call-1.scope" {
+	if unit != "ymz-tool-call-1.scope" {
 		t.Fatalf("unit = %q", unit)
 	}
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
-		"--user", "--scope", "--unit=autozeagent-tool-call-1.scope",
+		"--user", "--scope", "--unit=ymz-tool-call-1.scope",
 		"--property=MemoryMax=64M", "--uid=1000", "--", "echo", "hi",
 	} {
 		if !strings.Contains(joined, want) {

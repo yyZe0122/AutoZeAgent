@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"autozeagent.local/autozeagent/internal/gatewayclient"
+	"github.com/yyZe0122/yunmengze-agent/internal/gatewayclient"
 )
 
 // formatToolCallLine renders a typed tool-call summary for the timeline (presentation only).

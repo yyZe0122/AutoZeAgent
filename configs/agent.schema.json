@@ -1,7 +1,7 @@
 ﻿{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://autozeagent.local/schema/autozeagent.json",
-  "title": "AutoZeAgent provider configuration",
+  "$id": "https://ymz.local/schema/agent.json",
+  "title": "YunmengZe Agent provider configuration",
   "type": "object",
   "additionalProperties": false,
   "required": ["model", "provider"],

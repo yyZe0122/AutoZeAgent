@@ -7,20 +7,16 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 PREFIX=${PREFIX:-/usr/local}
-SYSCONFDIR=${SYSCONFDIR:-/etc/autozeagent}
-STATE_DIR=${STATE_DIR:-/var/lib/autozeagent}
-LOG_DIR=${LOG_DIR:-/var/log/autozeagent}
-MODULE_DIR=${MODULE_DIR:-$PREFIX/lib/autozeagent/modules}
+SYSCONFDIR=${SYSCONFDIR:-/etc/yunmengze}
+STATE_DIR=${STATE_DIR:-/var/lib/yunmengze}
+LOG_DIR=${LOG_DIR:-/var/log/yunmengze}
 SERVICE_DIR=${SERVICE_DIR:-/etc/systemd/system}
 
 if command -v systemctl >/dev/null 2>&1; then
-  systemctl disable --now autozeagent.service 2>/dev/null || true
+  systemctl disable --now yunmengze.service 2>/dev/null || true
 fi
-rm -f "$SERVICE_DIR/autozeagent.service"
-rm -f "$PREFIX/bin/autozeagent" "$PREFIX/bin/autozeagentd" "$PREFIX/bin/aze"
-# Remove retired module binaries so upgrades clean legacy installations.
-rm -f "$MODULE_DIR/memory/autozeagent-memory" "$MODULE_DIR/autozeagent-memory" "$MODULE_DIR/autozeagent-skills" "$MODULE_DIR/autozeagent-scheduler" "$MODULE_DIR/autozeagent-evolution"
-rmdir "$MODULE_DIR/memory" 2>/dev/null || true
+rm -f "$SERVICE_DIR/yunmengze.service"
+rm -f "$PREFIX/bin/ymz" "$PREFIX/bin/ymzd"
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload
 fi
@@ -43,13 +39,13 @@ safe_purge() {
 }
 
 if [ "${PURGE_CONFIG:-0}" = "1" ]; then
-  safe_purge "$SYSCONFDIR" /etc/autozeagent SYSCONFDIR
+  safe_purge "$SYSCONFDIR" /etc/yunmengze SYSCONFDIR
 else
   echo "Configuration preserved at $SYSCONFDIR"
 fi
 if [ "${PURGE_DATA:-0}" = "1" ]; then
-  safe_purge "$STATE_DIR" /var/lib/autozeagent STATE_DIR
-  safe_purge "$LOG_DIR" /var/log/autozeagent LOG_DIR
+  safe_purge "$STATE_DIR" /var/lib/yunmengze STATE_DIR
+  safe_purge "$LOG_DIR" /var/log/yunmengze LOG_DIR
 else
   echo "Data preserved at $STATE_DIR"
 fi

@@ -10,30 +10,30 @@ import (
 	"testing"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/agent"
-	"autozeagent.local/autozeagent/internal/providerconfig"
-	"autozeagent.local/autozeagent/internal/providers"
-	coresqlite "autozeagent.local/autozeagent/internal/store/sqlite"
-	"autozeagent.local/autozeagent/pkg/providerapi"
-	"autozeagent.local/autozeagent/pkg/toolapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/agent"
+	"github.com/yyZe0122/yunmengze-agent/internal/providerconfig"
+	"github.com/yyZe0122/yunmengze-agent/internal/providers"
+	coresqlite "github.com/yyZe0122/yunmengze-agent/internal/store/sqlite"
+	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
+	"github.com/yyZe0122/yunmengze-agent/pkg/toolapi"
 )
 
 // Opt-in live provider smoke: full agent loop, no tools.
 //
-//	AUTOZEAGENT_E2E_PROVIDER=1 go test -tags e2e ./internal/agent/ -run TestE2EProviderAgentRun -count=1
+//	YMZ_E2E_PROVIDER=1 go test -tags e2e ./internal/agent/ -run TestE2EProviderAgentRun -count=1
 //
-// Uses ConfigDir from AUTOZEAGENT_CONFIG_DIR or ~/.config/autozeagent (Linux user layout).
+// Uses ConfigDir from YMZ_CONFIG_DIR or ~/.config/yunmengze (Linux user layout).
 func TestE2EProviderAgentRun(t *testing.T) {
-	if os.Getenv("AUTOZEAGENT_E2E_PROVIDER") != "1" {
-		t.Skip("set AUTOZEAGENT_E2E_PROVIDER=1 to run live provider e2e")
+	if os.Getenv("YMZ_E2E_PROVIDER") != "1" {
+		t.Skip("set YMZ_E2E_PROVIDER=1 to run live provider e2e")
 	}
-	configDir := strings.TrimSpace(os.Getenv("AUTOZEAGENT_CONFIG_DIR"))
+	configDir := strings.TrimSpace(os.Getenv("YMZ_CONFIG_DIR"))
 	if configDir == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			t.Fatal(err)
 		}
-		configDir = filepath.Join(home, ".config", "autozeagent")
+		configDir = filepath.Join(home, ".config", "yunmengze")
 	}
 	resolved, err := providerconfig.Load(configDir)
 	if err != nil {

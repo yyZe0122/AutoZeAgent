@@ -1,4 +1,4 @@
-// Package daemonctl starts, stops, and ensures the unique local autozeagentd process.
+// Package daemonctl starts, stops, and ensures the unique local ymzd process.
 // The CLI uses this so TUI/run work without a manually started daemon; stop is explicit only.
 package daemonctl
 
@@ -13,12 +13,12 @@ import (
 	"strings"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/gatewayclient"
-	"autozeagent.local/autozeagent/internal/platform/paths"
+	"github.com/yyZe0122/yunmengze-agent/internal/gatewayclient"
+	"github.com/yyZe0122/yunmengze-agent/internal/platform/paths"
 )
 
 const (
-	pidFilename     = "autozeagentd.pid"
+	pidFilename     = "ymzd.pid"
 	defaultReadyFor = 20 * time.Second
 	pollInterval    = 100 * time.Millisecond
 )
@@ -33,7 +33,7 @@ type Status struct {
 	Message  string     `json:"message,omitempty"`
 }
 
-// Ensure makes the local gateway healthy for mode, starting autozeagentd if needed.
+// Ensure makes the local gateway healthy for mode, starting ymzd if needed.
 // It does not stop the daemon when the caller exits.
 func Ensure(ctx context.Context, mode paths.Mode) error {
 	if ctx == nil {
@@ -62,7 +62,7 @@ func Ensure(ctx context.Context, mode paths.Mode) error {
 	return nil
 }
 
-// Start starts autozeagentd if the gateway is not already healthy.
+// Start starts ymzd if the gateway is not already healthy.
 func Start(ctx context.Context, mode paths.Mode) error {
 	if ctx == nil {
 		return errors.New("daemonctl start context is required")
@@ -108,7 +108,7 @@ func Stop(ctx context.Context, mode paths.Mode) error {
 			_ = removePID(layout.RuntimeDir)
 			return nil
 		}
-		return errors.New("daemon is running but pid file is missing or stale; stop autozeagentd manually")
+		return errors.New("daemon is running but pid file is missing or stale; stop ymzd manually")
 	}
 	deadline := time.Now().Add(defaultReadyFor)
 	for {
@@ -184,7 +184,7 @@ func startDetached(mode paths.Mode, layout paths.Layout) error {
 	if err != nil {
 		return err
 	}
-	logPath := filepath.Join(layout.LogDir, "autozeagentd.stdout.log")
+	logPath := filepath.Join(layout.LogDir, "ymzd.stdout.log")
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
 	if err != nil {
 		return fmt.Errorf("open daemon stdout log: %w", err)
@@ -199,12 +199,12 @@ func startDetached(mode paths.Mode, layout paths.Layout) error {
 	// even though the daemon process itself runs with DataDir as working directory.
 	env := os.Environ()
 	if cwd, err := os.Getwd(); err == nil && strings.TrimSpace(cwd) != "" {
-		env = append(env, "AUTOZEAGENT_CLIENT_CWD="+cwd)
+		env = append(env, "YMZ_CLIENT_CWD="+cwd)
 	}
 	cmd.Env = env
 	configureDetached(cmd)
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start autozeagentd: %w", err)
+		return fmt.Errorf("start ymzd: %w", err)
 	}
 	// Detach: do not wait; child writes its own pid file after gateway binds.
 	_ = cmd.Process.Release()
@@ -252,13 +252,13 @@ func probeHealth(ctx context.Context, runtimeDir string) (bool, error) {
 }
 
 func lookPathDaemon() (string, error) {
-	name := "autozeagentd" + exeSuffix()
+	name := "ymzd" + exeSuffix()
 	if self, err := os.Executable(); err == nil {
 		candidate := filepath.Join(filepath.Dir(self), name)
 		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 			return candidate, nil
 		}
-		// When invoked via aze → autozeagent symlink, Executable may resolve to autozeagent.
+		// When CLI binary is renamed or linked, still find ymzd next to it.
 		if resolved, err := filepath.EvalSymlinks(self); err == nil {
 			candidate = filepath.Join(filepath.Dir(resolved), name)
 			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
@@ -268,12 +268,12 @@ func lookPathDaemon() (string, error) {
 	}
 	path, err := exec.LookPath(name)
 	if err != nil {
-		return "", fmt.Errorf("find autozeagentd: put it on PATH or next to the CLI binary: %w", err)
+		return "", fmt.Errorf("find ymzd: put it on PATH or next to the CLI binary: %w", err)
 	}
 	return path, nil
 }
 
-// WritePID records the current process id for stop/status (called by autozeagentd).
+// WritePID records the current process id for stop/status (called by ymzd).
 func WritePID(runtimeDir string) error {
 	if strings.TrimSpace(runtimeDir) == "" {
 		return errors.New("runtime directory is required")

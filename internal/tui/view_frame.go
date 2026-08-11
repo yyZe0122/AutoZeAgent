@@ -51,7 +51,7 @@ func (m model) View() string {
 }
 
 func (m model) renderHeader() string {
-	left := styleTitle.Render("autozeagent") + "  " +
+	left := styleTitle.Render("YunmengZe") + "  " +
 		styleDim.Render(string(m.mode)) + "  " +
 		sseDot(m.sseState) + styleDim.Render(" "+m.sseState)
 	themeHint := styleMuted.Render("  " + string(m.theme))

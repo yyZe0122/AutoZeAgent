@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"autozeagent.local/autozeagent/internal/platform/paths"
+	"github.com/yyZe0122/yunmengze-agent/internal/platform/paths"
 )
 
 func TestCoreIsHealthy(t *testing.T) {

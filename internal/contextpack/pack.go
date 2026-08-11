@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"autozeagent.local/autozeagent/pkg/providerapi"
+	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
 
 // Default tool-result protection window (estimated tokens of newest tool bodies).

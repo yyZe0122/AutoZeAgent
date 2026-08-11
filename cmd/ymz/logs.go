@@ -11,11 +11,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"autozeagent.local/autozeagent/internal/platform/paths"
+	"github.com/yyZe0122/yunmengze-agent/internal/platform/paths"
 )
 
 const (
-	daemonLogFileName = "autozeagentd.jsonl"
+	daemonLogFileName = "ymzd.jsonl"
 	maxLogTail        = 10000
 )
 

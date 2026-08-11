@@ -11,7 +11,7 @@ var testTime = time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)
 func TestTaskChatLifecycle(t *testing.T) {
 	t.Parallel()
 
-	task, err := NewTask("task-1", "session-1", "Build", "Build AutoZeAgent", testTime)
+	task, err := NewTask("task-1", "session-1", "Build", "Build YunmengZe", testTime)
 	if err != nil {
 		t.Fatalf("NewTask() error = %v", err)
 	}
@@ -62,7 +62,7 @@ func TestTaskPauseResumeLifecycle(t *testing.T) {
 func TestTaskRejectsIllegalTransitionWithoutMutation(t *testing.T) {
 	t.Parallel()
 
-	task, err := NewTask("task-1", "session-1", "Build", "Build AutoZeAgent", testTime)
+	task, err := NewTask("task-1", "session-1", "Build", "Build YunmengZe", testTime)
 	if err != nil {
 		t.Fatalf("NewTask() error = %v", err)
 	}

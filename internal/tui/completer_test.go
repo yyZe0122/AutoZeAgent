@@ -5,8 +5,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"autozeagent.local/autozeagent/internal/gatewayclient"
-	"autozeagent.local/autozeagent/internal/platform/paths"
+	"github.com/yyZe0122/yunmengze-agent/internal/gatewayclient"
+	"github.com/yyZe0122/yunmengze-agent/internal/platform/paths"
 )
 
 func TestCompleterFiltersPrefix(t *testing.T) {

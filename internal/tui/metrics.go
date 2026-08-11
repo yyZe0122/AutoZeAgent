@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/gatewayclient"
+	"github.com/yyZe0122/yunmengze-agent/internal/gatewayclient"
 )
 
 // planBudget matches approval.PlanBudget JSON on plan documents

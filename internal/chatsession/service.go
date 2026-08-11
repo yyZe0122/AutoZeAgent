@@ -14,17 +14,17 @@ import (
 	"sync"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/agent"
-	"autozeagent.local/autozeagent/internal/applicationerror"
-	"autozeagent.local/autozeagent/internal/approval"
-	"autozeagent.local/autozeagent/internal/audit"
-	"autozeagent.local/autozeagent/internal/contextpack"
-	"autozeagent.local/autozeagent/internal/corequery"
-	"autozeagent.local/autozeagent/internal/kernel"
-	"autozeagent.local/autozeagent/internal/memory"
-	"autozeagent.local/autozeagent/internal/providerconfig"
-	"autozeagent.local/autozeagent/internal/runlog"
-	"autozeagent.local/autozeagent/pkg/providerapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/agent"
+	"github.com/yyZe0122/yunmengze-agent/internal/applicationerror"
+	"github.com/yyZe0122/yunmengze-agent/internal/approval"
+	"github.com/yyZe0122/yunmengze-agent/internal/audit"
+	"github.com/yyZe0122/yunmengze-agent/internal/contextpack"
+	"github.com/yyZe0122/yunmengze-agent/internal/corequery"
+	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
+	"github.com/yyZe0122/yunmengze-agent/internal/memory"
+	"github.com/yyZe0122/yunmengze-agent/internal/providerconfig"
+	"github.com/yyZe0122/yunmengze-agent/internal/runlog"
+	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
 
 // PathGuardRoot expands the tool filesystem ceiling for a session workspace (ADR-046).
@@ -36,11 +36,11 @@ const (
 	// chatStepIDPrefix prefixes per-task step IDs. plan_steps.step_id is a global PK,
 	// so the literal "chat-step" cannot be reused across tasks.
 	chatStepIDPrefix      = "chat-step-"
-	chatSystemPromptAgent = "You are AutoZeAgent, a local coding assistant in a multi-turn chat session (build mode). " +
+	chatSystemPromptAgent = "You are YunmengZe, a local coding assistant in a multi-turn chat session (build mode). " +
 		"Reply helpfully in the user's language. You may read and write files under the workspace when needed. " +
 		"Prefer absolute paths under the workspace; relative paths are resolved against the workspace root. " +
 		"Do not invent plan steps or claim tool success without evidence."
-	chatSystemPromptPlan = "You are AutoZeAgent in plan mode (read-only analysis). " +
+	chatSystemPromptPlan = "You are YunmengZe in plan mode (read-only analysis). " +
 		"Reply helpfully in the user's language. You may read and inspect the workspace, ask clarifying questions, " +
 		"and discuss approaches. You must NOT modify files, create directories, or apply patches. " +
 		"If the user asks for edits, explain the plan and suggest switching to agent (build) mode. " +

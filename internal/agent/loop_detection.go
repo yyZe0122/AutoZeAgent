@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 	"strings"
 
-	"autozeagent.local/autozeagent/pkg/providerapi"
+	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
 
 const (

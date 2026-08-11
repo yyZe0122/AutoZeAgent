@@ -6,7 +6,7 @@
 
 ## 背景
 
-AutoZeAgent 允许 Agent Runner（经 chatsession）和模型 Tool Call 提出工具调用，但这些组件不能因为获得了一个 Skill、提示词或模型返回的 Tool Call 就直接产生副作用。Gateway 与 Scheduler 不得直接执行工具。执行前必须由代码统一校验 Plan、Policy、Capability Grant、超时和审计要求；否则“先执行后确认”会重新出现。
+YunmengZe 允许 Agent Runner（经 chatsession）和模型 Tool Call 提出工具调用，但这些组件不能因为获得了一个 Skill、提示词或模型返回的 Tool Call 就直接产生副作用。Gateway 与 Scheduler 不得直接执行工具。执行前必须由代码统一校验 Plan、Policy、Capability Grant、超时和审计要求；否则“先执行后确认”会重新出现。
 
 ## 决策
 
@@ -64,7 +64,7 @@ HTTP 工具只允许 `http` 和 `https`，禁止 URL userinfo 和自动重定向
 
 路径预检查与实际打开文件之间仍存在 TOCTOU 窗口。当前实现降低了常见 `..` 和 symlink 逃逸风险，但不能替代操作系统级 mount namespace、只读 bind mount 或基于文件句柄的安全打开策略。
 
-Go 的导入边界阻止 Core 代码误用低层执行器，但不能约束已经获得任意本机代码执行权限的恶意进程。生产路径**不**加载第三方模块进程；不可信代码不得链接进 `autozeagentd`。历史上的进程外模块方案已删除（见 ADR-001）。
+Go 的导入边界阻止 Core 代码误用低层执行器，但不能约束已经获得任意本机代码执行权限的恶意进程。生产路径**不**加载第三方模块进程；不可信代码不得链接进 `ymzd`。历史上的进程外模块方案已删除（见 ADR-001）。
 
 HTTP 当前限制审批域名，不等同于完整 SSRF 防护。后续还需要 DNS/IP 策略、私网地址策略和连接阶段的地址复核。
 

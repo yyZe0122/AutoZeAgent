@@ -9,7 +9,7 @@
 
 ## 决策
 
-`autozeagentd` 独占一个 SQLite 数据库 `core.db`，它是 Session、Task、Plan、Approval、Grant、Run（含 `parent_run_id`，migration 015）、Agent 记录、Tool Call、Event、Audit、Skill 快照、Scheduler Job/Run/Lease（含 `execution_mode` / `skill_ids`，migration 017，ADR-042）、**context 窗压 / session 摘要**（migration 016，ADR-041）、**tool permission 队列**（migration 018，ADR-043）、以及 **in-process memory 条目**（migration 019–020，ADR-044：分层 kind/priority/expires + FTS + transcript_search 投影）的事实源。摘要与记忆只影响 provider 请求视图，不删除 transcript 或 `agent_run_records`。
+`ymzd` 独占一个 SQLite 数据库 `core.db`，它是 Session、Task、Plan、Approval、Grant、Run（含 `parent_run_id`，migration 015）、Agent 记录、Tool Call、Event、Audit、Skill 快照、Scheduler Job/Run/Lease（含 `execution_mode` / `skill_ids`，migration 017，ADR-042）、**context 窗压 / session 摘要**（migration 016，ADR-041）、**tool permission 队列**（migration 018，ADR-043）、以及 **in-process memory 条目**（migration 019–020，ADR-044：分层 kind/priority/expires + FTS + transcript_search 投影）的事实源。摘要与记忆只影响 provider 请求视图，不删除 transcript 或 `agent_run_records`。
 
 Scheduler 通过 Core 已打开的 `*sql.DB` 工作，不创建 `scheduler.db`；到期 Job 由 in-process `scheduledtasks` 提交 chat task（ADR-042）。旧的 `memory.db`、`evolution.db` 和其他模块数据库不再属于生产架构，也不会被 daemon 自动读取或迁移。会话记忆使用 `core.db.memory_entries`（in-process），不是独立 Memory 库。
 

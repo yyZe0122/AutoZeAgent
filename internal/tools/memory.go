@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"strings"
 
-	"autozeagent.local/autozeagent/internal/memory"
-	"autozeagent.local/autozeagent/internal/policy"
-	"autozeagent.local/autozeagent/internal/runmeta"
-	"autozeagent.local/autozeagent/pkg/toolapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/memory"
+	"github.com/yyZe0122/yunmengze-agent/internal/policy"
+	"github.com/yyZe0122/yunmengze-agent/internal/runmeta"
+	"github.com/yyZe0122/yunmengze-agent/pkg/toolapi"
 )
 
 // MemoryBackend is the narrow surface tools need from *memory.Manager.

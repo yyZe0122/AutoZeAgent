@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/corequery"
-	"autozeagent.local/autozeagent/internal/kernel"
-	"autozeagent.local/autozeagent/pkg/schedulerapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/corequery"
+	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
+	"github.com/yyZe0122/yunmengze-agent/pkg/schedulerapi"
 )
 
 func (a *API) handleJobs(w http.ResponseWriter, r *http.Request) {

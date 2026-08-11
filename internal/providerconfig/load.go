@@ -78,7 +78,7 @@ func listModelRefsFromFile(path string) (string, []ModelRef, error) {
 }
 
 // Load reads provider configuration only from configDir
-// (autozeagent.local.json, then autozeagent.json). Project directories are not searched.
+// (agent.local.json, then agent.json). Project directories are not searched.
 // Optional ConfigDir/env is loaded first (does not override existing process env).
 func Load(configDir string) (*Resolved, error) {
 	if err := LoadEnvFromConfigDir(configDir); err != nil {

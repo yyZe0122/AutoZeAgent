@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/agent"
-	"autozeagent.local/autozeagent/internal/runmeta"
-	coresqlite "autozeagent.local/autozeagent/internal/store/sqlite"
+	"github.com/yyZe0122/yunmengze-agent/internal/agent"
+	"github.com/yyZe0122/yunmengze-agent/internal/runmeta"
+	coresqlite "github.com/yyZe0122/yunmengze-agent/internal/store/sqlite"
 )
 
 type stubSubagent struct {

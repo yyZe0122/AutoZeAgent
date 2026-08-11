@@ -1,20 +1,20 @@
-# Installs AutoZeAgent user-wide on Windows (no admin).
-# - Copies only the three binaries into %LOCALAPPDATA%\Programs\AutoZeAgent\bin
+# Installs YunmengZe user-wide on Windows (no admin).
+# - Copies only the two binaries into %LOCALAPPDATA%\Programs\YunmengZe\bin
 # - Adds that directory to the user PATH
-# - Seeds %APPDATA%\AutoZeAgent\autozeagent.json + env when missing
+# - Seeds %APPDATA%\YunmengZe\agent.json + env when missing
 # apiKey may use {env:}, {file:}, or a literal string — none is forced.
 param(
-    [string]$Repository = $env:AUTOZEAGENT_REPOSITORY,
-    [string]$Version = $env:AUTOZEAGENT_VERSION,
-    [string]$InstallDir = $env:AUTOZEAGENT_INSTALL_DIR,
-    [string]$ConfigDir = $env:AUTOZEAGENT_CONFIG_DIR
+    [string]$Repository = $env:YMZ_REPOSITORY,
+    [string]$Version = $env:YMZ_VERSION,
+    [string]$InstallDir = $env:YMZ_INSTALL_DIR,
+    [string]$ConfigDir = $env:YMZ_CONFIG_DIR
 )
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 if ([string]::IsNullOrWhiteSpace($Repository)) {
-    $Repository = 'yyZe0122/AutoZeAgent'
+    $Repository = 'yyZe0122/YunmengZe-Agent'
 }
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
@@ -22,16 +22,16 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
 }
 if ([string]::IsNullOrWhiteSpace($InstallDir)) {
     if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
-        $InstallDir = Join-Path $env:USERPROFILE 'AutoZeAgent\bin'
+        $InstallDir = Join-Path $env:USERPROFILE 'YunmengZe\bin'
     } else {
-        $InstallDir = Join-Path $env:LOCALAPPDATA 'Programs\AutoZeAgent\bin'
+        $InstallDir = Join-Path $env:LOCALAPPDATA 'Programs\YunmengZe\bin'
     }
 }
 if ([string]::IsNullOrWhiteSpace($ConfigDir)) {
     if ([string]::IsNullOrWhiteSpace($env:APPDATA)) {
-        $ConfigDir = Join-Path $env:USERPROFILE 'AutoZeAgent'
+        $ConfigDir = Join-Path $env:USERPROFILE 'YunmengZe'
     } else {
-        $ConfigDir = Join-Path $env:APPDATA 'AutoZeAgent'
+        $ConfigDir = Join-Path $env:APPDATA 'YunmengZe'
     }
 }
 
@@ -63,7 +63,7 @@ function Get-ReleaseTag {
     try {
         $list = Invoke-RestMethod -UseBasicParsing -Uri $apiList
     } catch {
-        throw "Could not list releases for $Repo. Set AUTOZEAGENT_VERSION=vX.Y.Z. $_"
+        throw "Could not list releases for $Repo. Set YMZ_VERSION=vX.Y.Z. $_"
     }
     foreach ($rel in $list) {
         if ($rel.draft) { continue }
@@ -71,14 +71,14 @@ function Get-ReleaseTag {
             return [string]$rel.tag_name
         }
     }
-    throw "No published releases for $Repo. Set AUTOZEAGENT_VERSION=vX.Y.Z."
+    throw "No published releases for $Repo. Set YMZ_VERSION=vX.Y.Z."
 }
 
 function Install-UserConfig {
     param([string]$Dir, [string]$ExamplePath)
     New-Item -ItemType Directory -Force -Path $Dir | Out-Null
-    $jsonPath = Join-Path $Dir 'autozeagent.json'
-    $localPath = Join-Path $Dir 'autozeagent.local.json'
+    $jsonPath = Join-Path $Dir 'agent.json'
+    $localPath = Join-Path $Dir 'agent.local.json'
     $envPath = Join-Path $Dir 'env'
     if (-not (Test-Path -LiteralPath $jsonPath) -and -not (Test-Path -LiteralPath $localPath)) {
         if (-not [string]::IsNullOrWhiteSpace($ExamplePath) -and (Test-Path -LiteralPath $ExamplePath)) {
@@ -120,7 +120,7 @@ function Install-UserConfig {
     if (-not (Test-Path -LiteralPath $envPath)) {
         @'
 # Optional KEY=value (daemon/CLI load this; does not override process env already set).
-# Pair with apiKey "{env:DEEPSEEK_API_KEY}" in autozeagent.json, or use a literal apiKey, or {file:…}.
+# Pair with apiKey "{env:DEEPSEEK_API_KEY}" in agent.json, or use a literal apiKey, or {file:…}.
 # Do not commit secrets.
 #
 DEEPSEEK_API_KEY=
@@ -142,14 +142,14 @@ if ($tag.StartsWith('v')) {
     $tag = "v$tag"
 }
 
-$asset = "autozeagent_${verNum}_windows_${arch}.zip"
+$asset = "ymz_${verNum}_windows_${arch}.zip"
 $baseUrl = "https://github.com/$Repository/releases/download/$tag"
 
-Write-Host "Installing AutoZeAgent $tag ($arch) ..."
+Write-Host "Installing YunmengZe $tag ($arch) ..."
 Write-Host "  binaries → $InstallDir"
 Write-Host "  config   → $ConfigDir"
 
-$tempDir = Join-Path ([IO.Path]::GetTempPath()) ('autozeagent-' + [Guid]::NewGuid().ToString('N'))
+$tempDir = Join-Path ([IO.Path]::GetTempPath()) ('ymz-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $tempDir | Out-Null
 try {
     $archivePath = Join-Path $tempDir $asset
@@ -177,26 +177,22 @@ try {
     Expand-Archive -LiteralPath $archivePath -DestinationPath $tempDir -Force
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
-    $bins = @('autozeagent.exe', 'autozeagentd.exe', 'aze.exe')
+    $bins = @('ymz.exe', 'ymzd.exe')
     foreach ($name in $bins) {
         $src = Join-Path $tempDir $name
         if (-not (Test-Path -LiteralPath $src)) {
-            if ($name -eq 'aze.exe') {
-                $src = Join-Path $tempDir 'autozeagent.exe'
-            } else {
-                throw "Archive missing $name"
-            }
+            throw "Archive missing $name"
         }
         Copy-Item -LiteralPath $src -Destination (Join-Path $InstallDir $name) -Force
     }
 
-    $example = Join-Path $tempDir 'configs\autozeagent.json.example'
+    $example = Join-Path $tempDir 'configs\agent.json.example'
     if (-not (Test-Path -LiteralPath $example)) {
         $example = ''
     }
     Install-UserConfig -Dir $ConfigDir -ExamplePath $example
 
-    if ($env:AUTOZEAGENT_NO_PATH_UPDATE -ne '1') {
+    if ($env:YMZ_NO_PATH_UPDATE -ne '1') {
         $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
         $pathEntries = @()
         if (-not [string]::IsNullOrWhiteSpace($userPath)) {
@@ -234,20 +230,19 @@ try {
     }
 
     Write-Host ""
-    Write-Host "Installed AutoZeAgent $tag"
-    Write-Host "  $InstallDir\autozeagent.exe"
-    Write-Host "  $InstallDir\aze.exe"
-    Write-Host "  $InstallDir\autozeagentd.exe"
+    Write-Host "Installed YunmengZe Agent $tag"
+    Write-Host "  $InstallDir\ymz.exe"
+    Write-Host "  $InstallDir\ymzd.exe"
     Write-Host ""
     Write-Host "API key (pick one; nothing is forced):"
     Write-Host "  1) Edit $ConfigDir\env  (e.g. DEEPSEEK_API_KEY=...)"
     Write-Host "  2) Set user/process env:  `$env:DEEPSEEK_API_KEY = '...'"
-    Write-Host "  3) Literal apiKey string in $ConfigDir\autozeagent.json"
+    Write-Host "  3) Literal apiKey string in $ConfigDir\agent.json"
     Write-Host "  4) apiKey `"{file:path}`" relative to config dir"
     Write-Host ""
     Write-Host "Open a new terminal if PATH just updated, then:"
-    Write-Host "  aze"
-    Write-Host "  autozeagent version"
+    Write-Host "  ymz"
+    Write-Host "  ymz version"
 } finally {
     if (Test-Path -LiteralPath $tempDir) {
         Remove-Item -LiteralPath $tempDir -Recurse -Force

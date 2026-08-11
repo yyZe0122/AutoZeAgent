@@ -6,7 +6,7 @@
 
 ## 背景
 
-AutoZeAgent 的正式目标平台是 Windows AMD64 与 Linux AMD64。Core、Gateway、Tool Executor 和文件写入链路已经存在平台实现，但路径目录、进程退出、信号、文件替换、Unix Socket、systemd 和 SQLite 错误分类需要形成同一套可验收边界，避免调用方依赖操作系统细节或驱动错误文本。
+YunmengZe 的正式目标平台是 Windows AMD64 与 Linux AMD64。Core、Gateway、Tool Executor 和文件写入链路已经存在平台实现，但路径目录、进程退出、信号、文件替换、Unix Socket、systemd 和 SQLite 错误分类需要形成同一套可验收边界，避免调用方依赖操作系统细节或驱动错误文本。
 
 当前没有需要持久化的应用级 CacheDir。Artifact、Gateway 和文件写入使用的临时文件必须与目标文件位于同一目录，以保持同文件系统替换语义，并在成功或失败后清理。
 
@@ -26,13 +26,13 @@ AutoZeAgent 的正式目标平台是 Windows AMD64 与 Linux AMD64。Core、Gate
 
 ### 目录语义
 
-Windows 用户模式使用 `APPDATA\AutoZeAgent` 作为配置目录，使用 `LOCALAPPDATA\AutoZeAgent` 作为数据根目录；系统模式使用 `ProgramData\AutoZeAgent`。Linux 用户模式遵循 `XDG_CONFIG_HOME`、`XDG_DATA_HOME` 和 `XDG_RUNTIME_DIR`，缺失时回退到用户主目录下的 XDG 默认位置；系统模式使用 `/etc/autozeagent`、`/var/lib/autozeagent`、`/run/autozeagent` 和 `/var/log/autozeagent`。
+Windows 用户模式使用 `APPDATA\YunmengZe` 作为配置目录，使用 `LOCALAPPDATA\YunmengZe` 作为数据根目录；系统模式使用 `ProgramData\YunmengZe`。Linux 用户模式遵循 `XDG_CONFIG_HOME`、`XDG_DATA_HOME` 和 `XDG_RUNTIME_DIR`，缺失时回退到用户主目录下的 XDG 默认位置；系统模式使用 `/etc/yunmengze`、`/var/lib/yunmengze`、`/run/yunmengze` 和 `/var/log/yunmengze`。
 
-AutoZeAgent 不新增无调用方的持久化 CacheDir。临时文件由具体写入者拥有，优先在目标目录创建，以保证替换不跨文件系统。
+YunmengZe 不新增无调用方的持久化 CacheDir。临时文件由具体写入者拥有，优先在目标目录创建，以保证替换不跨文件系统。
 
 ### Linux 服务与权限
 
-正式 systemd 单元是 `packaging/systemd/autozeagent.service`。验收至少校验专用用户和组、control-group 终止、Runtime/State 目录、私有临时目录与 NoNewPrivileges，并在可用时通过 `systemd-analyze verify` 检查单元语法。非 Linux 或未安装 systemd 工具的环境显式跳过该项，不伪装成 systemd 实机验收。
+正式 systemd 单元是 `packaging/systemd/yunmengze.service`。验收至少校验专用用户和组、control-group 终止、Runtime/State 目录、私有临时目录与 NoNewPrivileges，并在可用时通过 `systemd-analyze verify` 检查单元语法。非 Linux 或未安装 systemd 工具的环境显式跳过该项，不伪装成 systemd 实机验收。
 
 Unix Socket 必须拒绝已有的非 Socket 路径，限制 Socket 和父目录权限，并只清理当前进程拥有的 Endpoint。
 

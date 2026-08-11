@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/events"
-	"autozeagent.local/autozeagent/pkg/eventapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/events"
+	"github.com/yyZe0122/yunmengze-agent/pkg/eventapi"
 )
 
 var (

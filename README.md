@@ -1,4 +1,4 @@
-# AutoZeAgent
+# YunmengZe Agent
 
 [![Go](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go)](https://go.dev/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
@@ -14,8 +14,8 @@ A local-first, policy-controlled automation agent in Go.
 ## What you get / 生产形态
 
 ```text
-autozeagentd   long-running daemon
-autozeagent    local CLI + TUI (gatewayclient peers; TUI primary)
+ymzd   long-running daemon
+ymz    local CLI + TUI (gatewayclient peers; TUI primary)
 core.db        single SQLite source of truth
 ```
 
@@ -39,46 +39,46 @@ Release notes: [`docs/changelog/`](docs/changelog/) · publication: [`docs/relea
 **macOS / Linux** ([Homebrew](https://brew.sh)):
 
 ```bash
-brew install --cask yyZe0122/tap/autozeagent
-aze
-autozeagent version && autozeagentd --check
+brew install --cask yyZe0122/tap/ymz
+ymz
+ymz version && ymzd --check
 ```
 
 **Windows** ([Scoop](https://scoop.sh)):
 
 ```powershell
-scoop bucket add autozeagent https://github.com/yyZe0122/scoop-bucket
-scoop install autozeagent
-aze
-autozeagent version
+scoop bucket add ymz https://github.com/yyZe0122/scoop-bucket
+scoop install ymz
+ymz
+ymz version
 ```
 
 Tap / bucket are updated automatically on each GitHub Release (`homebrew-tap`, `scoop-bucket`).
 
 ### Fallback: one-line installer / 兜底：一键脚本
 
-Use when brew/scoop is unavailable. Pins Pre-release tags (or omit `AUTOZEAGENT_VERSION` when a non-prerelease `latest` exists).
+Use when brew/scoop is unavailable. Pins Pre-release tags (or omit `YMZ_VERSION` when a non-prerelease `latest` exists).
 
 无 brew/scoop 时使用。Pre-release 请固定版本。
 
-**Windows** → `%LOCALAPPDATA%\Programs\AutoZeAgent\bin` + user PATH:
+**Windows** → `%LOCALAPPDATA%\Programs\YunmengZe\bin` + user PATH:
 
 ```powershell
-$env:AUTOZEAGENT_VERSION = 'v0.1.0'
-irm "https://raw.githubusercontent.com/yyZe0122/AutoZeAgent/main/packaging/scripts/install.ps1" | iex
+$env:YMZ_VERSION = 'v0.1.0'
+irm "https://raw.githubusercontent.com/yyZe0122/YunmengZe-Agent/main/packaging/scripts/install.ps1" | iex
 ```
 
 **Linux / macOS** → `~/.local/bin`:
 
 ```bash
-export AUTOZEAGENT_VERSION=v0.1.0
-curl -fsSL "https://raw.githubusercontent.com/yyZe0122/AutoZeAgent/main/packaging/scripts/install-user.sh" | sh
+export YMZ_VERSION=v0.1.0
+curl -fsSL "https://raw.githubusercontent.com/yyZe0122/YunmengZe-Agent/main/packaging/scripts/install-user.sh" | sh
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Optional: `AUTOZEAGENT_INSTALL_DIR`, `AUTOZEAGENT_REPOSITORY`.
+Optional: `YMZ_INSTALL_DIR`, `YMZ_REPOSITORY`.
 
-**Manual zip/tar:** extract `autozeagent` / `aze` / `autozeagentd` onto PATH. Naming: `autozeagent_{version}_{os}_{arch}.…` (`amd64` = x64). Prefer package managers above.
+**Manual zip/tar:** extract `ymz` / `ymzd` onto PATH. Naming: `ymz_{version}_{os}_{arch}.…` (`amd64` = x64). Prefer package managers above.
 
 ### From source / 源码
 
@@ -102,10 +102,10 @@ Provider config lives in the **OS config directory only** (not project cwd). One
 
 | Mode | Linux | Windows |
 | --- | --- | --- |
-| user | `~/.config/autozeagent/` | `%APPDATA%\AutoZeAgent\` |
-| system | `/etc/autozeagent/` | `%ProgramData%\AutoZeAgent\config\` |
+| user | `~/.config/yunmengze/` | `%APPDATA%\YunmengZe\` |
+| system | `/etc/yunmengze/` | `%ProgramData%\YunmengZe\config\` |
 
-Lookup: `autozeagent.local.json` then `autozeagent.json`. Optional `env` file (`KEY=value`) is loaded by daemon/CLI (does not override already-set process env).
+Lookup: `agent.local.json` then `agent.json`. Optional `env` file (`KEY=value`) is loaded by daemon/CLI (does not override already-set process env).
 
 **API key — pick any (not forced):**
 
@@ -115,12 +115,12 @@ Lookup: `autozeagent.local.json` then `autozeagent.json`. Optional `env` file (`
 
 ```bash
 # after install, or manually:
-# edit ~/.config/autozeagent/env   OR   export DEEPSEEK_API_KEY=...
-# OR put a literal apiKey in autozeagent.json
-autozeagent config validate --mode user
+# edit ~/.config/yunmengze/env   OR   export DEEPSEEK_API_KEY=...
+# OR put a literal apiKey in agent.json
+ymz config validate --mode user
 ```
 
-Full multi-provider example: [`configs/autozeagent.json.example`](configs/autozeagent.json.example).
+Full multi-provider example: [`configs/agent.json.example`](configs/agent.json.example).
 
 Minimal shape:
 
@@ -160,17 +160,17 @@ Minimal shape:
 - `maxTokens` = output cap; `contextWindow` = packing/UI pressure ([ADR-041](docs/architecture/041-context-packing-and-pressure.md), [`docs/provider-protocols.md`](docs/provider-protocols.md))
 - Optional `models.subagent` / `models.compact` ([ADR-045](docs/architecture/045-model-roles.md))
 - Optional `chat`: workspace, `tools.git` / `tools.process`, `permission.mode` (`preauth` \| `ask`), memory ([ADR-038](docs/architecture/038-session-chat-boundary.md), [043](docs/architecture/043-tool-call-permission-interaction.md), [044](docs/architecture/044-in-process-memory-boundary.md), [046](docs/architecture/046-session-workspace-and-permission-tiers.md))
-- Full options: [`configs/autozeagent.json.example`](configs/autozeagent.json.example), [`configs/autozeagent.schema.json`](configs/autozeagent.schema.json)
+- Full options: [`configs/agent.json.example`](configs/agent.json.example), [`configs/agent.schema.json`](configs/agent.schema.json)
 
 ## Run / 运行
 
-**TUI is the primary UX.** No-arg / `aze` opens it and ensures a unique local daemon (stop only via `daemon stop`).
+**TUI is the primary UX.** No-arg / `ymz` opens it and ensures a unique local daemon (stop only via `daemon stop`).
 
 ```bash
-aze
-# or: autozeagent
-autozeagent daemon status
-autozeagent daemon stop
+ymz
+# or: ymz
+ymz daemon status
+ymz daemon stop
 ```
 
 `health` / most subcommands need a **running** daemon; only TUI entry and `run` call ensure.
@@ -199,14 +199,14 @@ autozeagent daemon stop
 ### CLI (secondary)
 
 ```bash
-autozeagent health --mode user
-autozeagent run --mode user "Report workspace status without changing files."
-autozeagent task status TASK_ID --mode user
-autozeagent logs --tail 200 --mode user
-autozeagent logs --run RUN_ID
-# AUTOZEAGENT_LOG_LEVEL=debug  →  ADR-047
-autozeagent job list --mode user
-autozeagent help
+ymz health --mode user
+ymz run --mode user "Report workspace status without changing files."
+ymz task status TASK_ID --mode user
+ymz logs --tail 200 --mode user
+ymz logs --run RUN_ID
+# YMZ_LOG_LEVEL=debug  →  ADR-047
+ymz job list --mode user
+ymz help
 ```
 
 Prefer TUI `/cron` to create jobs; CLI `job create` is for scripts.
@@ -214,7 +214,7 @@ Prefer TUI `/cron` to create jobs; CLI `job create` is for scripts.
 ## Architecture (short) / 架构要点
 
 ```text
-User → CLI/TUI → local Gateway → autozeagentd
+User → CLI/TUI → local Gateway → ymzd
          → chatsession (agent|plan) · agent · tool broker · skills · jobs
          → providers / controlled effects · core.db
 ```
@@ -244,7 +244,7 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md), [`AGENTS.md`](AGENTS.md). Report vulns
 
 ## Security notes / 安全
 
-- Do not commit secrets, `autozeagent.local.json`, `*.db`, logs, sockets, or `bin/` / `dist/`.
+- Do not commit secrets, `agent.local.json`, `*.db`, logs, sockets, or `bin/` / `dist/`.
 - Least privilege: workspace roots, `chat.tools`, service accounts.
 - Grants and the Tool Broker are security boundaries, not optional UI.
 - Back up `core.db` before upgrades on important installs.

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"unicode/utf8"
 
-	"autozeagent.local/autozeagent/pkg/providerapi"
+	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
 
 // DefaultMaxToolResultRunes is the max tool-result Content length sent to the

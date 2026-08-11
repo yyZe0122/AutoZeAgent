@@ -13,11 +13,11 @@ import (
 	"strings"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/applicationerror"
-	"autozeagent.local/autozeagent/internal/approval"
-	"autozeagent.local/autozeagent/internal/kernel"
-	"autozeagent.local/autozeagent/internal/runlog"
-	"autozeagent.local/autozeagent/internal/skillcatalog"
+	"github.com/yyZe0122/yunmengze-agent/internal/applicationerror"
+	"github.com/yyZe0122/yunmengze-agent/internal/approval"
+	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
+	"github.com/yyZe0122/yunmengze-agent/internal/runlog"
+	"github.com/yyZe0122/yunmengze-agent/internal/skillcatalog"
 )
 
 const defaultMaxSkillContextBytes = 64 * 1024

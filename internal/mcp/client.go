@@ -149,7 +149,7 @@ func (c *Client) initialize(ctx context.Context) error {
 	if err := c.call(ctx, "initialize", map[string]any{
 		"protocolVersion": "2024-11-05",
 		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "autozeagent", "version": "0"},
+		"clientInfo":      map[string]any{"name": "yunmengze", "version": "0"},
 	}, &result); err != nil {
 		return err
 	}

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/coreidentity"
-	coresqlite "autozeagent.local/autozeagent/internal/store/sqlite"
+	"github.com/yyZe0122/yunmengze-agent/internal/coreidentity"
+	coresqlite "github.com/yyZe0122/yunmengze-agent/internal/store/sqlite"
 )
 
 func TestSessionTranscriptIncludesUserAndAssistant(t *testing.T) {

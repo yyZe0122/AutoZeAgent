@@ -1,6 +1,6 @@
 # Architecture ADRs
 
-Numbered decision records for AutoZeAgent. This directory is the project **design knowledge base**.
+Numbered decision records for YunmengZe. This directory is the project **design knowledge base**.
 
 Living status / backlog (only): [`docs/optimization/current.md`](../optimization/current.md).  
 Agent/contributor entry: [`AGENTS.md`](../../AGENTS.md).
@@ -8,8 +8,8 @@ Agent/contributor entry: [`AGENTS.md`](../../AGENTS.md).
 ## Production shape
 
 ```text
-autozeagentd   long-running daemon (composition root)
-autozeagent    local CLI + TUI (Gateway clients only)
+ymzd   long-running daemon (composition root)
+ymz    local CLI + TUI (Gateway clients only)
 core.db        single SQLite source of truth
 ```
 
@@ -82,7 +82,7 @@ Provider wire formats: [`docs/provider-protocols.md`](../provider-protocols.md).
 | 044 | In-process memory boundary | Layered L0–L3 memory; freeze inject; FTS; `/memory`; no Module Runtime |
 | 045 | Model roles | Optional `models.subagent` / `models.compact`; fallback to top-level `model` |
 | 046 | Session workspace + permission tiers | Client cwd session root; once/similar/permanent/deny |
-| 047 | Structured logging / debug chain | slog JSON stage boundaries; `aze logs`; tests vs real-machine |
+| 047 | Structured logging / debug chain | slog JSON stage boundaries; `ymz logs`; tests vs real-machine |
 
 Missing numbers (002, 005, 014–015, 019–021, 025, …) are **historical gaps**, not missing files to recreate.
 

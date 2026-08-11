@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"strings"
 
-	"autozeagent.local/autozeagent/internal/coreidentity"
+	"github.com/yyZe0122/yunmengze-agent/internal/coreidentity"
 )
 
 func (s *Store) ListSessions(ctx context.Context, options SessionListOptions) ([]Session, error) {

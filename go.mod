@@ -1,4 +1,4 @@
-module autozeagent.local/autozeagent
+module github.com/yyZe0122/yunmengze-agent
 
 go 1.26.0
 

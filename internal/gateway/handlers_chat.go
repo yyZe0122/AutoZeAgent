@@ -9,12 +9,12 @@ import (
 	"strconv"
 	"strings"
 
-	"autozeagent.local/autozeagent/internal/approval"
-	"autozeagent.local/autozeagent/internal/corequery"
-	"autozeagent.local/autozeagent/internal/kernel"
-	"autozeagent.local/autozeagent/internal/runlog"
-	"autozeagent.local/autozeagent/internal/taskcontrol"
-	"autozeagent.local/autozeagent/internal/tasksubmission"
+	"github.com/yyZe0122/yunmengze-agent/internal/approval"
+	"github.com/yyZe0122/yunmengze-agent/internal/corequery"
+	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
+	"github.com/yyZe0122/yunmengze-agent/internal/runlog"
+	"github.com/yyZe0122/yunmengze-agent/internal/taskcontrol"
+	"github.com/yyZe0122/yunmengze-agent/internal/tasksubmission"
 )
 
 type taskSubmissionRequest struct {

@@ -6,7 +6,7 @@ Accepted，2026-07-14；2026-07-21 更新为进程内实现；**2026-08-03 产�
 
 ## 决策
 
-Scheduler 是 `autozeagentd` 内的一个后台 Runner，不是独立模块或操作系统进程。它使用 Core 已打开的 `*sql.DB`，Job、Job Run 和 Lease 与其他领域数据共同保存在 `core.db`。
+Scheduler 是 `ymzd` 内的一个后台 Runner，不是独立模块或操作系统进程。它使用 Core 已打开的 `*sql.DB`，Job、Job Run 和 Lease 与其他领域数据共同保存在 `core.db`。
 
 Scheduler 只负责“何时提交任务”，不能创建 Approval、Grant、Agent Run 或 Tool Call。到期 Job 通过 SQLite claim/lease 领取，再调用 `tasksubmission.Service` 创建幂等 Core Task。Chat 产品路径见 **ADR-042**（双轨 agent/plan chatsession）；副作用仍经 Tool Broker。
 

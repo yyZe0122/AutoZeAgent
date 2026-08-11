@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-AutoZeAgent is currently in alpha development. Security fixes are applied to the latest commit on the default branch; older snapshots and unofficial builds are not supported.
+YunmengZe is currently in alpha development. Security fixes are applied to the latest commit on the default branch; older snapshots and unofficial builds are not supported.
 
 ## Reporting a vulnerability
 
@@ -35,7 +35,7 @@ Reports involving the following areas are especially useful:
 
 ## Operator responsibilities
 
-AutoZeAgent can execute tools and communicate with external model providers. Operators should:
+YunmengZe can execute tools and communicate with external model providers. Operators should:
 
 - run it with the least operating-system privilege required;
 - restrict filesystem access via `chat.workspace` / `chat.roots` (default session root = launch directory; avoid `allow_all` unless you accept full local-user path reach);

@@ -11,8 +11,8 @@ import (
 	"net/url"
 	"strings"
 
-	"autozeagent.local/autozeagent/internal/policy"
-	"autozeagent.local/autozeagent/pkg/toolapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/policy"
+	"github.com/yyZe0122/yunmengze-agent/pkg/toolapi"
 )
 
 type httpGetTool struct {
@@ -73,7 +73,7 @@ func (t *httpGetTool) Execute(ctx context.Context, raw json.RawMessage) (json.Ra
 	if err != nil {
 		return nil, err
 	}
-	request.Header.Set("User-Agent", "AutoZeAgent/0")
+	request.Header.Set("User-Agent", "YunmengZe/0")
 	response, err := t.client.Do(request)
 	if err != nil {
 		return nil, err

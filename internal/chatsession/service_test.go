@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/agent"
-	"autozeagent.local/autozeagent/internal/approval"
-	"autozeagent.local/autozeagent/internal/corequery"
-	"autozeagent.local/autozeagent/internal/kernel"
-	storesqlite "autozeagent.local/autozeagent/internal/store/sqlite"
-	"autozeagent.local/autozeagent/pkg/providerapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/agent"
+	"github.com/yyZe0122/yunmengze-agent/internal/approval"
+	"github.com/yyZe0122/yunmengze-agent/internal/corequery"
+	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
+	storesqlite "github.com/yyZe0122/yunmengze-agent/internal/store/sqlite"
+	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
 
 type fakeAgent struct {

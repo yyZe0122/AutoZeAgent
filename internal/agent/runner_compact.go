@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"autozeagent.local/autozeagent/internal/contextpack"
-	"autozeagent.local/autozeagent/pkg/providerapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/contextpack"
+	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
 
 // CompactSummaryPrompt is the structured head-summary system prompt (OpenCode/Hermes-style).

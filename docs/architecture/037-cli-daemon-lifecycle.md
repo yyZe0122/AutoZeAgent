@@ -5,20 +5,20 @@
 
 ## 决策
 
-`autozeagent` / `aze` 在进入 **TUI** 或执行 **`run`** 前，通过 `internal/daemonctl` 确保本 `--mode` 下唯一的 `autozeagentd` 已就绪：
+`ymz` / `ymz` 在进入 **TUI** 或执行 **`run`** 前，通过 `internal/daemonctl` 确保本 `--mode` 下唯一的 `ymzd` 已就绪：
 
 1. 探测本地 Gateway（`gateway.json` + `/v1/health`）；
-2. 未就绪则在旁路启动 `autozeagentd --mode <mode>`（与 CLI 同目录或 `PATH`）；
+2. 未就绪则在旁路启动 `ymzd --mode <mode>`（与 CLI 同目录或 `PATH`）；
 3. 等待 Gateway 健康后再继续；
 4. **退出 TUI / 结束 `run` 不会停止 daemon**；
-5. 仅 `autozeagent daemon stop`（或进程信号 / systemd）关闭服务。
+5. 仅 `ymz daemon stop`（或进程信号 / systemd）关闭服务。
 
-单实例仍由 Gateway 绑定保证：`ensureNoActiveEndpoint` + Unix socket / loopback 端口互斥。Daemon 在 Gateway 监听成功后写入 `RuntimeDir/autozeagentd.pid`，停止时删除；`daemon stop` 对 PID 发 `SIGTERM`（Windows 用 `taskkill`）。
+单实例仍由 Gateway 绑定保证：`ensureNoActiveEndpoint` + Unix socket / loopback 端口互斥。Daemon 在 Gateway 监听成功后写入 `RuntimeDir/ymzd.pid`，停止时删除；`daemon stop` 对 PID 发 `SIGTERM`（Windows 用 `taskkill`）。
 
 显式控制：
 
 ```text
-autozeagent daemon start|stop|status [--mode user|system]
+ymz daemon start|stop|status [--mode user|system]
 ```
 
 ## 非目标
@@ -29,7 +29,7 @@ autozeagent daemon start|stop|status [--mode user|system]
 
 ## 后果
 
-- 用户可一句话 `aze` 进入 TUI，无需先手动起守护进程；
+- 用户可一句话 `ymz` 进入 TUI，无需先手动起守护进程；
 - 后台常驻直到 `daemon stop`；
 - `health` / `task` 等子命令仍假定 Gateway 可用，不自动 ensure（避免隐式拉起影响诊断）。
 

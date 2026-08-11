@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"autozeagent.local/autozeagent/pkg/providerapi"
+	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
 
 type requestCaptureProvider struct {

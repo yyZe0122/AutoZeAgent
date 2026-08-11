@@ -19,7 +19,7 @@ Skill 是用户显式选择的受限指令内容，不能成为授权来源。�
 运行时根目录按低到高优先级发现：
 
 1. `<config_dir>/skills`，用户模式标记为 `user`，系统模式标记为 `system`；
-2. 当前工作目录下 `.autozeagent/skills`，标记为 `project`，可覆盖同 ID 的配置目录 Skill。
+2. 当前工作目录下 `.yunmengze/skills`，标记为 `project`，可覆盖同 ID 的配置目录 Skill。
 
 不存在的根目录被忽略；非法文件作为诊断记录并从目录中排除。
 

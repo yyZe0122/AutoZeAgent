@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"autozeagent.local/autozeagent/internal/gatewayclient"
+	"github.com/yyZe0122/yunmengze-agent/internal/gatewayclient"
 )
 
 func TestPlanBudgetOf(t *testing.T) {
@@ -103,7 +103,7 @@ func TestMetricsPanelShowsCostWhenPresent(t *testing.T) {
 		plan: &gatewayclient.Plan{
 			Document: json.RawMessage(`{"budget":{"max_tokens":1000,"max_duration_ms":1}}`),
 		},
-		dataDir: "/data/aze",
+		dataDir: "/data/ymz",
 	}
 	panel := m.renderMetricsPanel(30)
 	for _, want := range []string{"tokens", "cost 1234µ", "tok=1000", "budget"} {

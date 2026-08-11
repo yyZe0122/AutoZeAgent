@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/applicationerror"
-	"autozeagent.local/autozeagent/internal/approval"
-	"autozeagent.local/autozeagent/internal/kernel"
-	"autozeagent.local/autozeagent/internal/runlog"
+	"github.com/yyZe0122/yunmengze-agent/internal/applicationerror"
+	"github.com/yyZe0122/yunmengze-agent/internal/approval"
+	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
+	"github.com/yyZe0122/yunmengze-agent/internal/runlog"
 )
 
 var ErrInvalidRequest = errors.New("invalid task control request")

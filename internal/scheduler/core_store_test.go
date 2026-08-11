@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/kernel"
-	coresqlite "autozeagent.local/autozeagent/internal/store/sqlite"
-	"autozeagent.local/autozeagent/pkg/schedulerapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
+	coresqlite "github.com/yyZe0122/yunmengze-agent/internal/store/sqlite"
+	"github.com/yyZe0122/yunmengze-agent/pkg/schedulerapi"
 )
 
 func TestCoreStoreClaimsAndAcknowledgesDueJob(t *testing.T) {

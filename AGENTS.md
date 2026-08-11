@@ -1,13 +1,13 @@
 # AGENTS.md
 
-Local-first Go automation agent. Module: `autozeagent.local/autozeagent`. Go **1.26+**.
+Local-first Go automation agent. Module: `github.com/yyZe0122/yunmengze-agent`. Go **1.26+**.
 
 ## Production shape
 
 Only three production pieces:
 
-- `autozeagentd` — long-running daemon (composition root: `cmd/autozeagentd`)
-- `autozeagent` / `aze` — local CLI client of the gateway (`cmd/autozeagent`); no-arg and `aze` open the TUI; TUI/`run` ensure a unique daemon via `internal/daemonctl` (stop only via `daemon stop`)
+- `ymzd` — long-running daemon (composition root: `cmd/ymzd`)
+- `ymz` — local CLI client of the gateway (`cmd/ymz`); no-arg and `tui` open the TUI; TUI/`run` ensure a unique daemon via `internal/daemonctl` (stop only via `daemon stop`)
 - `core.db` — single SQLite source of truth (`modernc.org/sqlite`, pure Go; builds use `CGO_ENABLED=0`)
 
 Do **not** restore deleted architecture: Module Runtime/Supervisor, out-of-process Memory/Scheduler/Evolution/Echo, `skills.db` / `scheduler.db`, `/v1/modules`, multi-DB, ORM, container DI, or generic event-bus frameworks.
@@ -40,8 +40,8 @@ Local release matrix: `goreleaser release --snapshot --clean --parallelism 1`.
 
 | Path | Role |
 | --- | --- |
-| `cmd/autozeagentd` | Wires SQLite, kernel, chatsession, agent, tools, MCP, gateway, taskcontrol, scheduledtasks |
-| `cmd/autozeagent` | Gateway client only — no tools, no provider, no grants; no-arg/`tui` → `internal/tui` |
+| `cmd/ymzd` | Wires SQLite, kernel, chatsession, agent, tools, MCP, gateway, taskcontrol, scheduledtasks |
+| `cmd/ymz` | Gateway client only — no tools, no provider, no grants; no-arg/`tui` → `internal/tui` |
 | `internal/gateway` | Local HTTP/UDS server only (`api.go` + `handlers_*.go` + LocalRunner) |
 | `internal/gatewayclient` | Shared CLI+TUI facade: HTTP/SSE transport + typed helpers (no import of gateway server) |
 | `internal/tui` | Bubble Tea UI; Gateway-only (`gatewayclient` + paths + `pkg/*` + optional `modelstream`); primary UX |
@@ -61,7 +61,7 @@ Local release matrix: `goreleaser release --snapshot --clean --parallelism 1`.
 - **Writes** go through narrow services: `tasksubmission` (submit)、`chatsession` (chat runs)、`taskcontrol` (pause/resume/cancel). **Reads** go through `corequery`. Gateway must not hold a business `*sql.DB`.
 - Model-requested effects go **only** through Tool Broker (`internal/tools`, `RegisterBuiltins`). Nested `internal/tools/internal/executor` is intentionally unimportable outside `tools`.
 - Scheduler is **in-process** on Core’s shared `*sql.DB` — no separate scheduler DB or process. Jobs are **chat-native** (ADR-042): due fire → `tasksubmission` → `chatsession`.
-- Skills are file-based: `<config_dir>/skills` and `.autozeagent/skills` as `<id>/SKILL.md`. Instruction text only — never approvals, grants, or policy expansion.
+- Skills are file-based: `<config_dir>/skills` and `.yunmengze/skills` as `<id>/SKILL.md`. Instruction text only — never approvals, grants, or policy expansion.
 - Sub-agents (if any) = logical child Runs with `parent_run_id` + `task` tool, not new processes/modules (ADR-039).
 - CLI and TUI are **peers**: both use `gatewayclient`; TUI does **not** shell out to CLI subcommands. **TUI is the primary UX**; CLI is secondary (scripts/automation).
 
@@ -71,21 +71,21 @@ Local release matrix: `goreleaser release --snapshot --clean --parallelism 1`.
 - Gateway does not execute tools, call providers, or issue grants.
 - Migration filenames are lexicographically ordered and **immutable after release** (keep history even when later migrations drop tables).
 - Persist/serve times as UTC RFC3339Nano; convert for display only at CLI/UI edges.
-- Never commit secrets, `autozeagent.local.json`, `*.db`, logs, sockets, or `bin/`/`dist/` output.
+- Never commit secrets, `agent.local.json`, `*.db`, logs, sockets, or `bin/`/`dist/` output.
 - Prefer concrete types, small interfaces at call sites, explicit errors, and `context.Context` on cancellable work. No hidden global orchestration.
 
 ## Config / runtime
 
 - Modes: `--mode user|system` (OS-specific dirs; Linux user uses XDG).
-- Provider config is **ConfigDir only** (not project cwd): `autozeagent.local.json` then `autozeagent.json` under user/system config dir (Linux `~/.config/autozeagent`, Windows `%APPDATA%\AutoZeAgent`). Daemon `EnsureConfig` migrates from project/data dir once if ConfigDir is empty, else seeds a template. Prefer `{env:VAR}` / file refs over literal API keys.
+- Provider config is **ConfigDir only** (not project cwd): `agent.local.json` then `agent.json` under user/system config dir (Linux `~/.config/yunmengze`, Windows `%APPDATA%\YunmengZe`). Daemon `EnsureConfig` migrates from project/data dir once if ConfigDir is empty, else seeds a template. Prefer `{env:VAR}` / file refs over literal API keys.
 - Per-model options: `maxTokens` = output cap; optional `contextWindow` = model context length for **packing + UI pressure** (not the same field as `maxTokens`). See `docs/provider-protocols.md`, ADR-041.
 - Optional **`models`** role map (ADR-045): `models.subagent` / `models.compact` as `provider/model` overrides; omit → top-level `model` (main). `/model` only changes main; role map changes need daemon restart. Unknown keys fail load.
 - Optional **`chat`** in the same JSON: `workspace` (`default` client_cwd\|daemon_cwd\|abs path; `allow[]`; `allow_all`; ADR-046), legacy `roots` (merged into ceiling), `allow_write` (optional ceiling for **agent** writes; omit = true), `tools.git` / `tools.process` (agent-only high-risk grants; default false), `compaction.enabled` (default true), `max_iterations` (1–64, default 16), `permission.mode` (`preauth` default \| `ask` \| `auto` reserved; ADR-043), `memory` (enabled/max_inject_runes/session_search; ADR-044). Session workspace = client launch cwd on submit. Plan mode is always read-only. Manual compact: TUI `/compact [focus]`. Tool permission: TUI `/perm` once\|similar\|permanent\|deny. Layered memory: TUI `/memory` `/refresh-memory`. See ADR-038, ADR-041, ADR-043, ADR-044, ADR-046.
-- `autozeagent config validate` checks path layout + provider load/resolve + chat structure; never prints secrets.
+- `ymz config validate` checks path layout + provider load/resolve + chat structure; never prints secrets.
 - Daemon owns `core.db` lifecycle; components must not close the shared connection.
 - Dual-track tasks (OpenCode-style): both modes → `chatsession`; **agent** = write grants, **plan** = read-only. No interactive Planner/approval path. TUI Tab switches draft mode.
 - Scheduled jobs: fixed interval; default `execution_mode=agent`; create via TUI `/cron [every objective]` or CLI `job create` (secondary). See ADR-042.
-- Daemon structured logs: JSONL (`autozeagentd.jsonl`); stage fields `component` / `operation` / `result` + `session_id` / `task_id` / `run_id` / `trace_id` (ADR-047). Filter: `aze logs --run|--session|--task|--component|--level`. Level: `AUTOZEAGENT_LOG_LEVEL`. Integration debug = real machine + logs; keep package tests for safety/architecture (no full e2e harness).
+- Daemon structured logs: JSONL (`ymzd.jsonl`); stage fields `component` / `operation` / `result` + `session_id` / `task_id` / `run_id` / `trace_id` (ADR-047). Filter: `ymz logs --run|--session|--task|--component|--level`. Level: `YMZ_LOG_LEVEL`. Integration debug = real machine + logs; keep package tests for safety/architecture (no full e2e harness).
 
 ## Deep dives
 

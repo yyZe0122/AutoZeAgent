@@ -10,8 +10,8 @@ import (
 	"sort"
 	"strings"
 
-	"autozeagent.local/autozeagent/internal/kernel"
-	"autozeagent.local/autozeagent/internal/policy"
+	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
+	"github.com/yyZe0122/yunmengze-agent/internal/policy"
 )
 
 var ErrInvalidPlan = errors.New("invalid plan")

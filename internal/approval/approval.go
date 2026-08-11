@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/coreidentity"
-	"autozeagent.local/autozeagent/internal/events"
-	"autozeagent.local/autozeagent/internal/kernel"
-	"autozeagent.local/autozeagent/pkg/eventapi"
-	"autozeagent.local/autozeagent/pkg/sqliteerror"
+	"github.com/yyZe0122/yunmengze-agent/internal/coreidentity"
+	"github.com/yyZe0122/yunmengze-agent/internal/events"
+	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
+	"github.com/yyZe0122/yunmengze-agent/pkg/eventapi"
+	"github.com/yyZe0122/yunmengze-agent/pkg/sqliteerror"
 )
 
 type ApprovalID = coreidentity.ApprovalID

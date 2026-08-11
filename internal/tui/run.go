@@ -10,10 +10,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-isatty"
 
-	"autozeagent.local/autozeagent/internal/gatewayclient"
-	"autozeagent.local/autozeagent/internal/modelstream"
-	"autozeagent.local/autozeagent/internal/platform/paths"
-	"autozeagent.local/autozeagent/pkg/eventapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/gatewayclient"
+	"github.com/yyZe0122/yunmengze-agent/internal/modelstream"
+	"github.com/yyZe0122/yunmengze-agent/internal/platform/paths"
+	"github.com/yyZe0122/yunmengze-agent/pkg/eventapi"
 )
 
 // Config configures the local TUI.

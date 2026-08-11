@@ -3,7 +3,7 @@ package gateway
 import (
 	"context"
 
-	"autozeagent.local/autozeagent/internal/toolpermission"
+	"github.com/yyZe0122/yunmengze-agent/internal/toolpermission"
 )
 
 // ToolPermissionAdapter adapts toolpermission.Service to ToolPermissionService.

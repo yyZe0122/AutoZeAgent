@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/coreidentity"
+	"github.com/yyZe0122/yunmengze-agent/internal/coreidentity"
 )
 
 var ErrNotFound = errors.New("core query resource not found")

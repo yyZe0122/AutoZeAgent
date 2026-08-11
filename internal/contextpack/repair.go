@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"autozeagent.local/autozeagent/pkg/providerapi"
+	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
 
 // RepairToolMessages fixes orphan tool protocol edges for provider views:

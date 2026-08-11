@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"autozeagent.local/autozeagent/internal/platform/pathsecurity"
+	"github.com/yyZe0122/yunmengze-agent/internal/platform/pathsecurity"
 )
 
 const SkillFileName = "SKILL.md"

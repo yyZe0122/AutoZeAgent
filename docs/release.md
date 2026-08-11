@@ -8,31 +8,31 @@ Moved out of the root README so install/run docs stay short. Chinese notes follo
 
 | Channel | Platforms | Command |
 | --- | --- | --- |
-| **Homebrew** (recommended) | macOS, Linux | `brew install --cask yyZe0122/tap/autozeagent` |
-| **Scoop** (recommended) | Windows | `scoop bucket add autozeagent https://github.com/yyZe0122/scoop-bucket` then `scoop install autozeagent` |
+| **Homebrew** (recommended) | macOS, Linux | `brew install --cask yyZe0122/tap/ymz` |
+| **Scoop** (recommended) | Windows | `scoop bucket add ymz https://github.com/yyZe0122/scoop-bucket` then `scoop install ymz` |
 | One-line scripts (fallback) | Win / Linux / macOS | `install.ps1` / `install-user.sh` |
 | Manual / source | all | Release zip/tar or `make install` |
 
 Affiliate repos (auto-updated by GoReleaser on each tag):
 
-- [`yyZe0122/homebrew-tap`](https://github.com/yyZe0122/homebrew-tap) → `Casks/autozeagent.rb`
-- [`yyZe0122/scoop-bucket`](https://github.com/yyZe0122/scoop-bucket) → `autozeagent.json`
+- [`yyZe0122/homebrew-tap`](https://github.com/yyZe0122/homebrew-tap) → `Casks/ymz.rb`
+- [`yyZe0122/scoop-bucket`](https://github.com/yyZe0122/scoop-bucket) → `agent.json`
 
 ## Asset naming / 资产命名
 
-GoReleaser builds **one archive per OS/arch**. Each archive contains **three binaries** (`autozeagent`, `aze`, `autozeagentd`) plus configs and packaging scripts.
+GoReleaser builds **one archive per OS/arch**. Each archive contains **two binaries** (`ymz`, `ymzd`) plus configs and packaging scripts.
 
 每个平台一个归档；归档内含 **三个二进制** 与配置/脚本。
 
 | Pattern | Example (tag `v0.1.0`) |
 | --- | --- |
-| `autozeagent_{version}_{os}_{arch}.tar.gz` | `autozeagent_0.1.0_linux_amd64.tar.gz` |
-| `autozeagent_{version}_windows_{arch}.zip` | `autozeagent_0.1.0_windows_amd64.zip` |
+| `ymz_{version}_{os}_{arch}.tar.gz` | `ymz_0.1.0_linux_amd64.tar.gz` |
+| `ymz_{version}_windows_{arch}.zip` | `ymz_0.1.0_windows_amd64.zip` |
 | `checksums.txt` | SHA-256 of all archives (fixed name) |
 
 - `{version}` = tag **without** leading `v` (GoReleaser `.Version`).
 - Fallback installers (`packaging/scripts/install-user.sh`, `install.ps1`) and package manifests must stay in sync with this pattern.
-- Prefer `AUTOZEAGENT_VERSION=v0.1.0` when the release is marked **Pre-release** (GitHub `latest` may skip it).
+- Prefer `YMZ_VERSION=v0.1.0` when the release is marked **Pre-release** (GitHub `latest` may skip it).
 
 ## Release notes / 更新日志
 
@@ -47,7 +47,7 @@ GoReleaser builds **one archive per OS/arch**. Each archive contains **three bin
 
 ```bash
 sudo -i
-cd /home/yyze/projects/AutoZeAgent
+cd /home/yyze/projects/YunmengZe
 
 # Main repo Release upload
 export GITHUB_TOKEN=ghp_...   # or rely on: gh auth login → script uses gh auth token
@@ -93,7 +93,7 @@ Or export PATs yourself:
 
 | Token | Required access |
 | --- | --- |
-| **`GITHUB_TOKEN`** (fine-grained) | **AutoZeAgent**: Contents R/W; Workflows R/W if commit touches `.github/workflows/`; Metadata Read |
+| **`GITHUB_TOKEN`** (fine-grained) | **YunmengZe**: Contents R/W; Workflows R/W if commit touches `.github/workflows/`; Metadata Read |
 | **`PACKAGE_GITHUB_TOKEN`** (fine-grained) | **homebrew-tap** + **scoop-bucket**: Contents R/W; Metadata Read |
 | **Classic** (one token for all) | **`repo` + `workflow`** |
 
@@ -112,7 +112,7 @@ After a successful publish, confirm:
 
 ```bash
 # Release assets present (not only Source code zip)
-gh release view vX.Y.Z --repo yyZe0122/AutoZeAgent
+gh release view vX.Y.Z --repo yyZe0122/YunmengZe-Agent
 # Tap / bucket commits
 gh api repos/yyZe0122/homebrew-tap/commits --jq '.[0].commit.message'
 gh api repos/yyZe0122/scoop-bucket/commits --jq '.[0].commit.message'
@@ -124,14 +124,14 @@ If the Release page only shows **Source code** zip/tar.gz, binaries were never u
 
 [`.github/workflows/release.yml`](../.github/workflows/release.yml) still runs on `v*` tags when Actions is enabled and billing is healthy. Prefer **local upload** when hosted runners are unavailable.
 
-**Repository secret:** set `PACKAGE_GITHUB_TOKEN` on AutoZeAgent (Contents R/W on `homebrew-tap` + `scoop-bucket`). Without it, the Release may succeed while brew/scoop stay stale.
+**Repository secret:** set `PACKAGE_GITHUB_TOKEN` on YunmengZe (Contents R/W on `homebrew-tap` + `scoop-bucket`). Without it, the Release may succeed while brew/scoop stay stale.
 
 ### Local snapshot only / 仅本地快照
 
 ```bash
 export PACKAGE_GITHUB_TOKEN=dummy   # template only; snapshot skips publish
 goreleaser release --snapshot --clean --parallelism 1 --skip=publish
-# dist/autozeagent_<snapshot-version>_{os}_{arch}.*
+# dist/ymz_<snapshot-version>_{os}_{arch}.*
 # dist/ also contains generated cask / scoop drafts when publish runs
 ```
 
@@ -139,7 +139,7 @@ goreleaser release --snapshot --clean --parallelism 1 --skip=publish
 
 ```bash
 gh auth login
-gh release download v0.1.0 --repo yyZe0122/AutoZeAgent
+gh release download v0.1.0 --repo yyZe0122/YunmengZe-Agent
 ```
 
 ## Private-to-public audit checklist / 转公开清单
@@ -167,11 +167,11 @@ Machine-wide systemd: extract a Linux release archive, then from the extract dir
 
 ```bash
 sudo sh packaging/scripts/install.sh .
-sudo install -m 0640 -o root -g autozeagent \
-  configs/autozeagent.json.example /etc/autozeagent/autozeagent.json
+sudo install -m 0640 -o root -g ymz \
+  configs/agent.json.example /etc/yunmengze/agent.json
 # Optional env file for {env:…} secrets (legacy name; not a Planner process):
-#   /etc/autozeagent/planner.env
-sudo systemctl enable --now autozeagent
+#   /etc/yunmengze/planner.env
+sudo systemctl enable --now ymz
 ```
 
 Details: [`packaging/install/systemd.md`](../packaging/install/systemd.md).

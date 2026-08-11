@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"autozeagent.local/autozeagent/internal/gatewayclient"
+	"github.com/yyZe0122/yunmengze-agent/internal/gatewayclient"
 )
 
 type timelineKind string

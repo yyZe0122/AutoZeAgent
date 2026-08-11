@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	coresqlite "autozeagent.local/autozeagent/internal/store/sqlite"
-	"autozeagent.local/autozeagent/pkg/providerapi"
-	"autozeagent.local/autozeagent/pkg/toolapi"
+	coresqlite "github.com/yyZe0122/yunmengze-agent/internal/store/sqlite"
+	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
+	"github.com/yyZe0122/yunmengze-agent/pkg/toolapi"
 )
 
 func TestRunnerTrimsLongToolResultsForProviderOnly(t *testing.T) {

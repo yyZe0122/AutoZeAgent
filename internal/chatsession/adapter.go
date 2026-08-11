@@ -3,7 +3,7 @@ package chatsession
 import (
 	"context"
 
-	"autozeagent.local/autozeagent/internal/tasksubmission"
+	"github.com/yyZe0122/yunmengze-agent/internal/tasksubmission"
 )
 
 // AsTaskChat adapts Service to tasksubmission.ChatStarter.

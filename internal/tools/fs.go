@@ -13,8 +13,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"autozeagent.local/autozeagent/internal/policy"
-	"autozeagent.local/autozeagent/pkg/toolapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/policy"
+	"github.com/yyZe0122/yunmengze-agent/pkg/toolapi"
 )
 
 const defaultFileReadLimit = 16 * 1024 * 1024
@@ -713,7 +713,7 @@ func atomicWrite(ctx context.Context, path string, content []byte) error {
 		return err
 	}
 	directory := filepath.Dir(path)
-	temporary, err := os.CreateTemp(directory, ".autozeagent-*.tmp")
+	temporary, err := os.CreateTemp(directory, ".yunmengze-*.tmp")
 	if err != nil {
 		return err
 	}

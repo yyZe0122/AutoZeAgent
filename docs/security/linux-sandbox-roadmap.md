@@ -40,7 +40,7 @@ RuntimeMaxSec=      (from Broker deadline + 5s when present)
 - 检测宿主机是否使用 cgroups v2 unified hierarchy（`/sys/fs/cgroup/cgroup.controllers`）。
 - 无 systemd / 无 `systemd-run` / probe 失败必须明确降级并记录 Audit（`process.isolation`），不能静默声称资源限制已启用。
 - Broker 超时仍是上层最后期限，cgroup/systemd 是额外防线。
-- transient unit 名称绑定 Tool Call ID（`autozeagent-tool-<id>.scope`），`--collect` + best-effort `systemctl stop` 清理。
+- transient unit 名称绑定 Tool Call ID（`ymz-tool-<id>.scope`），`--collect` + best-effort `systemctl stop` 清理。
 
 ## 第二阶段：namespace 隔离
 

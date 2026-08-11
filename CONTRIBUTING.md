@@ -1,6 +1,6 @@
-# Contributing to AutoZeAgent
+# Contributing to YunmengZe
 
-Thank you for considering a contribution. AutoZeAgent favors small, reviewable changes that preserve explicit security boundaries and straightforward Go code.
+Thank you for considering a contribution. YunmengZe favors small, reviewable changes that preserve explicit security boundaries and straightforward Go code.
 
 ## Before you start
 

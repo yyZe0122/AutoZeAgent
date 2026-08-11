@@ -6,7 +6,7 @@ Accepted (implemented 2026-08-10)
 
 ## Context
 
-Auto-started `autozeagentd` used `DataDir` as cwd; empty `chat.roots` made tools see DataDir, not the directory where the user ran `aze`. Interactive permissions (ADR-043) only offered once/session/deny, with no permanent trust table.
+Auto-started `ymzd` used `DataDir` as cwd; empty `chat.roots` made tools see DataDir, not the directory where the user ran `ymz`. Interactive permissions (ADR-043) only offered once/session/deny, with no permanent trust table.
 
 ## Decision
 

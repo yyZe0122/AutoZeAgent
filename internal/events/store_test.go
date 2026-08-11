@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	coresqlite "autozeagent.local/autozeagent/internal/store/sqlite"
-	"autozeagent.local/autozeagent/pkg/eventapi"
+	coresqlite "github.com/yyZe0122/yunmengze-agent/internal/store/sqlite"
+	"github.com/yyZe0122/yunmengze-agent/pkg/eventapi"
 )
 
 func TestAppendListAndAggregateOrdering(t *testing.T) {

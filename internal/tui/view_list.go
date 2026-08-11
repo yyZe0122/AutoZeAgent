@@ -7,8 +7,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"autozeagent.local/autozeagent/internal/gatewayclient"
-	"autozeagent.local/autozeagent/pkg/schedulerapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/gatewayclient"
+	"github.com/yyZe0122/yunmengze-agent/pkg/schedulerapi"
 )
 
 func (m *model) inListMode() bool {
@@ -230,7 +230,7 @@ func renderPickerOverlay(m *model, width int) string {
 		case listSessions:
 			empty = "No sessions yet. Type a message to start."
 		case listSkills:
-			empty = "No skills found. Add <id>/SKILL.md under config or .autozeagent/skills."
+			empty = "No skills found. Add <id>/SKILL.md under config or .yunmengze/skills."
 		case listPermissions:
 			empty = "No pending permissions. (chat.permission.mode=ask + ungranted high-risk tools)"
 		default:

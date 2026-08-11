@@ -8,11 +8,11 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"autozeagent.local/autozeagent/internal/gatewayclient"
-	"autozeagent.local/autozeagent/internal/modelstream"
-	"autozeagent.local/autozeagent/internal/platform/paths"
-	"autozeagent.local/autozeagent/pkg/eventapi"
-	"autozeagent.local/autozeagent/pkg/schedulerapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/gatewayclient"
+	"github.com/yyZe0122/yunmengze-agent/internal/modelstream"
+	"github.com/yyZe0122/yunmengze-agent/internal/platform/paths"
+	"github.com/yyZe0122/yunmengze-agent/pkg/eventapi"
+	"github.com/yyZe0122/yunmengze-agent/pkg/schedulerapi"
 )
 
 // execMode is the draft permission posture for the next task submission

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"autozeagent.local/autozeagent/pkg/providerapi"
+	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
 
 func TestTrimRunesLeavesShortContent(t *testing.T) {

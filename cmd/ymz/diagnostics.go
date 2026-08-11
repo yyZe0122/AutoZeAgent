@@ -17,10 +17,10 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"autozeagent.local/autozeagent/internal/app"
-	"autozeagent.local/autozeagent/internal/gatewayclient"
-	"autozeagent.local/autozeagent/internal/platform/paths"
-	"autozeagent.local/autozeagent/internal/providerconfig"
+	"github.com/yyZe0122/yunmengze-agent/internal/app"
+	"github.com/yyZe0122/yunmengze-agent/internal/gatewayclient"
+	"github.com/yyZe0122/yunmengze-agent/internal/platform/paths"
+	"github.com/yyZe0122/yunmengze-agent/internal/providerconfig"
 )
 
 type configCheck struct {

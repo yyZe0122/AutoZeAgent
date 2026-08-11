@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"autozeagent.local/autozeagent/internal/gatewayclient"
+	"github.com/yyZe0122/yunmengze-agent/internal/gatewayclient"
 )
 
 func TestFormatToolCallLineFSWrite(t *testing.T) {

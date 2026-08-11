@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"autozeagent.local/autozeagent/internal/providerconfig"
-	"autozeagent.local/autozeagent/pkg/providerapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/providerconfig"
+	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
 
 func TestNewConfiguredUsesSelectedProtocol(t *testing.T) {
@@ -71,7 +71,7 @@ func TestNewConfiguredUsesSelectedProtocol(t *testing.T) {
 				if got := request.Header.Get(test.expectedHeader); got == "" {
 					t.Errorf("missing %s", test.expectedHeader)
 				}
-				if got := request.Header.Get("X-AutoZeAgent-Test"); got != "configured" {
+				if got := request.Header.Get("X-YunmengZe-Test"); got != "configured" {
 					t.Errorf("custom header = %q", got)
 				}
 				var body map[string]any
@@ -92,7 +92,7 @@ func TestNewConfiguredUsesSelectedProtocol(t *testing.T) {
 
 			provider, err := NewConfigured(providerconfig.Resolved{
 				ProviderID: "test", Protocol: test.protocol, ModelID: "test-model", BaseURL: server.URL,
-				APIKey: "secret", Headers: map[string]string{"X-AutoZeAgent-Test": "configured"},
+				APIKey: "secret", Headers: map[string]string{"X-YunmengZe-Test": "configured"},
 			})
 			if err != nil {
 				t.Fatal(err)

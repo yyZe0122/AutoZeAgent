@@ -6,7 +6,7 @@
 
 ## 背景
 
-旧 `cmd/autozeagent-skills`、`internal/skills` 和 `skills.db` 曾实现 Candidate、评估、审批、隔离、版本、指标和 FTS 等完整生命周期，但 Core Agent 与 Planner 从未使用这条链路。当前真实需求只是发现本地 Skill、展示元数据、按选择读取正文并注入受限上下文。为这类文件内容启动独立进程和数据库，会提前引入数据所有权、RPC、迁移和运行维护成本。
+旧 `cmd/ymz-skills`、`internal/skills` 和 `skills.db` 曾实现 Candidate、评估、审批、隔离、版本、指标和 FTS 等完整生命周期，但 Core Agent 与 Planner 从未使用这条链路。当前真实需求只是发现本地 Skill、展示元数据、按选择读取正文并注入受限上下文。为这类文件内容启动独立进程和数据库，会提前引入数据所有权、RPC、迁移和运行维护成本。
 
 Crush 的实现证明了更小的可行边界：以目录中的 `SKILL.md` 为事实源，发现阶段只建立名称、描述、来源和路径目录，实际正文按 ID 读取；用户、项目和内置来源通过明确优先级解析，不依赖 SQLite。
 

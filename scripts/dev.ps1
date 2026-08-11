@@ -3,7 +3,7 @@ param(
     [ValidateSet('format', 'check', 'build', 'install', 'uninstall', 'all')]
     [string]$Action = 'all',
 
-    [string]$InstallDir = $env:AUTOZEAGENT_INSTALL_DIR
+    [string]$InstallDir = $env:YMZ_INSTALL_DIR
 )
 
 $ErrorActionPreference = 'Stop'
@@ -36,8 +36,8 @@ $env:GOTELEMETRY = 'off'
 New-Item -ItemType Directory -Force -Path $env:GOCACHE, $env:GOMODCACHE, $env:GOPATH | Out-Null
 
 $Commands = @(
-    'autozeagent',
-    'autozeagentd'
+    'yunmengze',
+    'ymzd'
 )
 
 function Invoke-Go {
@@ -100,7 +100,6 @@ function Invoke-Build {
     foreach ($command in $Commands) {
         Invoke-Go -Arguments @('build', '-o', (Join-Path $binDirectory "$command.exe"), "./cmd/$command")
     }
-    Copy-Item -LiteralPath (Join-Path $binDirectory 'autozeagent.exe') -Destination (Join-Path $binDirectory 'aze.exe') -Force
 }
 
 function Get-InstallDirectory {
@@ -108,9 +107,9 @@ function Get-InstallDirectory {
         return $InstallDir
     }
     if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
-        return (Join-Path $env:LOCALAPPDATA 'Programs\AutoZeAgent\bin')
+        return (Join-Path $env:LOCALAPPDATA 'Programs\YunmengZe\bin')
     }
-    return (Join-Path $env:USERPROFILE 'AutoZeAgent\bin')
+    return (Join-Path $env:USERPROFILE 'YunmengZe\bin')
 }
 
 function Invoke-Install {
@@ -118,10 +117,10 @@ function Invoke-Install {
     $destination = Get-InstallDirectory
     New-Item -ItemType Directory -Force -Path $destination | Out-Null
     $binDirectory = Join-Path $Root 'bin'
-    foreach ($name in @('autozeagent.exe', 'autozeagentd.exe', 'aze.exe')) {
+    foreach ($name in @('ymz.exe', 'ymzd.exe')) {
         Copy-Item -LiteralPath (Join-Path $binDirectory $name) -Destination (Join-Path $destination $name) -Force
     }
-    Write-Host "Installed to $destination : autozeagent aze autozeagentd"
+    Write-Host "Installed to $destination : ymz ymzd"
     $pathEntries = $env:PATH -split ';'
     if ($pathEntries -notcontains $destination) {
         Write-Host "Add to PATH (or open a new terminal after user install.ps1 PATH update):"
@@ -131,19 +130,19 @@ function Invoke-Install {
 
 function Invoke-Uninstall {
     $destination = Get-InstallDirectory
-    foreach ($name in @('autozeagent.exe', 'autozeagentd.exe', 'aze.exe')) {
+    foreach ($name in @('ymz.exe', 'ymzd.exe')) {
         $path = Join-Path $destination $name
         if (Test-Path -LiteralPath $path) {
             Remove-Item -LiteralPath $path -Force
         }
     }
-    Write-Host "Removed from $destination : autozeagent aze autozeagentd"
+    Write-Host "Removed from $destination : ymz ymzd"
 }
 
 function Invoke-RuntimeCheck {
-    $daemon = Join-Path $Root 'bin\autozeagentd.exe'
+    $daemon = Join-Path $Root 'bin\ymzd.exe'
     if (-not (Test-Path -LiteralPath $daemon)) {
-        throw 'bin\autozeagentd.exe is missing; run the build action first.'
+        throw 'bin\ymzd.exe is missing; run the build action first.'
     }
 
     # Keep bootstrap state inside the workspace instead of writing to the
@@ -157,7 +156,7 @@ function Invoke-RuntimeCheck {
         $env:LOCALAPPDATA = $checkRoot
         & $daemon --check
         if ($LASTEXITCODE -ne 0) {
-            throw "autozeagentd --check failed with exit code $LASTEXITCODE"
+            throw "ymzd --check failed with exit code $LASTEXITCODE"
         }
     }
     finally {

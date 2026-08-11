@@ -9,8 +9,8 @@ import (
 	"net/url"
 	"strings"
 
-	"autozeagent.local/autozeagent/internal/approval"
-	"autozeagent.local/autozeagent/internal/taskcontrol"
+	"github.com/yyZe0122/yunmengze-agent/internal/approval"
+	"github.com/yyZe0122/yunmengze-agent/internal/taskcontrol"
 )
 
 type TaskSubmissionRequest struct {

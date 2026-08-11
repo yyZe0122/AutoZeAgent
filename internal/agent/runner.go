@@ -9,9 +9,9 @@ import (
 	"strings"
 	"sync"
 
-	"autozeagent.local/autozeagent/internal/contextpack"
-	"autozeagent.local/autozeagent/pkg/providerapi"
-	"autozeagent.local/autozeagent/pkg/toolapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/contextpack"
+	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
+	"github.com/yyZe0122/yunmengze-agent/pkg/toolapi"
 )
 
 var (

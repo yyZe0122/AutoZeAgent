@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"autozeagent.local/autozeagent/internal/kernel"
-	"autozeagent.local/autozeagent/internal/memory"
+	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
+	"github.com/yyZe0122/yunmengze-agent/internal/memory"
 )
 
 func (s *Service) RefreshMemory(sessionID kernel.SessionID) {

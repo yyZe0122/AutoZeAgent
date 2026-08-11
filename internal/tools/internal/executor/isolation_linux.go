@@ -72,7 +72,7 @@ func (rt *isolationRuntime) probe() IsolationStatus {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	unit := fmt.Sprintf("autozeagent-probe-%d.scope", os.Getpid())
+	unit := fmt.Sprintf("ymz-probe-%d.scope", os.Getpid())
 	// Prefer --user when a user session is available; fall back to system.
 	userArgs := []string{"--user", "--quiet", "--collect", "--scope", "--unit=" + unit, "--", "true"}
 	if err := rt.runCommand(ctx, path, userArgs...); err == nil {

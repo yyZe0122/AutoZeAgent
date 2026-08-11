@@ -1,19 +1,19 @@
 ﻿# Provider protocol configuration
 
-AutoZeAgent selects a wire protocol from each provider's JSON configuration. The provider ID and URL do not imply a protocol, so the same gateway URL can expose different adapters by changing only `type` or `protocol`.
+YunmengZe selects a wire protocol from each provider's JSON configuration. The provider ID and URL do not imply a protocol, so the same gateway URL can expose different adapters by changing only `type` or `protocol`.
 
 Configuration is loaded **only** from the OS config directory (`paths.Layout.ConfigDir`):
 
-1. `<config-dir>/autozeagent.local.json` (machine-local; preferred)
-2. `<config-dir>/autozeagent.json`
+1. `<config-dir>/agent.local.json` (machine-local; preferred)
+2. `<config-dir>/agent.json`
 3. Optional `<config-dir>/env` — `KEY=value` lines loaded into the process before resolving `{env:…}` (does **not** override variables already set in the environment)
 
 | Mode | Linux | Windows | macOS |
 | --- | --- | --- | --- |
-| user | `~/.config/autozeagent` (`XDG_CONFIG_HOME`) | `%APPDATA%\AutoZeAgent` | Application Support path from `paths` |
-| system | `/etc/autozeagent` | `ProgramData\AutoZeAgent\config` | system path from `paths` |
+| user | `~/.config/yunmengze` (`XDG_CONFIG_HOME`) | `%APPDATA%\YunmengZe` | Application Support path from `paths` |
+| system | `/etc/yunmengze` | `ProgramData\YunmengZe\config` | system path from `paths` |
 
-On first start, if ConfigDir has no file, the daemon may **migrate** once from the process working directory or data dir (legacy project `autozeagent.local.json`), otherwise it writes a default template with `{env:…}` placeholders (no secrets) and may seed an empty `env` template. Installers do the same without overwriting existing files. Project directories are **not** searched for ongoing loads.
+On first start, if ConfigDir has no file, the daemon may **migrate** once from the process working directory or data dir (legacy project `agent.local.json`), otherwise it writes a default template with `{env:…}` placeholders (no secrets) and may seed an empty `env` template. Installers do the same without overwriting existing files. Project directories are **not** searched for ongoing loads.
 
 ## API keys (choose any; nothing is forced)
 
@@ -42,11 +42,11 @@ Examples:
 Optional ConfigDir `env` file:
 
 ```bash
-# ~/.config/autozeagent/env  (chmod 600)
+# ~/.config/yunmengze/env  (chmod 600)
 DEEPSEEK_API_KEY=sk-...
 ```
 
-See also [`configs/autozeagent.json.example`](../configs/autozeagent.json.example) (includes env / file / literal illustrations).
+See also [`configs/agent.json.example`](../configs/agent.json.example) (includes env / file / literal illustrations).
 
 The top-level `model` must use `provider-id/model-id` format. It is the **main** chat model.
 
@@ -73,7 +73,7 @@ Allowed keys: `subagent` (`task` child runs), `compact` (session head summarizat
 | `anthropic-messages` | `anthropic`, `anthropic-compatible`, `claude` | `/v1/messages` | `x-api-key: ...` |
 | `gemini-generate-content` | `gemini`, `google`, `google-generative-ai` | `/v1beta/models/{model}:generateContent` | `x-goog-api-key: ...` |
 
-If neither field is present, AutoZeAgent keeps backward compatibility by selecting `openai-chat`. If both `type` and `protocol` are present, they must resolve to the same canonical protocol.
+If neither field is present, YunmengZe keeps backward compatibility by selecting `openai-chat`. If both `type` and `protocol` are present, they must resolve to the same canonical protocol.
 
 Use `openai-compatible` for providers that expose Chat Completions. The `openai` alias intentionally selects the newer OpenAI Responses protocol.
 
@@ -124,7 +124,7 @@ Use `openai-compatible` for providers that expose Chat Completions. The `openai`
 
 This protocol family covers OpenAI-compatible services such as DeepSeek, OpenRouter, Ollama, LM Studio, llama.cpp, vLLM, and LiteLLM when they expose `/chat/completions` semantics.
 
-When a request includes a JSON Schema and `responseFormat` is omitted (or set to `auto`), AutoZeAgent first sends OpenAI's `json_schema` format. If the endpoint explicitly reports that `response_format` or `json_schema` is unsupported, AutoZeAgent retries once with `json_object` and remembers that choice for subsequent requests to the same model. Set `responseFormat` explicitly only when a gateway needs a fixed compatibility override or when debugging negotiation.
+When a request includes a JSON Schema and `responseFormat` is omitted (or set to `auto`), YunmengZe first sends OpenAI's `json_schema` format. If the endpoint explicitly reports that `response_format` or `json_schema` is unsupported, YunmengZe retries once with `json_object` and remembers that choice for subsequent requests to the same model. Set `responseFormat` explicitly only when a gateway needs a fixed compatibility override or when debugging negotiation.
 
 ## Per-model generation options
 
@@ -148,7 +148,7 @@ Generation options belong to each entry in `models`, so models sharing a provide
 - `contextWindow` is the model context length in tokens (optional). It is **not** the same as `maxTokens` (output cap). Used for **provider-view packing and TUI pressure** (ADR-041): usable window ≈ `contextWindow − maxOutput − reserve`. Omit or `0` when unknown (packing falls back to L1 trim only); do not copy run budgets into this field.
 - `reasoningEffort` is used when the request does not already specify an effort. It currently maps to `reasoning_effort` for OpenAI-compatible Chat Completions and to `reasoning.effort` for OpenAI Responses.
 - Request-level values take precedence over model defaults, except that `maxTokens` always remains an upper bound.
-- Configure only options supported by the selected model and endpoint. AutoZeAgent rejects `reasoningEffort` for the Anthropic and Gemini adapters rather than silently ignoring it.
+- Configure only options supported by the selected model and endpoint. YunmengZe rejects `reasoningEffort` for the Anthropic and Gemini adapters rather than silently ignoring it.
 
 ## OpenAI Responses
 

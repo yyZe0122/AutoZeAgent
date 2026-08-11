@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"autozeagent.local/autozeagent/pkg/schedulerapi"
-	"autozeagent.local/autozeagent/pkg/sqliteerror"
+	"github.com/yyZe0122/yunmengze-agent/pkg/schedulerapi"
+	"github.com/yyZe0122/yunmengze-agent/pkg/sqliteerror"
 )
 
 const jobSelectColumns = `job_id,name,session_id,task_title,task_objective,execution_mode,skill_ids,interval_seconds,next_run_at,timeout_seconds,max_retries,backoff_seconds,misfire_policy,idempotency_key,status,created_at,updated_at`

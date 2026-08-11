@@ -7,10 +7,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"autozeagent.local/autozeagent/internal/gatewayclient"
-	"autozeagent.local/autozeagent/internal/modelstream"
-	"autozeagent.local/autozeagent/pkg/eventapi"
-	"autozeagent.local/autozeagent/pkg/providerapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/gatewayclient"
+	"github.com/yyZe0122/yunmengze-agent/internal/modelstream"
+	"github.com/yyZe0122/yunmengze-agent/pkg/eventapi"
+	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {

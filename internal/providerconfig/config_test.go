@@ -259,7 +259,7 @@ func TestResolveProtocolRejectsConflictingFields(t *testing.T) {
 
 func TestLoadResolvesHeaderPlaceholders(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("AUTOZEAGENT_TEST_HEADER", "header-secret")
+	t.Setenv("YMZ_TEST_HEADER", "header-secret")
 	config := `{
   "model": "custom/model",
   "provider": {
@@ -267,7 +267,7 @@ func TestLoadResolvesHeaderPlaceholders(t *testing.T) {
       "type": "anthropic",
       "options": {
         "baseURL": "https://provider.example",
-        "headers": {"X-Custom-Token": "{env:AUTOZEAGENT_TEST_HEADER}"}
+        "headers": {"X-Custom-Token": "{env:YMZ_TEST_HEADER}"}
       },
       "models": {"model": {}}
     }

@@ -7,15 +7,15 @@ import (
 	"strings"
 	"sync"
 
-	"autozeagent.local/autozeagent/internal/app"
-	"autozeagent.local/autozeagent/internal/corequery"
-	"autozeagent.local/autozeagent/internal/events"
-	"autozeagent.local/autozeagent/internal/kernel"
-	"autozeagent.local/autozeagent/internal/modelstream"
-	"autozeagent.local/autozeagent/internal/skillcatalog"
-	"autozeagent.local/autozeagent/internal/taskcontrol"
-	"autozeagent.local/autozeagent/internal/tasksubmission"
-	"autozeagent.local/autozeagent/pkg/schedulerapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/app"
+	"github.com/yyZe0122/yunmengze-agent/internal/corequery"
+	"github.com/yyZe0122/yunmengze-agent/internal/events"
+	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
+	"github.com/yyZe0122/yunmengze-agent/internal/modelstream"
+	"github.com/yyZe0122/yunmengze-agent/internal/skillcatalog"
+	"github.com/yyZe0122/yunmengze-agent/internal/taskcontrol"
+	"github.com/yyZe0122/yunmengze-agent/internal/tasksubmission"
+	"github.com/yyZe0122/yunmengze-agent/pkg/schedulerapi"
 )
 
 const (

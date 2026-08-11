@@ -3,7 +3,7 @@ package contextpack
 import (
 	"testing"
 
-	"autozeagent.local/autozeagent/pkg/providerapi"
+	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
 
 func TestSplitHeadTailKeepsToolPairs(t *testing.T) {

@@ -85,7 +85,7 @@ func isolationUnitName(callID string) string {
 	if id == "" {
 		id = "unknown"
 	}
-	return "autozeagent-tool-" + id + ".scope"
+	return "ymz-tool-" + id + ".scope"
 }
 
 func runtimeMaxSec(deadline time.Time, now time.Time) int {

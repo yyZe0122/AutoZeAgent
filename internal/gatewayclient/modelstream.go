@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net/url"
 
-	"autozeagent.local/autozeagent/internal/modelstream"
-	"autozeagent.local/autozeagent/pkg/providerapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/modelstream"
+	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
 
 // StreamModelEvents consumes GET /v1/model-stream until ctx is cancelled.

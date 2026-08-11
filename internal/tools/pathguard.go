@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"autozeagent.local/autozeagent/internal/platform/pathsecurity"
+	"github.com/yyZe0122/yunmengze-agent/internal/platform/pathsecurity"
 )
 
 // PathGuard contains tool paths under configured roots (ADR-012 / ADR-046).

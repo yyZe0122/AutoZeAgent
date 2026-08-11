@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"strings"
 
-	"autozeagent.local/autozeagent/pkg/schedulerapi"
+	"github.com/yyZe0122/yunmengze-agent/pkg/schedulerapi"
 )
 
 type jobListResponse struct {

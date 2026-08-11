@@ -71,5 +71,5 @@ Rules:
 - `internal/providerconfig` (`LoadModelRoles`, `validateModelsMap`)
 - `internal/agent.Runner` (`Role`, `Roles`, `snapshotForRole`)
 - `internal/tools/task.go` (`Role: "subagent"`)
-- `cmd/autozeagentd` (`buildRoleEndpoints`)
+- `cmd/ymzd` (`buildRoleEndpoints`)
 - ADR-039, ADR-041

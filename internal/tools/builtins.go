@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"errors"
 
-	"autozeagent.local/autozeagent/internal/tools/internal/executor"
+	"github.com/yyZe0122/yunmengze-agent/internal/tools/internal/executor"
 )
 
 // ExecutorConfig controls the broker-owned process runner. The concrete runner

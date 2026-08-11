@@ -1,5 +1,5 @@
 ﻿{
-  "$schema": "./configs/autozeagent.schema.json",
+  "$schema": "./configs/agent.schema.json",
   "model": "deepseek/deepseek-chat",
   "models": {
     "subagent": "deepseek/deepseek-chat",

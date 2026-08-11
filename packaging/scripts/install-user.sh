@@ -1,16 +1,16 @@
 #!/bin/sh
-# User install: binaries → ~/.local/bin (or AUTOZEAGENT_INSTALL_DIR),
+# User install: binaries → ~/.local/bin (or YMZ_INSTALL_DIR),
 # PATH in shell rc, ConfigDir template + optional env file.
 # apiKey may use {env:}, {file:}, or a literal string in JSON — none is forced.
 set -eu
 
-REPOSITORY=${AUTOZEAGENT_REPOSITORY:-yyZe0122/AutoZeAgent}
-VERSION=${AUTOZEAGENT_VERSION:-latest}
-INSTALL_DIR=${AUTOZEAGENT_INSTALL_DIR:-"${HOME}/.local/bin"}
+REPOSITORY=${YMZ_REPOSITORY:-yyZe0122/YunmengZe-Agent}
+VERSION=${YMZ_VERSION:-latest}
+INSTALL_DIR=${YMZ_INSTALL_DIR:-"${HOME}/.local/bin"}
 if [ -n "${XDG_CONFIG_HOME:-}" ]; then
-  CONFIG_DIR=${AUTOZEAGENT_CONFIG_DIR:-"${XDG_CONFIG_HOME}/autozeagent"}
+  CONFIG_DIR=${YMZ_CONFIG_DIR:-"${XDG_CONFIG_HOME}/yunmengze"}
 else
-  CONFIG_DIR=${AUTOZEAGENT_CONFIG_DIR:-"${HOME}/.config/autozeagent"}
+  CONFIG_DIR=${YMZ_CONFIG_DIR:-"${HOME}/.config/yunmengze"}
 fi
 
 case "$(uname -s)" in
@@ -65,7 +65,7 @@ resolve_tag() {
   fi
   if [ -z "$tag" ]; then
     echo "Could not resolve latest release tag for ${REPOSITORY}." >&2
-    echo "Set AUTOZEAGENT_VERSION=vX.Y.Z (required for Pre-release-only repos)." >&2
+    echo "Set YMZ_VERSION=vX.Y.Z (required for Pre-release-only repos)." >&2
     exit 1
   fi
   echo "$tag"
@@ -73,8 +73,8 @@ resolve_tag() {
 
 append_path_rc() {
   install_dir=$1
-  marker="# AutoZeAgent PATH"
-  env_marker="# AutoZeAgent env file"
+  marker="# YunmengZe PATH"
+  env_marker="# YunmengZe env file"
   shell_name=$(basename "${SHELL:-}")
   case "$shell_name" in
     zsh) rc="${HOME}/.zshrc" ;;
@@ -106,16 +106,16 @@ seed_config() {
   example_src=$1
   mkdir -p "$CONFIG_DIR"
   chmod 0750 "$CONFIG_DIR" 2>/dev/null || true
-  if [ ! -f "${CONFIG_DIR}/autozeagent.json" ] && [ ! -f "${CONFIG_DIR}/autozeagent.local.json" ]; then
+  if [ ! -f "${CONFIG_DIR}/agent.json" ] && [ ! -f "${CONFIG_DIR}/agent.local.json" ]; then
     if [ -f "$example_src" ]; then
       # Drop $schema relative path that is wrong outside the repo.
       if command -v sed >/dev/null 2>&1; then
-        sed '/"\$schema"/d' "$example_src" >"${CONFIG_DIR}/autozeagent.json"
+        sed '/"\$schema"/d' "$example_src" >"${CONFIG_DIR}/agent.json"
       else
-        cp "$example_src" "${CONFIG_DIR}/autozeagent.json"
+        cp "$example_src" "${CONFIG_DIR}/agent.json"
       fi
     else
-      cat >"${CONFIG_DIR}/autozeagent.json" <<'EOF'
+      cat >"${CONFIG_DIR}/agent.json" <<'EOF'
 {
   "model": "deepseek/deepseek-chat",
   "provider": {
@@ -142,15 +142,15 @@ seed_config() {
 }
 EOF
     fi
-    chmod 0600 "${CONFIG_DIR}/autozeagent.json"
-    echo "  config: created ${CONFIG_DIR}/autozeagent.json"
+    chmod 0600 "${CONFIG_DIR}/agent.json"
+    echo "  config: created ${CONFIG_DIR}/agent.json"
   else
     echo "  config: kept existing file under ${CONFIG_DIR}"
   fi
   if [ ! -f "${CONFIG_DIR}/env" ]; then
     cat >"${CONFIG_DIR}/env" <<'EOF'
 # Optional KEY=value (loaded by daemon/CLI; does not override existing process env).
-# Pair with apiKey "{env:DEEPSEEK_API_KEY}" in autozeagent.json, or put a literal apiKey in JSON, or use {file:…}.
+# Pair with apiKey "{env:DEEPSEEK_API_KEY}" in agent.json, or put a literal apiKey in JSON, or use {file:…}.
 # chmod 600 recommended. Do not commit secrets.
 #
 DEEPSEEK_API_KEY=
@@ -171,14 +171,14 @@ case "$TAG" in
   *) VER_NUM=$TAG; TAG="v$TAG" ;;
 esac
 
-ASSET="autozeagent_${VER_NUM}_${OS}_${ARCH}.tar.gz"
+ASSET="ymz_${VER_NUM}_${OS}_${ARCH}.tar.gz"
 BASE_URL="https://github.com/${REPOSITORY}/releases/download/${TAG}"
 
-echo "Installing AutoZeAgent ${TAG} (${OS}/${ARCH}) ..."
+echo "Installing YunmengZe ${TAG} (${OS}/${ARCH}) ..."
 echo "  binaries → ${INSTALL_DIR}"
 echo "  config   → ${CONFIG_DIR}"
 
-TMP_DIR=$(mktemp -d 2>/dev/null || mktemp -d -t autozeagent)
+TMP_DIR=$(mktemp -d 2>/dev/null || mktemp -d -t ymz)
 trap 'rm -rf "$TMP_DIR"' EXIT HUP INT TERM
 
 fetch "$BASE_URL/$ASSET" "$TMP_DIR/$ASSET"
@@ -206,18 +206,13 @@ fi
 
 tar -xzf "$TMP_DIR/$ASSET" -C "$TMP_DIR"
 mkdir -p "$INSTALL_DIR"
-cp "$TMP_DIR/autozeagent" "$INSTALL_DIR/autozeagent"
-cp "$TMP_DIR/autozeagentd" "$INSTALL_DIR/autozeagentd"
-if [ -f "$TMP_DIR/aze" ]; then
-  cp "$TMP_DIR/aze" "$INSTALL_DIR/aze"
-else
-  ln -sfn autozeagent "$INSTALL_DIR/aze"
-fi
-chmod 0755 "$INSTALL_DIR/autozeagent" "$INSTALL_DIR/autozeagentd" "$INSTALL_DIR/aze"
+cp "$TMP_DIR/ymz" "$INSTALL_DIR/ymz"
+cp "$TMP_DIR/ymzd" "$INSTALL_DIR/ymzd"
+chmod 0755 "$INSTALL_DIR/ymz" "$INSTALL_DIR/ymzd"
 
 EXAMPLE=""
-if [ -f "$TMP_DIR/configs/autozeagent.json.example" ]; then
-  EXAMPLE="$TMP_DIR/configs/autozeagent.json.example"
+if [ -f "$TMP_DIR/configs/agent.json.example" ]; then
+  EXAMPLE="$TMP_DIR/configs/agent.json.example"
 fi
 seed_config "$EXAMPLE"
 append_path_rc "$INSTALL_DIR"
@@ -235,17 +230,16 @@ if [ -f "${CONFIG_DIR}/env" ]; then
 fi
 
 echo ""
-echo "Installed AutoZeAgent ${TAG}"
-echo "  ${INSTALL_DIR}/autozeagent"
-echo "  ${INSTALL_DIR}/aze"
-echo "  ${INSTALL_DIR}/autozeagentd"
+echo "Installed YunmengZe Agent ${TAG}"
+echo "  ${INSTALL_DIR}/ymz"
+echo "  ${INSTALL_DIR}/ymzd"
 echo ""
 echo "API key (pick one; nothing is forced):"
 echo "  1) Edit ${CONFIG_DIR}/env  (e.g. DEEPSEEK_API_KEY=...) — loaded automatically"
 echo "  2) Export in the shell:  export DEEPSEEK_API_KEY=..."
-echo "  3) Put a literal apiKey string in ${CONFIG_DIR}/autozeagent.json"
+echo "  3) Put a literal apiKey string in ${CONFIG_DIR}/agent.json"
 echo "  4) Use {file:relative-or-abs-path} in apiKey"
 echo ""
 echo "Open a new terminal (or source your shell rc), then:"
-echo "  aze"
-echo "  autozeagent version"
+echo "  ymz"
+echo "  ymz version"

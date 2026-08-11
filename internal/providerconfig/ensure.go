@@ -45,7 +45,7 @@ type EnsureResult struct {
 //  1. MkdirAll configDir
 //  2. If ConfigDir already has a config file, use it
 //  3. Else copy the first existing file from migrateFromDirs (each dir checked for
-//     autozeagent.local.json then autozeagent.json) into ConfigDir as LocalFilename
+//     agent.local.json then agent.json) into ConfigDir as LocalFilename
 //  4. Else write a default template (env-based keys, no secrets) as Filename
 func EnsureConfig(configDir string, migrateFromDirs ...string) (EnsureResult, error) {
 	configDir = strings.TrimSpace(configDir)
@@ -105,7 +105,7 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(dst), ".autozeagent-config-*.tmp")
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".yunmengze-config-*.tmp")
 	if err != nil {
 		return err
 	}

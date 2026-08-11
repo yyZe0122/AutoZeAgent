@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"strings"
 
-	"autozeagent.local/autozeagent/internal/applicationerror"
-	"autozeagent.local/autozeagent/internal/corequery"
+	"github.com/yyZe0122/yunmengze-agent/internal/applicationerror"
+	"github.com/yyZe0122/yunmengze-agent/internal/corequery"
 )
 
 type listRequest struct {

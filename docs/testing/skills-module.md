@@ -38,13 +38,13 @@ $env:GOCACHE=Join-Path $PWD '.cache\go-build'
 $env:GOMODCACHE=Join-Path $PWD '.cache\gomod'
 $env:GOPATH=Join-Path $PWD '.cache\gopath'
 $env:GOTELEMETRY='off'
-go test ./internal/kernel ./internal/store/sqlite ./internal/skillcatalog ./internal/tasksubmission ./internal/chatsession ./internal/gateway ./cmd/autozeagentd
+go test ./internal/kernel ./internal/store/sqlite ./internal/skillcatalog ./internal/tasksubmission ./internal/chatsession ./internal/gateway ./cmd/ymzd
 ```
 
 Linux 目标机：
 
 ```bash
-go test ./internal/kernel ./internal/store/sqlite ./internal/skillcatalog ./internal/tasksubmission ./internal/chatsession ./internal/gateway ./cmd/autozeagentd
+go test ./internal/kernel ./internal/store/sqlite ./internal/skillcatalog ./internal/tasksubmission ./internal/chatsession ./internal/gateway ./cmd/ymzd
 ```
 
 覆盖范围：
@@ -56,7 +56,7 @@ go test ./internal/kernel ./internal/store/sqlite ./internal/skillcatalog ./inte
 - Chat（`chatsession`）从 Task Skill 快照注入**独立** system 消息（ADR-036）；只读快照、不重读 `SKILL.md`；不存在 Memory 模块；
 - Skill 不能扩大 capability schema，也不能创建 Approval/Grant、修改 Policy 或执行 Tool；
 - `GET /v1/skills` 只公开稳定排序的元数据，不泄露文件路径或正文；`gatewayclient.ListSkills` + TUI `/skills` 显式选择并随 `POST /v1/tasks` 附带 `skill_ids`（不自动匹配）；
-- `autozeagentd` 按配置目录、项目目录的优先级发现 Skill，同 ID 由项目目录覆盖，并保留非法文件 diagnostic。
+- `ymzd` 按配置目录、项目目录的优先级发现 Skill，同 ID 由项目目录覆盖，并保留非法文件 diagnostic。
 
 额外建议：
 
@@ -72,4 +72,4 @@ go test ./internal/gatewayclient ./internal/tui ./internal/chatsession -count=1
 go test ./internal/architecture
 ```
 
-架构意图：旧 `cmd/autozeagent-skills`、`internal/skills`、`pkg/skillsapi`、`migrations/skills` 与配置示例持续不存在；模型可寻址能力不能绕过 Tool Broker、Canonical Plan Hash、Grant 和 Audit。
+架构意图：旧 `cmd/ymz-skills`、`internal/skills`、`pkg/skillsapi`、`migrations/skills` 与配置示例持续不存在；模型可寻址能力不能绕过 Tool Broker、Canonical Plan Hash、Grant 和 Audit。

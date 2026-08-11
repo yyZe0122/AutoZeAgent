@@ -1,4 +1,4 @@
-# AutoZeAgent 当前状态
+# YunmengZe → YunmengZe Agent 当前状态
 
 更新：2026-08-11
 
@@ -6,13 +6,15 @@
 
 ## 现状
 
-生产形态稳定：`autozeagentd` + CLI·TUI + `core.db`。设计知识库：`docs/architecture/`。
+生产形态稳定：`ymzd` + CLI·TUI + `core.db`。设计知识库：`docs/architecture/`。
 
 对照 Crush（`/tmp/opencode-compare/crush`）只读评估后：偷 **编排与 UX 契约**，不偷软权限、不把 agent/tools 拉进 TUI。
 
+**下一优先：** 品牌与工程命名统一为 **YunmengZe Agent（对外）/ agent 中性语义（对内）** —— 见下方 **R 改名**。
+
 ## 原则（不变）
 
-- 三件套：`autozeagentd` / CLI·TUI / `core.db`。不恢复 Module Runtime、多 DB、交互 **Planner**（plan-step 整单审批轨）。
+- 三件套：daemon + CLI·TUI + `core.db`。不恢复 Module Runtime、多 DB、交互 **Planner**（plan-step 整单审批轨）。
 - 工具副作用只经 Tool Broker；Policy → Approval → Capability Grant → containment → 限流 → Audit。
 - Skill 仅指令文本，不扩大授权；`skill_ids` 显式选择（ADR-036）。
 - plan 永远只读；高风险工具仅 agent + `chat.tools` allowlist 预授权（ADR-038）；**tool-call** 交互 permission 见 ADR-043（≠ Planner）。
@@ -41,17 +43,91 @@
 
 | ID | 项 | 状态 |
 | --- | --- | --- |
-| **L1** | 结构化日志链路 + `aze logs --session/--task` + ADR-047 | **已落地**（gateway/tasksubmission/chatsession/taskcontrol/scheduledtasks 阶段边界；`internal/runlog`） |
+| **L1** | 结构化日志链路 + `ymz logs --session/--task` + ADR-047 | **已落地**（gateway/tasksubmission/chatsession/taskcontrol/scheduledtasks 阶段边界；`internal/runlog`） |
 | — | 全链路 e2e harness / OTel | **不做**（真机 + 日志；单测护栏保留） |
 
-排障：`AUTOZEAGENT_LOG_LEVEL=debug` + `aze logs --run <id>`。约定见 ADR-047。
+排障：`YMZ_LOG_LEVEL=debug` + `ymz logs --run <id>`（改名后见 R 表 env）。约定见 ADR-047。
 
 ## 分发（Homebrew + Scoop）
 
 | ID | 项 | 状态 |
 | --- | --- | --- |
-| **D1** | GoReleaser `homebrew_casks` → `yyZe0122/homebrew-tap`；`scoops` → `yyZe0122/scoop-bucket` | **已接线**（需 `PACKAGE_GITHUB_TOKEN`；一键脚本降为兜底） |
+| **D1** | GoReleaser `homebrew_casks` → `yyZe0122/homebrew-tap`；`scoops` → `yyZe0122/scoop-bucket` | **已接线**（v0.1.2 已推 cask/manifest；一键脚本降为兜底） |
 | — | winget / npm | **不做**（除非硬需求） |
+
+改名落地后 cask/scoop 名与 homepage 随 **R5** 更新。
+
+---
+
+## 改名：YunmengZe Agent（R）— **下一优先**
+
+### 目标分层
+
+| 层 | 命名 | 说明 |
+| --- | --- | --- |
+| **对外品牌** | **YunmengZe Agent** | README、TUI、Release 标题、brew/scoop description |
+| **对内工程** | 中性 **agent** 语义 | 去掉 AutoZe / autozeagent 品牌痕迹；配置文件 `agent.json` |
+| **可执行 / 路径品牌段** | **`ymz` / `yunmengze`** | CLI 短、目录防撞；**不要**裸 `~/.config/agent` |
+
+**不做：** 长期旧名兼容（alpha、几乎无外部用户 → 干净切断）。  
+**保留：** `internal/agent` 领域包名（agent 循环，非品牌）。  
+**Go module 不叫裸 `agent`：** 用有命名空间的路径。
+
+### 命名表（已定默认；执行前可改格子）
+
+| 用途 | 旧 | 新 |
+| --- | --- | --- |
+| 展示名 | YunmengZe | **YunmengZe Agent** |
+| CLI 主命令 | `ymz` / `ymz` | **`ymz`**（可选同二进制第二名 **`yunmengze`**） |
+| Daemon | `ymzd` | **`ymzd`** |
+| 配置目录 Linux | `~/.config/yunmengze` | **`~/.config/yunmengze`** |
+| 配置目录 Windows | `%APPDATA%\YunmengZe` | **`%APPDATA%\YunmengZe`** |
+| 配置目录 macOS | `…/YunmengZe` | **`…/YunmengZe`** |
+| 系统路径 Linux | `/etc/yunmengze` 等 | **`/etc/yunmengze`**、`/var/lib/yunmengze`、`/run/yunmengze`、`/var/log/yunmengze` |
+| 配置文件 | `agent.json` / `.local` | **`agent.json`** / **`agent.local.json`** |
+| 项目 skills | `.yunmengze/skills` | **`.yunmengze/skills`** |
+| 日志文件 | `ymzd.jsonl` | **`ymzd.jsonl`** |
+| 环境变量前缀 | `YMZ_*` | **`YMZ_*`**（如 `YMZ_LOG_LEVEL`、`YMZ_VERSION`、安装脚本 `YMZ_INSTALL_DIR`） |
+| systemd | `yunmengze.service` / user `ymz` | **`yunmengze.service`** / **`yunmengze`** |
+| Release 资产前缀 | `ymz_{ver}_{os}_{arch}` | **`ymz_{ver}_{os}_{arch}`** |
+| Go module | `github.com/yyZe0122/yunmengze-agent` | **`github.com/yyZe0122/yunmengze-agent`** |
+| GitHub 主仓 | `yyZe0122/YunmengZe` | **`yyZe0122/YunmengZe-Agent`**（`gh repo rename`，保留 redirect） |
+| Homebrew cask | `ymz` | **`ymz`**（description: YunmengZe Agent） |
+| Scoop manifest | `agent.json` | **`ymz.json`** |
+| 本地目录（可选） | `…/YunmengZe` | **`…/YunmengZe-Agent`** |
+
+三件套仍是：`ymzd` + CLI·TUI（`ymz`）+ `core.db`。
+
+### 执行 Phase
+
+| ID | Phase | 内容 | 验收 |
+| --- | --- | --- | --- |
+| **R0** | 冻结命名 | 确认上表 5 关键：CLI / daemon / 配置根+文件名 / GH 仓名 / 资产·cask 名 | **已定** |
+| **R1** | 路径与产品常量 | paths / providerconfig / env / skills / 日志 / 展示串 | **已落地** |
+| **R2** | 二进制与 cmd | `cmd/ymz` + `cmd/ymzd`；Makefile / `dev.ps1`；无 `aze` | **已落地** |
+| **R3** | Go module | `github.com/yyZe0122/yunmengze-agent` | **已落地**（`make check` 通过） |
+| **R4** | 打包 / 安装 / 文档 | goreleaser / packaging / configs / README / AGENTS | **已落地**（`goreleaser check` 通过） |
+| **R5** | GitHub + 包仓 | `gh repo rename YunmengZe-Agent`；remote；cask/scoop 新名；删旧 manifest | **待你执行** |
+| **R6** | 发版 | **v0.2.0** 破坏性改名里程碑 | **待你执行** |
+
+### 改名原则
+
+- 历史 changelog v0.1.x 可保留旧名作史料；新文档与 v0.2.0+ 全用新名。
+- ADR 技术结论不动；标题/产品名可随改或后补。
+- **不**把 `internal/agent` 重命名为别的业务包（领域词保留）。
+- **不**做 winget/npm；**不**做双栈旧命令长期兼容。
+- `publish-release.sh` 硬编码路径在 R4 改为 repo root 探测（或随本地目录 rename）。
+
+### 风险
+
+| 风险 | 缓解 |
+| --- | --- |
+| 触达面大（路径/env/cmd/文档/GR） | 按 R1→R6 顺序；每 Phase `make check` |
+| module import 漏改 | 全量替换 + 编译 + test |
+| GH rename 后旧链接 | GitHub redirect + v0.2.0 更新 formula |
+| 与领域包 `agent` 混淆 | 展示名 YunmengZe Agent；路径 `yunmengze`；文件 `agent.json` |
+
+---
 
 ## 可选（非阻塞，未承诺）
 
@@ -86,6 +162,8 @@
 | monorepo 全量 client DTO | alias 可接受 |
 | TUI 与 tools 同进程 | 禁止 |
 | yolo / per-tool 软权限 | 禁止 |
+| 改名后旧路径/旧 CLI 长期兼容 | **不做**（alpha 干净切断；文档一句手动迁移） |
+| winget / npm | **不做** |
 
 ## 不建议引入
 
@@ -96,6 +174,6 @@
 ```bash
 make check
 make build
-make all          # check + build + autozeagentd --check
+make all          # check + build + ymzd --check（改名后 ymzd --check）
 go test ./... -count=1
 ```

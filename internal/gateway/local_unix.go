@@ -12,7 +12,7 @@ import (
 )
 
 func listenLocal(runtimeDir string) (localListener, error) {
-	address := filepath.Join(runtimeDir, "autozeagent.sock")
+	address := filepath.Join(runtimeDir, "ymz.sock")
 	if len(address) > 100 {
 		return localListener{}, errors.New("gateway Unix socket path exceeds 100 bytes")
 	}

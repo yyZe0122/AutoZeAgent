@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"autozeagent.local/autozeagent/pkg/providerapi"
-	"autozeagent.local/autozeagent/pkg/toolapi"
+	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
+	"github.com/yyZe0122/yunmengze-agent/pkg/toolapi"
 )
 
 func validateRunRequest(request RunRequest) error {

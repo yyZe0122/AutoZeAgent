@@ -3,10 +3,10 @@ package tui
 import (
 	"context"
 
-	"autozeagent.local/autozeagent/internal/gatewayclient"
-	"autozeagent.local/autozeagent/internal/modelstream"
-	"autozeagent.local/autozeagent/pkg/eventapi"
-	"autozeagent.local/autozeagent/pkg/schedulerapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/gatewayclient"
+	"github.com/yyZe0122/yunmengze-agent/internal/modelstream"
+	"github.com/yyZe0122/yunmengze-agent/pkg/eventapi"
+	"github.com/yyZe0122/yunmengze-agent/pkg/schedulerapi"
 )
 
 // Gateway is the narrow local-gateway surface used by the TUI.

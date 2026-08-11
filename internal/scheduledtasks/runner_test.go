@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"autozeagent.local/autozeagent/internal/kernel"
-	"autozeagent.local/autozeagent/internal/tasksubmission"
-	"autozeagent.local/autozeagent/pkg/schedulerapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
+	"github.com/yyZe0122/yunmengze-agent/internal/tasksubmission"
+	"github.com/yyZe0122/yunmengze-agent/pkg/schedulerapi"
 )
 
 type claimClient struct {

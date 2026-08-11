@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/applicationerror"
-	"autozeagent.local/autozeagent/internal/approval"
-	"autozeagent.local/autozeagent/internal/audit"
-	"autozeagent.local/autozeagent/internal/kernel"
-	"autozeagent.local/autozeagent/internal/policy"
+	"github.com/yyZe0122/yunmengze-agent/internal/applicationerror"
+	"github.com/yyZe0122/yunmengze-agent/internal/approval"
+	"github.com/yyZe0122/yunmengze-agent/internal/audit"
+	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
+	"github.com/yyZe0122/yunmengze-agent/internal/policy"
 )
 
 func (s *Service) resolveGrantRoots(ctx context.Context, task kernel.Task) []string {

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/kernel"
-	coresqlite "autozeagent.local/autozeagent/internal/store/sqlite"
+	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
+	coresqlite "github.com/yyZe0122/yunmengze-agent/internal/store/sqlite"
 )
 
 func TestTaskUsageSumsAssistantMessages(t *testing.T) {

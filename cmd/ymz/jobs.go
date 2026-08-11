@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/gatewayclient"
-	"autozeagent.local/autozeagent/internal/platform/paths"
-	"autozeagent.local/autozeagent/pkg/schedulerapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/gatewayclient"
+	"github.com/yyZe0122/yunmengze-agent/internal/platform/paths"
+	"github.com/yyZe0122/yunmengze-agent/pkg/schedulerapi"
 )
 
 type jobCreateValues struct {
@@ -101,7 +101,7 @@ func parseJobCreateArgs(args []string) (jobCreateValues, error) {
 		return jobCreateValues{}, err
 	}
 	if flags.NArg() != 1 {
-		return jobCreateValues{}, fmt.Errorf("use autozeagent job create --session <id> --name <name> --every <duration> [options] \"objective\"")
+		return jobCreateValues{}, fmt.Errorf("use ymz job create --session <id> --name <name> --every <duration> [options] \"objective\"")
 	}
 	values.sessionID = strings.TrimSpace(values.sessionID)
 	values.name = strings.TrimSpace(values.name)
@@ -143,7 +143,7 @@ func runJobList(args []string) error {
 		return err
 	}
 	if flags.NArg() != 0 {
-		return fmt.Errorf("use autozeagent job list [--all] [--mode user|system]")
+		return fmt.Errorf("use ymz job list [--all] [--mode user|system]")
 	}
 	mode, err := paths.ParseMode(*modeValue)
 	if err != nil {
@@ -209,7 +209,7 @@ func parseJobActionArgs(action string, args []string) (string, paths.Mode, strin
 
 func parseJobTargetValues(command string, args []string, allowReason bool) (string, paths.Mode, string, error) {
 	if len(args) == 0 || strings.TrimSpace(args[0]) == "" {
-		return "", "", "", fmt.Errorf("use autozeagent %s <job-id> [options]", command)
+		return "", "", "", fmt.Errorf("use ymz %s <job-id> [options]", command)
 	}
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
@@ -222,7 +222,7 @@ func parseJobTargetValues(command string, args []string, allowReason bool) (stri
 		return "", "", "", err
 	}
 	if flags.NArg() != 0 {
-		return "", "", "", fmt.Errorf("use autozeagent %s <job-id> [options]", command)
+		return "", "", "", fmt.Errorf("use ymz %s <job-id> [options]", command)
 	}
 	mode, err := paths.ParseMode(*modeValue)
 	if err != nil {

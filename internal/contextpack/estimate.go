@@ -8,7 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"autozeagent.local/autozeagent/pkg/providerapi"
+	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
 
 // CharsPerToken is the default heuristic (industry ~4 chars/token).

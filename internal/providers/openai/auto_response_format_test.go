@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"autozeagent.local/autozeagent/pkg/providerapi"
+	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
 
 func TestAutomaticResponseFormatFallsBackAndCachesByModel(t *testing.T) {

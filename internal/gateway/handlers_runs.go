@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	"autozeagent.local/autozeagent/internal/corequery"
-	"autozeagent.local/autozeagent/internal/kernel"
+	"github.com/yyZe0122/yunmengze-agent/internal/corequery"
+	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
 )
 
 func (a *API) handleRuns(w http.ResponseWriter, r *http.Request) {

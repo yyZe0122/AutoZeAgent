@@ -12,19 +12,19 @@ import (
 	"sync"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/agent"
-	"autozeagent.local/autozeagent/internal/kernel"
-	"autozeagent.local/autozeagent/internal/policy"
-	"autozeagent.local/autozeagent/internal/runmeta"
-	"autozeagent.local/autozeagent/pkg/providerapi"
-	"autozeagent.local/autozeagent/pkg/toolapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/agent"
+	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
+	"github.com/yyZe0122/yunmengze-agent/internal/policy"
+	"github.com/yyZe0122/yunmengze-agent/internal/runmeta"
+	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
+	"github.com/yyZe0122/yunmengze-agent/pkg/toolapi"
 )
 
 const (
 	// DefaultMaxTaskDepth: top-level is 0; spawn denied when parent Depth >= max.
 	DefaultMaxTaskDepth = 2
 
-	taskSystemPrompt = "You are a sub-agent of AutoZeAgent. Complete the delegated task. " +
+	taskSystemPrompt = "You are a sub-agent of YunmengZe. Complete the delegated task. " +
 		"Reply helpfully in the user's language. Prefer absolute paths under the workspace. " +
 		"Do not claim tool success without evidence."
 )

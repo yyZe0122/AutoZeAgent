@@ -12,35 +12,35 @@ import (
 	"strings"
 	"sync"
 
-	"autozeagent.local/autozeagent/internal/agent"
-	"autozeagent.local/autozeagent/internal/app"
-	"autozeagent.local/autozeagent/internal/applicationerror"
-	"autozeagent.local/autozeagent/internal/approval"
-	"autozeagent.local/autozeagent/internal/artifacts"
-	"autozeagent.local/autozeagent/internal/chatsession"
-	"autozeagent.local/autozeagent/internal/contextpack"
-	"autozeagent.local/autozeagent/internal/corequery"
-	"autozeagent.local/autozeagent/internal/daemonctl"
-	"autozeagent.local/autozeagent/internal/events"
-	"autozeagent.local/autozeagent/internal/gateway"
-	"autozeagent.local/autozeagent/internal/kernel"
-	"autozeagent.local/autozeagent/internal/memory"
-	"autozeagent.local/autozeagent/internal/modelstream"
-	"autozeagent.local/autozeagent/internal/platform/paths"
-	platformsignals "autozeagent.local/autozeagent/internal/platform/signals"
-	"autozeagent.local/autozeagent/internal/policy"
-	"autozeagent.local/autozeagent/internal/providerconfig"
-	"autozeagent.local/autozeagent/internal/providers"
-	"autozeagent.local/autozeagent/internal/scheduledtasks"
-	"autozeagent.local/autozeagent/internal/scheduler"
-	"autozeagent.local/autozeagent/internal/skillcatalog"
-	coresqlite "autozeagent.local/autozeagent/internal/store/sqlite"
-	"autozeagent.local/autozeagent/internal/taskcontrol"
-	"autozeagent.local/autozeagent/internal/tasksubmission"
-	"autozeagent.local/autozeagent/internal/toolpermission"
-	"autozeagent.local/autozeagent/internal/tools"
-	"autozeagent.local/autozeagent/internal/version"
-	"autozeagent.local/autozeagent/pkg/providerapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/agent"
+	"github.com/yyZe0122/yunmengze-agent/internal/app"
+	"github.com/yyZe0122/yunmengze-agent/internal/applicationerror"
+	"github.com/yyZe0122/yunmengze-agent/internal/approval"
+	"github.com/yyZe0122/yunmengze-agent/internal/artifacts"
+	"github.com/yyZe0122/yunmengze-agent/internal/chatsession"
+	"github.com/yyZe0122/yunmengze-agent/internal/contextpack"
+	"github.com/yyZe0122/yunmengze-agent/internal/corequery"
+	"github.com/yyZe0122/yunmengze-agent/internal/daemonctl"
+	"github.com/yyZe0122/yunmengze-agent/internal/events"
+	"github.com/yyZe0122/yunmengze-agent/internal/gateway"
+	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
+	"github.com/yyZe0122/yunmengze-agent/internal/memory"
+	"github.com/yyZe0122/yunmengze-agent/internal/modelstream"
+	"github.com/yyZe0122/yunmengze-agent/internal/platform/paths"
+	platformsignals "github.com/yyZe0122/yunmengze-agent/internal/platform/signals"
+	"github.com/yyZe0122/yunmengze-agent/internal/policy"
+	"github.com/yyZe0122/yunmengze-agent/internal/providerconfig"
+	"github.com/yyZe0122/yunmengze-agent/internal/providers"
+	"github.com/yyZe0122/yunmengze-agent/internal/scheduledtasks"
+	"github.com/yyZe0122/yunmengze-agent/internal/scheduler"
+	"github.com/yyZe0122/yunmengze-agent/internal/skillcatalog"
+	coresqlite "github.com/yyZe0122/yunmengze-agent/internal/store/sqlite"
+	"github.com/yyZe0122/yunmengze-agent/internal/taskcontrol"
+	"github.com/yyZe0122/yunmengze-agent/internal/tasksubmission"
+	"github.com/yyZe0122/yunmengze-agent/internal/toolpermission"
+	"github.com/yyZe0122/yunmengze-agent/internal/tools"
+	"github.com/yyZe0122/yunmengze-agent/internal/version"
+	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
 
 func main() {
@@ -52,7 +52,7 @@ func main() {
 }
 
 func run(args []string) error {
-	flags := flag.NewFlagSet("autozeagentd", flag.ContinueOnError)
+	flags := flag.NewFlagSet("ymzd", flag.ContinueOnError)
 	modeValue := flags.String("mode", string(paths.ModeUser), "runtime mode: user or system")
 	logLevelValue := flags.String("log-level", defaultLogLevel(), "log level: debug, info, warn, or error")
 	check := flags.Bool("check", false, "validate core bootstrap and print status")
@@ -61,7 +61,7 @@ func run(args []string) error {
 		return err
 	}
 	if *showVersion {
-		fmt.Printf("autozeagentd %s commit=%s date=%s\n", version.Version, version.Commit, version.Date)
+		fmt.Printf("ymzd %s commit=%s date=%s\n", version.Version, version.Commit, version.Date)
 		return nil
 	}
 
@@ -118,7 +118,7 @@ func run(args []string) error {
 		return err
 	}
 	migrateFrom := []string{workingDirectory, layout.DataDir}
-	if clientCWD := strings.TrimSpace(os.Getenv("AUTOZEAGENT_CLIENT_CWD")); clientCWD != "" {
+	if clientCWD := strings.TrimSpace(os.Getenv("YMZ_CLIENT_CWD")); clientCWD != "" {
 		migrateFrom = append([]string{clientCWD}, migrateFrom...)
 	}
 	ensureResult, err := providerconfig.EnsureConfig(layout.ConfigDir, migrateFrom...)
@@ -325,7 +325,7 @@ func run(args []string) error {
 	jobRunner, err := scheduledtasks.New(scheduledtasks.Config{
 		Client:      schedulerStore,
 		Submissions: taskSubmissionService,
-		Owner:       "autozeagentd",
+		Owner:       "ymzd",
 		OnError: func(err error) {
 			slog.Error("scheduled job runner failure", "component", "scheduledtasks", "operation", "poll", "result", "failed", "error", err)
 		},
@@ -335,7 +335,7 @@ func run(args []string) error {
 	}
 	backgroundRunners = append(backgroundRunners, jobRunner)
 	core, err := app.New(app.Config{
-		Name:              "autozeagentd",
+		Name:              "ymzd",
 		Version:           version.Version,
 		Runtime:           layout,
 		BackgroundRunners: backgroundRunners,
@@ -444,7 +444,7 @@ func discoverSkillCatalog(layout paths.Layout, workingDirectory string) (*skillc
 	}
 	return skillcatalog.Discover([]skillcatalog.Root{
 		{Path: filepath.Join(layout.ConfigDir, "skills"), Source: configSource},
-		{Path: filepath.Join(workingDirectory, ".autozeagent", "skills"), Source: skillcatalog.SourceProject},
+		{Path: filepath.Join(workingDirectory, ".yunmengze", "skills"), Source: skillcatalog.SourceProject},
 	})
 }
 

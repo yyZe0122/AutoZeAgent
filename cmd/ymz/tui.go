@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"autozeagent.local/autozeagent/internal/platform/paths"
-	"autozeagent.local/autozeagent/internal/tui"
+	"github.com/yyZe0122/yunmengze-agent/internal/platform/paths"
+	"github.com/yyZe0122/yunmengze-agent/internal/tui"
 )
 
 func runTUI(args []string) error {
@@ -17,7 +17,7 @@ func runTUI(args []string) error {
 		return err
 	}
 	if flags.NArg() != 0 {
-		return fmt.Errorf("use autozeagent tui [--mode user|system]")
+		return fmt.Errorf("use ymz tui [--mode user|system]")
 	}
 	mode, err := paths.ParseMode(*modeValue)
 	if err != nil {

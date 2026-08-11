@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"autozeagent.local/autozeagent/pkg/schedulerapi"
+	"github.com/yyZe0122/yunmengze-agent/pkg/schedulerapi"
 )
 
 type jobServiceStub struct {

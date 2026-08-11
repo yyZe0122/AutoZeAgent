@@ -6,8 +6,8 @@ import (
 	"errors"
 	"testing"
 
-	"autozeagent.local/autozeagent/internal/policy"
-	"autozeagent.local/autozeagent/pkg/toolapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/policy"
+	"github.com/yyZe0122/yunmengze-agent/pkg/toolapi"
 )
 
 type namedTool struct {

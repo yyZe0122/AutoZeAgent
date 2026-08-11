@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	storesqlite "autozeagent.local/autozeagent/internal/store/sqlite"
-	"autozeagent.local/autozeagent/pkg/providerapi"
+	storesqlite "github.com/yyZe0122/yunmengze-agent/internal/store/sqlite"
+	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
 
 func TestStoreInsertListSearch(t *testing.T) {

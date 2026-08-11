@@ -16,7 +16,7 @@ fi
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 root_dir=$(dirname "$script_dir")
-unit="$root_dir/packaging/systemd/autozeagent.service"
+unit="$root_dir/packaging/systemd/yunmengze.service"
 
 require_line() {
   if ! grep -Fqx "$1" "$unit"; then
@@ -25,21 +25,21 @@ require_line() {
   fi
 }
 
-require_line "User=autozeagent"
-require_line "Group=autozeagent"
+require_line "User=yunmengze"
+require_line "Group=yunmengze"
 require_line "KillMode=control-group"
-require_line "RuntimeDirectory=autozeagent"
+require_line "RuntimeDirectory=yunmengze"
 require_line "RuntimeDirectoryMode=0750"
-require_line "StateDirectory=autozeagent"
+require_line "StateDirectory=yunmengze"
 require_line "PrivateTmp=true"
 require_line "NoNewPrivileges=true"
-require_line "ExecStartPre=/usr/local/bin/autozeagent config validate --mode system"
-require_line "ExecStart=/usr/local/bin/autozeagentd --mode system"
-require_line "ExecStartPost=/usr/local/bin/autozeagent health --mode system"
+require_line "ExecStartPre=/usr/local/bin/ymz config validate --mode system"
+require_line "ExecStart=/usr/local/bin/ymzd --mode system"
+require_line "ExecStartPost=/usr/local/bin/ymz health --mode system"
 
 verify_dir=$(mktemp -d)
 trap 'rm -rf "$verify_dir"' 0 HUP INT TERM
-verify_unit="$verify_dir/autozeagent.service"
+verify_unit="$verify_dir/yunmengze.service"
 
 # systemd-analyze also checks host-specific users, directories, and Exec*
 # binaries. Replace only those values in the temporary copy; canonical

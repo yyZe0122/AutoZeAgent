@@ -9,10 +9,10 @@ import (
 	"strings"
 	"sync"
 
-	"autozeagent.local/autozeagent/internal/mcp"
-	"autozeagent.local/autozeagent/internal/policy"
-	"autozeagent.local/autozeagent/internal/providerconfig"
-	"autozeagent.local/autozeagent/pkg/toolapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/mcp"
+	"github.com/yyZe0122/yunmengze-agent/internal/policy"
+	"github.com/yyZe0122/yunmengze-agent/internal/providerconfig"
+	"github.com/yyZe0122/yunmengze-agent/pkg/toolapi"
 )
 
 var nonNameChars = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)

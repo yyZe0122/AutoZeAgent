@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"autozeagent.local/autozeagent/internal/corequery"
+	"github.com/yyZe0122/yunmengze-agent/internal/corequery"
 )
 
 func (a *API) handleMemory(w http.ResponseWriter, r *http.Request) {

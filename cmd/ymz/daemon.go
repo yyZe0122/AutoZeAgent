@@ -9,21 +9,21 @@ import (
 	"os"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/daemonctl"
-	"autozeagent.local/autozeagent/internal/platform/paths"
+	"github.com/yyZe0122/yunmengze-agent/internal/daemonctl"
+	"github.com/yyZe0122/yunmengze-agent/internal/platform/paths"
 )
 
 const daemonControlTimeout = 30 * time.Second
 
 func runDaemon(args []string) error {
 	if len(args) < 1 {
-		return errors.New("use autozeagent daemon start|stop|status [--mode user|system]")
+		return errors.New("use ymz daemon start|stop|status [--mode user|system]")
 	}
 	action := args[0]
 	switch action {
 	case "start", "stop", "status":
 	default:
-		return errors.New("use autozeagent daemon start|stop|status [--mode user|system]")
+		return errors.New("use ymz daemon start|stop|status [--mode user|system]")
 	}
 	flags := flag.NewFlagSet("daemon "+action, flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
@@ -32,7 +32,7 @@ func runDaemon(args []string) error {
 		return err
 	}
 	if flags.NArg() != 0 {
-		return fmt.Errorf("use autozeagent daemon %s [--mode user|system]", action)
+		return fmt.Errorf("use ymz daemon %s [--mode user|system]", action)
 	}
 	mode, err := paths.ParseMode(*modeValue)
 	if err != nil {
@@ -65,11 +65,11 @@ func runDaemon(args []string) error {
 		fmt.Println(string(encoded))
 		return nil
 	default:
-		return errors.New("use autozeagent daemon start|stop|status [--mode user|system]")
+		return errors.New("use ymz daemon start|stop|status [--mode user|system]")
 	}
 }
 
-// ensureDaemon starts autozeagentd if needed so gateway-backed commands can proceed.
+// ensureDaemon starts ymzd if needed so gateway-backed commands can proceed.
 func ensureDaemon(mode paths.Mode) error {
 	ctx, cancel := context.WithTimeout(context.Background(), daemonControlTimeout)
 	defer cancel()

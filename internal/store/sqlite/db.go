@@ -15,7 +15,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	coremigrations "autozeagent.local/autozeagent/migrations/core"
+	coremigrations "github.com/yyZe0122/yunmengze-agent/migrations/core"
 )
 
 const (

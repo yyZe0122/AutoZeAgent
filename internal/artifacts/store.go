@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"autozeagent.local/autozeagent/pkg/toolapi"
+	"github.com/yyZe0122/yunmengze-agent/pkg/toolapi"
 )
 
 type Store struct {

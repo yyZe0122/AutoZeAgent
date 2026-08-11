@@ -6,7 +6,7 @@
 
 ## 背景
 
-AutoZeAgent 已经有 Session、Task、Plan、Run、Approval、Capability Grant、Tool Call、Audit 和不可变 Event，但最小 Agent Loop 原先只在内存中维护 Provider Message。进程在以下位置退出时，调用方无法可靠判断应该继续、返回已有结果，还是重新执行：
+YunmengZe 已经有 Session、Task、Plan、Run、Approval、Capability Grant、Tool Call、Audit 和不可变 Event，但最小 Agent Loop 原先只在内存中维护 Provider Message。进程在以下位置退出时，调用方无法可靠判断应该继续、返回已有结果，还是重新执行：
 
 - Provider 已返回 Tool Call，但 Tool Broker 尚未开始；
 - Tool 已成功且 Grant 已消费，但 Tool Result 尚未加入下一轮 Provider 请求；

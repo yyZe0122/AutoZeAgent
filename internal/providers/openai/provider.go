@@ -17,8 +17,8 @@ import (
 	"sync"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/providers/internal/providerhttp"
-	"autozeagent.local/autozeagent/pkg/providerapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/providers/internal/providerhttp"
+	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
 
 const (

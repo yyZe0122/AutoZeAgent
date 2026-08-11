@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"strings"
 
-	"autozeagent.local/autozeagent/internal/providerconfig"
-	"autozeagent.local/autozeagent/internal/providers/anthropic"
-	"autozeagent.local/autozeagent/internal/providers/gemini"
-	"autozeagent.local/autozeagent/internal/providers/openai"
-	"autozeagent.local/autozeagent/internal/providers/openairesponses"
-	"autozeagent.local/autozeagent/pkg/providerapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/providerconfig"
+	"github.com/yyZe0122/yunmengze-agent/internal/providers/anthropic"
+	"github.com/yyZe0122/yunmengze-agent/internal/providers/gemini"
+	"github.com/yyZe0122/yunmengze-agent/internal/providers/openai"
+	"github.com/yyZe0122/yunmengze-agent/internal/providers/openairesponses"
+	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
 
 // NewConfigured builds the protocol adapter selected by the resolved JSON configuration.

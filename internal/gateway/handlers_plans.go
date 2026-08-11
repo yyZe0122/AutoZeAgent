@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/approval"
-	"autozeagent.local/autozeagent/internal/corequery"
-	"autozeagent.local/autozeagent/internal/kernel"
+	"github.com/yyZe0122/yunmengze-agent/internal/approval"
+	"github.com/yyZe0122/yunmengze-agent/internal/corequery"
+	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
 )
 
 func (a *API) handlePlans(w http.ResponseWriter, r *http.Request) {

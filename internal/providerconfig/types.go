@@ -1,4 +1,4 @@
-// Package providerconfig loads the selected model and provider from AutoZeAgent JSON configuration.
+// Package providerconfig loads the selected model and provider from YunmengZe Agent JSON configuration.
 package providerconfig
 
 import (
@@ -6,8 +6,8 @@ import (
 )
 
 const (
-	Filename      = "autozeagent.json"
-	LocalFilename = "autozeagent.local.json"
+	Filename      = "agent.json"
+	LocalFilename = "agent.local.json"
 
 	ProtocolOpenAIChat        = "openai-chat"
 	ProtocolOpenAIResponses   = "openai-responses"
@@ -41,7 +41,7 @@ var AllowedModelRoles = map[string]struct{}{
 	RoleCompact:  {},
 }
 
-// MCPConfig is the optional MCP servers section of autozeagent.json.
+// MCPConfig is the optional MCP servers section of agent.json.
 type MCPConfig struct {
 	Servers map[string]MCPServer `json:"servers,omitempty"`
 }
@@ -60,7 +60,7 @@ const (
 	PermissionModeAuto    = "auto"
 )
 
-// ChatConfig is the optional session chat workspace section of autozeagent.json.
+// ChatConfig is the optional session chat workspace section of agent.json.
 // Tab agent (build) vs plan (read-only) selects tools; this block sets roots,
 // agent write ceiling, and optional packing/loop limits (ADR-041).
 type ChatConfig struct {

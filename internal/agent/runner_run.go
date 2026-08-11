@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"autozeagent.local/autozeagent/pkg/providerapi"
+	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
 
 func (r *Runner) Run(ctx context.Context, request RunRequest) (Result, error) {

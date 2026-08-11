@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"autozeagent.local/autozeagent/internal/app"
+	"github.com/yyZe0122/yunmengze-agent/internal/app"
 )
 
 type Health struct {

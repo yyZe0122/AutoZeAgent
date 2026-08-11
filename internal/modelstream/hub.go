@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"autozeagent.local/autozeagent/pkg/providerapi"
+	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
 
 // Default coalesce window for text/thinking deltas (Crush-style ~33ms).

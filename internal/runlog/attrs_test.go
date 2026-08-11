@@ -3,7 +3,7 @@ package runlog_test
 import (
 	"testing"
 
-	"autozeagent.local/autozeagent/internal/runlog"
+	"github.com/yyZe0122/yunmengze-agent/internal/runlog"
 )
 
 func TestAttrsOmitsEmptyAndDefaultsTrace(t *testing.T) {

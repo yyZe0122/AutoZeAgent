@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/approval"
-	"autozeagent.local/autozeagent/internal/audit"
-	"autozeagent.local/autozeagent/internal/kernel"
+	"github.com/yyZe0122/yunmengze-agent/internal/approval"
+	"github.com/yyZe0122/yunmengze-agent/internal/audit"
+	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
 )
 
 // Service decides pending tool permissions and issues scoped grants (ADR-043).

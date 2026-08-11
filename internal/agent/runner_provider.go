@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/contextpack"
-	"autozeagent.local/autozeagent/pkg/providerapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/contextpack"
+	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
 
 func (r *Runner) packForProvider(

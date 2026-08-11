@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/coreidentity"
+	"github.com/yyZe0122/yunmengze-agent/internal/coreidentity"
 )
 
 type SessionID = coreidentity.SessionID

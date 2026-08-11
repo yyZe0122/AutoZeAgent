@@ -7,13 +7,13 @@
 
 OpenAI-compatible 流式响应会把文本和 Tool Call 拆成厂商协议片段。若 Agent / chatsession 或 Gateway 分别理解这些片段，就会形成多套聚合、完成判断和错误处理逻辑，并可能把不完整 Tool Call 当成可执行请求。
 
-AutoZeAgent 同时已有 Core 领域事件流 `eventapi.Envelope`。领域事件是已持久化事实，Provider Streaming 是模型响应的临时传输，两者不能因为都使用 SSE 就合并成同一种业务事件。
+YunmengZe 同时已有 Core 领域事件流 `eventapi.Envelope`。领域事件是已持久化事实，Provider Streaming 是模型响应的临时传输，两者不能因为都使用 SSE 就合并成同一种业务事件。
 
 ## 决策
 
 ### 唯一模型输出事件
 
-`pkg/providerapi.StreamEvent` 是 AutoZeAgent 唯一的模型输出流式事件：
+`pkg/providerapi.StreamEvent` 是 YunmengZe 唯一的模型输出流式事件：
 
 - `delta`：非空文本增量；
 - `tool_call`：已经由 Provider 边界聚合完成的 Tool Call；

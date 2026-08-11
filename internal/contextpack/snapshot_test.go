@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	storesqlite "autozeagent.local/autozeagent/internal/store/sqlite"
+	storesqlite "github.com/yyZe0122/yunmengze-agent/internal/store/sqlite"
 )
 
 func TestCountCompactionsSinceAndAllowLLMCompact(t *testing.T) {

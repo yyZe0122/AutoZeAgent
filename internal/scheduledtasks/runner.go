@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/kernel"
-	"autozeagent.local/autozeagent/internal/runlog"
-	"autozeagent.local/autozeagent/internal/tasksubmission"
-	"autozeagent.local/autozeagent/pkg/schedulerapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
+	"github.com/yyZe0122/yunmengze-agent/internal/runlog"
+	"github.com/yyZe0122/yunmengze-agent/internal/tasksubmission"
+	"github.com/yyZe0122/yunmengze-agent/pkg/schedulerapi"
 )
 
 type Client interface {

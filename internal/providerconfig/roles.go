@@ -112,7 +112,7 @@ func WriteSelectedModel(configDir, ref string) (string, error) {
 	if err == nil {
 		mode = info.Mode().Perm()
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".autozeagent-model-*.tmp")
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".yunmengze-model-*.tmp")
 	if err != nil {
 		return "", fmt.Errorf("create temp config: %w", err)
 	}

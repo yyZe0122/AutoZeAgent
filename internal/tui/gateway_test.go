@@ -6,11 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"autozeagent.local/autozeagent/internal/gatewayclient"
-	"autozeagent.local/autozeagent/internal/modelstream"
-	"autozeagent.local/autozeagent/internal/platform/paths"
-	"autozeagent.local/autozeagent/pkg/eventapi"
-	"autozeagent.local/autozeagent/pkg/schedulerapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/gatewayclient"
+	"github.com/yyZe0122/yunmengze-agent/internal/modelstream"
+	"github.com/yyZe0122/yunmengze-agent/internal/platform/paths"
+	"github.com/yyZe0122/yunmengze-agent/pkg/eventapi"
+	"github.com/yyZe0122/yunmengze-agent/pkg/schedulerapi"
 )
 
 // fakeGateway is a minimal Gateway for unit tests.
@@ -159,7 +159,7 @@ func TestRefreshCmdUsesGateway(t *testing.T) {
 		health: gatewayclient.Health{OK: true},
 		model:  gatewayclient.ModelConfig{Model: "p/m", Models: []string{"p/m"}},
 	}
-	gw.health.Core.Runtime.DataDir = "/tmp/aze-data"
+	gw.health.Core.Runtime.DataDir = "/tmp/ymz-data"
 
 	m := newModel(paths.ModeUser, gw)
 	msg := m.refreshCmd(1, refreshFull)()
@@ -182,7 +182,7 @@ func TestRefreshCmdUsesGateway(t *testing.T) {
 	if status.err != nil || !status.health.OK || status.model.Model != "p/m" {
 		t.Fatalf("status = %#v", status)
 	}
-	if status.health.Core.Runtime.DataDir != "/tmp/aze-data" {
+	if status.health.Core.Runtime.DataDir != "/tmp/ymz-data" {
 		t.Fatalf("dataDir = %q", status.health.Core.Runtime.DataDir)
 	}
 }
@@ -220,14 +220,14 @@ func TestModelListAndCron(t *testing.T) {
 		},
 		health: gatewayclient.Health{OK: true},
 	}
-	gw.health.Core.Runtime.DataDir = "/data/aze"
+	gw.health.Core.Runtime.DataDir = "/data/ymz"
 
 	m := newModel(paths.ModeUser, gw)
 	m.width, m.height = 120, 40
 
 	updated, _ := m.Update(statusDoneMsg{health: gw.health, model: gw.model})
 	mm := updated.(model)
-	if mm.dataDir != "/data/aze" || mm.modelName != "deepseek/a" || len(mm.models) != 2 {
+	if mm.dataDir != "/data/ymz" || mm.modelName != "deepseek/a" || len(mm.models) != 2 {
 		t.Fatalf("status fields: dataDir=%q model=%q models=%v", mm.dataDir, mm.modelName, mm.models)
 	}
 
@@ -313,7 +313,7 @@ func TestModelListAndCron(t *testing.T) {
 		t.Fatalf("strip=%q", strip)
 	}
 	panel := mm.renderContextPanel(20)
-	for _, want := range []string{"Metrics", "tokens", "budget", "data", "/data/aze"} {
+	for _, want := range []string{"Metrics", "tokens", "budget", "data", "/data/ymz"} {
 		if !strings.Contains(panel, want) {
 			t.Fatalf("panel missing %q:\n%s", want, panel)
 		}

@@ -8,17 +8,17 @@ import (
 	"path/filepath"
 	"strings"
 
-	"autozeagent.local/autozeagent/internal/version"
+	"github.com/yyZe0122/yunmengze-agent/internal/version"
 )
 
 const (
-	daemonLogName    = "autozeagentd.jsonl"
+	daemonLogName    = "ymzd.jsonl"
 	daemonLogMaxSize = 10 << 20
 	daemonLogBackups = 3
 )
 
 func defaultLogLevel() string {
-	if value := strings.TrimSpace(os.Getenv("AUTOZEAGENT_LOG_LEVEL")); value != "" {
+	if value := strings.TrimSpace(os.Getenv("YMZ_LOG_LEVEL")); value != "" {
 		return value
 	}
 	return "info"
@@ -60,7 +60,7 @@ func configureLogging(logDir string, level slog.Level, mode string) (*os.File, e
 		ReplaceAttr: replaceLogAttr,
 	})
 	slog.SetDefault(slog.New(handler).With(
-		"service", "autozeagentd",
+		"service", "ymzd",
 		"mode", mode,
 		"version", version.Version,
 	))

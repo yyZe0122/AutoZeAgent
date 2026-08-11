@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/gatewayclient"
-	"autozeagent.local/autozeagent/internal/kernel"
-	"autozeagent.local/autozeagent/internal/platform/paths"
+	"github.com/yyZe0122/yunmengze-agent/internal/gatewayclient"
+	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
+	"github.com/yyZe0122/yunmengze-agent/internal/platform/paths"
 )
 
 const (
@@ -29,7 +29,7 @@ func runWorkflow(args []string) error {
 		return err
 	}
 	if flags.NArg() != 1 || strings.TrimSpace(flags.Arg(0)) == "" {
-		return errors.New("use autozeagent run [--mode user|system] [--execution-mode agent|plan] \"task objective\"")
+		return errors.New("use ymz run [--mode user|system] [--execution-mode agent|plan] \"task objective\"")
 	}
 	mode, err := paths.ParseMode(*modeValue)
 	if err != nil {
@@ -93,7 +93,7 @@ func waitForTaskTerminal(ctx context.Context, client *gatewayclient.Client, task
 
 func runTaskStatus(args []string) error {
 	if len(args) == 0 {
-		return errors.New("use autozeagent task status <task-id> [--mode user|system]")
+		return errors.New("use ymz task status <task-id> [--mode user|system]")
 	}
 	taskID := strings.TrimSpace(args[0])
 	flags := flag.NewFlagSet("task status", flag.ContinueOnError)
@@ -121,7 +121,7 @@ func runTaskStatus(args []string) error {
 
 func runTaskAction(action string, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("use autozeagent task %s <task-id> [--reason <text>] [--mode user|system]", action)
+		return fmt.Errorf("use ymz task %s <task-id> [--reason <text>] [--mode user|system]", action)
 	}
 	taskID := strings.TrimSpace(args[0])
 	flags := flag.NewFlagSet("task "+action, flag.ContinueOnError)
@@ -157,9 +157,9 @@ func runTaskAction(action string, args []string) error {
 }
 
 func runApprovalShow(args []string) error {
-	return errors.New("interactive plan approval was removed; use Tab plan for read-only chat or autozeagent run --execution-mode plan")
+	return errors.New("interactive plan approval was removed; use Tab plan for read-only chat or ymz run --execution-mode plan")
 }
 
 func runApprovalDecide(args []string) error {
-	return errors.New("interactive plan approval was removed; use Tab plan for read-only chat or autozeagent run --execution-mode plan")
+	return errors.New("interactive plan approval was removed; use Tab plan for read-only chat or ymz run --execution-mode plan")
 }

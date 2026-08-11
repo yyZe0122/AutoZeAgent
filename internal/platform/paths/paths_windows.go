@@ -19,10 +19,10 @@ func resolve(mode Mode) (Layout, error) {
 		if dataBase == "" {
 			dataBase = configBase
 		}
-		root := filepath.Join(dataBase, "AutoZeAgent")
+		root := filepath.Join(dataBase, "YunmengZe")
 		return Layout{
 			Mode:       mode,
-			ConfigDir:  filepath.Join(configBase, "AutoZeAgent"),
+			ConfigDir:  filepath.Join(configBase, "YunmengZe"),
 			DataDir:    root,
 			RuntimeDir: filepath.Join(root, "run"),
 			LogDir:     filepath.Join(root, "logs"),
@@ -32,7 +32,7 @@ func resolve(mode Mode) (Layout, error) {
 		if programData == "" {
 			programData = `C:\ProgramData`
 		}
-		root := filepath.Join(programData, "AutoZeAgent")
+		root := filepath.Join(programData, "YunmengZe")
 		return Layout{
 			Mode:       mode,
 			ConfigDir:  filepath.Join(root, "config"),

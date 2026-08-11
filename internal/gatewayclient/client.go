@@ -6,8 +6,8 @@ import (
 	"context"
 	"fmt"
 
-	"autozeagent.local/autozeagent/internal/platform/paths"
-	"autozeagent.local/autozeagent/pkg/eventapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/platform/paths"
+	"github.com/yyZe0122/yunmengze-agent/pkg/eventapi"
 )
 
 // Client is the typed local-gateway facade (HTTP/SSE + workflow helpers).

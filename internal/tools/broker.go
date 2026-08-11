@@ -14,14 +14,14 @@ import (
 	"sync"
 	"time"
 
-	"autozeagent.local/autozeagent/internal/approval"
-	"autozeagent.local/autozeagent/internal/artifacts"
-	"autozeagent.local/autozeagent/internal/audit"
-	"autozeagent.local/autozeagent/internal/kernel"
-	"autozeagent.local/autozeagent/internal/policy"
-	"autozeagent.local/autozeagent/internal/runmeta"
-	"autozeagent.local/autozeagent/internal/tools/internal/executor"
-	"autozeagent.local/autozeagent/pkg/toolapi"
+	"github.com/yyZe0122/yunmengze-agent/internal/approval"
+	"github.com/yyZe0122/yunmengze-agent/internal/artifacts"
+	"github.com/yyZe0122/yunmengze-agent/internal/audit"
+	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
+	"github.com/yyZe0122/yunmengze-agent/internal/policy"
+	"github.com/yyZe0122/yunmengze-agent/internal/runmeta"
+	"github.com/yyZe0122/yunmengze-agent/internal/tools/internal/executor"
+	"github.com/yyZe0122/yunmengze-agent/pkg/toolapi"
 )
 
 var (
