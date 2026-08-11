@@ -113,6 +113,48 @@ release:
   prerelease: true
   mode: replace
 
+# Homebrew Cask + Scoop. Requires PACKAGE_GITHUB_TOKEN with Contents: R/W on
+# yyZe0122/homebrew-tap and yyZe0122/scoop-bucket. Default GITHUB_TOKEN cannot
+# push to other repos (Actions or local). GoReleaser v2: use homebrew_casks
+# (legacy brews/formula is deprecated and fails `goreleaser check`).
+homebrew_casks:
+  - name: autozeagent
+    repository:
+      owner: yyZe0122
+      name: homebrew-tap
+      token: "{{ .Env.PACKAGE_GITHUB_TOKEN }}"
+    directory: Casks
+    homepage: "https://github.com/yyZe0122/AutoZeAgent"
+    description: "Local-first, policy-controlled automation agent"
+    license: "Apache-2.0"
+    # Paths inside the release archive (three production binaries).
+    binaries:
+      - autozeagent
+      - autozeagentd
+      - aze
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "Brew cask update for {{ .ProjectName }} {{ .Tag }}"
+    # Skip upload for tags with prerelease markers (e.g. v1.0.0-rc1); plain v0.x still uploads.
+    skip_upload: auto
+
+scoops:
+  - name: autozeagent
+    repository:
+      owner: yyZe0122
+      name: scoop-bucket
+      token: "{{ .Env.PACKAGE_GITHUB_TOKEN }}"
+    # Root of bucket repo (Scoop lists manifests better without a subdir).
+    homepage: "https://github.com/yyZe0122/AutoZeAgent"
+    description: "Local-first, policy-controlled automation agent"
+    license: "Apache-2.0"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "Scoop update for {{ .ProjectName }} {{ .Tag }}"
+    skip_upload: auto
+
 # Body comes from CI: goreleaser ... --release-notes=docs/changelog/<tag>.md
 changelog:
   disable: true

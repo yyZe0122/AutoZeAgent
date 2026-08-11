@@ -4,6 +4,20 @@ Moved out of the root README so install/run docs stay short. Chinese notes follo
 
 从根 README 外移：日常安装/运行见仓库根目录 README；本页仅发布、资产命名与公开前审核。
 
+## User install channels / 用户安装渠道
+
+| Channel | Platforms | Command |
+| --- | --- | --- |
+| **Homebrew** (recommended) | macOS, Linux | `brew install --cask yyZe0122/tap/autozeagent` |
+| **Scoop** (recommended) | Windows | `scoop bucket add autozeagent https://github.com/yyZe0122/scoop-bucket` then `scoop install autozeagent` |
+| One-line scripts (fallback) | Win / Linux / macOS | `install.ps1` / `install-user.sh` |
+| Manual / source | all | Release zip/tar or `make install` |
+
+Affiliate repos (auto-updated by GoReleaser on each tag):
+
+- [`yyZe0122/homebrew-tap`](https://github.com/yyZe0122/homebrew-tap) → `Casks/autozeagent.rb`
+- [`yyZe0122/scoop-bucket`](https://github.com/yyZe0122/scoop-bucket) → `autozeagent.json`
+
 ## Asset naming / 资产命名
 
 GoReleaser builds **one archive per OS/arch**. Each archive contains **three binaries** (`autozeagent`, `aze`, `autozeagentd`) plus configs and packaging scripts.
@@ -17,7 +31,7 @@ GoReleaser builds **one archive per OS/arch**. Each archive contains **three bin
 | `checksums.txt` | SHA-256 of all archives (fixed name) |
 
 - `{version}` = tag **without** leading `v` (GoReleaser `.Version`).
-- Installers (`packaging/scripts/install-user.sh`, `install.ps1`) must stay in sync with this pattern.
+- Fallback installers (`packaging/scripts/install-user.sh`, `install.ps1`) and package manifests must stay in sync with this pattern.
 - Prefer `AUTOZEAGENT_VERSION=v0.1.0` when the release is marked **Pre-release** (GitHub `latest` may skip it).
 
 ## Release notes / 更新日志
@@ -35,8 +49,10 @@ GoReleaser builds **one archive per OS/arch**. Each archive contains **three bin
 sudo -i
 cd /home/yyze/projects/AutoZeAgent
 
-# PAT with repo (or fine-grained: contents read/write on this repo). Never commit the token.
-export GITHUB_TOKEN=ghp_...
+# Main repo Release upload
+export GITHUB_TOKEN=ghp_...   # or rely on: gh auth login → script uses gh auth token
+# Homebrew tap + Scoop bucket (Contents R/W on both). Omit only if GITHUB_TOKEN can write them.
+export PACKAGE_GITHUB_TOKEN=github_pat_...
 
 ./scripts/publish-release.sh v0.1.0
 # uncommitted release pipeline files:
@@ -51,14 +67,15 @@ Script: [`scripts/publish-release.sh`](../scripts/publish-release.sh)
 | --- | --- |
 | *(default)* | `make check` → optional snapshot → push main/tag → **local** `goreleaser release` upload |
 | `--upload-only` | Skip push; HEAD must already be tag; local upload only |
-| `--via-actions` | Push tag only; let GitHub Actions publish (**needs billing OK**) |
+| `--via-actions` | Push tag only; let GitHub Actions publish (**needs billing OK** + `PACKAGE_GITHUB_TOKEN` secret) |
 | `--commit-paths release` | Commit goreleaser/changelog/installers/README whitelist |
 | `--commit-paths all --yes` | Commit entire dirty tree (careful) |
 | `--snapshot-only` | `make check` + snapshot only |
 | `--force-tag --yes` | Replace existing local/remote tag |
 | `--dry-run` | Print steps |
 
-Requires `docs/changelog/vX.Y.Z.md` and `GITHUB_TOKEN` for the default path.
+Requires `docs/changelog/vX.Y.Z.md` and `GITHUB_TOKEN` for the default path.  
+`PACKAGE_GITHUB_TOKEN` is required for brew/scoop push (falls back to `GITHUB_TOKEN` if unset).
 
 ### Auth for local upload / 本地上传鉴权
 
@@ -72,19 +89,33 @@ gh auth login
 # Classic login scopes must include: repo, workflow, read:org (as offered)
 ```
 
-Or export a PAT yourself:
+Or export PATs yourself:
 
-| Type | Required access |
+| Token | Required access |
 | --- | --- |
-| **Fine-grained** | This repo; **Contents: R/W**; **Workflows: R/W** (needed if tag commit touches `.github/workflows/`); Metadata: Read |
-| **Classic** | **`repo` + `workflow`** |
+| **`GITHUB_TOKEN`** (fine-grained) | **AutoZeAgent**: Contents R/W; Workflows R/W if commit touches `.github/workflows/`; Metadata Read |
+| **`PACKAGE_GITHUB_TOKEN`** (fine-grained) | **homebrew-tap** + **scoop-bucket**: Contents R/W; Metadata Read |
+| **Classic** (one token for all) | **`repo` + `workflow`** |
 
-Why **Workflows**? `POST /repos/.../releases` returns `403 Resource not accessible by personal access token` when the target commit modifies workflow files and the token cannot. Our pipeline often changes `release.yml`.
+Why **Workflows** on the main repo? `POST /repos/.../releases` returns `403 Resource not accessible by personal access token` when the target commit modifies workflow files and the token cannot. Our pipeline often changes `release.yml`.
+
+Why a **separate** package token? Default Actions `GITHUB_TOKEN` and narrow fine-grained tokens **cannot** push to other repositories. GoReleaser needs write access to the tap and bucket.
 
 ```bash
-# optional manual token
+# optional manual tokens
 export GITHUB_TOKEN='…'
+export PACKAGE_GITHUB_TOKEN='…'   # or same classic PAT if it covers all three repos
 # probe read (200) and create draft release (201, not 403) — see script 403 help
+```
+
+After a successful publish, confirm:
+
+```bash
+# Release assets present (not only Source code zip)
+gh release view vX.Y.Z --repo yyZe0122/AutoZeAgent
+# Tap / bucket commits
+gh api repos/yyZe0122/homebrew-tap/commits --jq '.[0].commit.message'
+gh api repos/yyZe0122/scoop-bucket/commits --jq '.[0].commit.message'
 ```
 
 If the Release page only shows **Source code** zip/tar.gz, binaries were never uploaded (Actions billing lock and/or failed local token). Use local upload with a correct PAT, not `--via-actions`, until billing is healthy.
@@ -93,11 +124,15 @@ If the Release page only shows **Source code** zip/tar.gz, binaries were never u
 
 [`.github/workflows/release.yml`](../.github/workflows/release.yml) still runs on `v*` tags when Actions is enabled and billing is healthy. Prefer **local upload** when hosted runners are unavailable.
 
+**Repository secret:** set `PACKAGE_GITHUB_TOKEN` on AutoZeAgent (Contents R/W on `homebrew-tap` + `scoop-bucket`). Without it, the Release may succeed while brew/scoop stay stale.
+
 ### Local snapshot only / 仅本地快照
 
 ```bash
-goreleaser release --snapshot --clean --parallelism 1
+export PACKAGE_GITHUB_TOKEN=dummy   # template only; snapshot skips publish
+goreleaser release --snapshot --clean --parallelism 1 --skip=publish
 # dist/autozeagent_<snapshot-version>_{os}_{arch}.*
+# dist/ also contains generated cask / scoop drafts when publish runs
 ```
 
 ### Authenticated download / 私密下载

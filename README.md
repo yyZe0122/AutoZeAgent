@@ -29,32 +29,43 @@ Design KB: [`docs/architecture/`](docs/architecture/) · living backlog: [`docs/
 
 ## Install / 安装
 
-**Prebuilt (recommended):** use the **one-line installer** (installs binaries onto PATH).  
-Do **not** treat the GitHub Release zip/tar as a “project folder” — that archive is a **portable bundle** (bins + README/configs for packaging). The installer copies **only** the three executables into a user tools directory.
-
-**推荐一键安装**（装到 PATH）。Release 上的 zip/tar 是**便携归档**（含二进制 + 说明/配置示例），不是要打开的项目目录；安装脚本只会把三个 exe 拷到用户工具目录。
-
-Naming: `autozeagent_{version}_{os}_{arch}.…` — **`amd64` = x64 / x86_64**. Example **v0.1.0**:
-
-| Platform | AMD64 (x64) | ARM64 |
-| --- | --- | --- |
-| Windows | `autozeagent_0.1.0_windows_amd64.zip` | `autozeagent_0.1.0_windows_arm64.zip` |
-| Linux | `autozeagent_0.1.0_linux_amd64.tar.gz` | `autozeagent_0.1.0_linux_arm64.tar.gz` |
-| macOS | `autozeagent_0.1.0_darwin_amd64.tar.gz` | `autozeagent_0.1.0_darwin_arm64.tar.gz` |
+**Recommended:** install via a package manager (binaries on PATH).  
+**推荐：** 用包管理器安装（装到 PATH）。
 
 Release notes: [`docs/changelog/`](docs/changelog/) · publication: [`docs/release.md`](docs/release.md).
 
-### One-line install / 一键安装（装到系统用户目录）
+### Package managers / 包管理器
 
-**Windows** (no admin) → `%LOCALAPPDATA%\Programs\AutoZeAgent\bin` + user **PATH**:
+**macOS / Linux** ([Homebrew](https://brew.sh)):
+
+```bash
+brew install --cask yyZe0122/tap/autozeagent
+aze
+autozeagent version && autozeagentd --check
+```
+
+**Windows** ([Scoop](https://scoop.sh)):
 
 ```powershell
-# Pin Pre-release tags (or omit AUTOZEAGENT_VERSION when a non-prerelease "latest" exists)
-$env:AUTOZEAGENT_VERSION = 'v0.1.0'
-irm "https://raw.githubusercontent.com/yyZe0122/AutoZeAgent/main/packaging/scripts/install.ps1" | iex
-# new terminal, then:
+scoop bucket add autozeagent https://github.com/yyZe0122/scoop-bucket
+scoop install autozeagent
 aze
 autozeagent version
+```
+
+Tap / bucket are updated automatically on each GitHub Release (`homebrew-tap`, `scoop-bucket`).
+
+### Fallback: one-line installer / 兜底：一键脚本
+
+Use when brew/scoop is unavailable. Pins Pre-release tags (or omit `AUTOZEAGENT_VERSION` when a non-prerelease `latest` exists).
+
+无 brew/scoop 时使用。Pre-release 请固定版本。
+
+**Windows** → `%LOCALAPPDATA%\Programs\AutoZeAgent\bin` + user PATH:
+
+```powershell
+$env:AUTOZEAGENT_VERSION = 'v0.1.0'
+irm "https://raw.githubusercontent.com/yyZe0122/AutoZeAgent/main/packaging/scripts/install.ps1" | iex
 ```
 
 **Linux / macOS** → `~/.local/bin`:
@@ -63,13 +74,11 @@ autozeagent version
 export AUTOZEAGENT_VERSION=v0.1.0
 curl -fsSL "https://raw.githubusercontent.com/yyZe0122/AutoZeAgent/main/packaging/scripts/install-user.sh" | sh
 export PATH="$HOME/.local/bin:$PATH"
-aze
-autozeagent version && autozeagentd --check
 ```
 
 Optional: `AUTOZEAGENT_INSTALL_DIR`, `AUTOZEAGENT_REPOSITORY`.
 
-**Manual zip:** only if you want a portable folder — extract and put `autozeagent.exe` / `aze.exe` / `autozeagentd.exe` on PATH yourself. Prefer the one-liner above.
+**Manual zip/tar:** extract `autozeagent` / `aze` / `autozeagentd` onto PATH. Naming: `autozeagent_{version}_{os}_{arch}.…` (`amd64` = x64). Prefer package managers above.
 
 ### From source / 源码
 

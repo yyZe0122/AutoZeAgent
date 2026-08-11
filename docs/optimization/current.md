@@ -46,6 +46,13 @@
 
 排障：`AUTOZEAGENT_LOG_LEVEL=debug` + `aze logs --run <id>`。约定见 ADR-047。
 
+## 分发（Homebrew + Scoop）
+
+| ID | 项 | 状态 |
+| --- | --- | --- |
+| **D1** | GoReleaser `homebrew_casks` → `yyZe0122/homebrew-tap`；`scoops` → `yyZe0122/scoop-bucket` | **已接线**（需 `PACKAGE_GITHUB_TOKEN`；一键脚本降为兜底） |
+| — | winget / npm | **不做**（除非硬需求） |
+
 ## 可选（非阻塞，未承诺）
 
 | 项 | 说明 |

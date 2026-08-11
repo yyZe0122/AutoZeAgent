@@ -13,7 +13,9 @@
 #   ./scripts/publish-release.sh v0.1.0 --via-actions      # tag push only (needs Actions)
 #   ./scripts/publish-release.sh v0.1.0 --dry-run
 #
-# Requires: git, make, goreleaser. GITHUB_TOKEN for local upload (default).
+# Requires: git, make, goreleaser.
+#   GITHUB_TOKEN          — local upload of GitHub Release (default path)
+#   PACKAGE_GITHUB_TOKEN  — push Homebrew cask + Scoop manifest (falls back to GITHUB_TOKEN)
 set -euo pipefail
 
 REPO_DEFAULT="/home/yyze/projects/AutoZeAgent"
@@ -64,8 +66,12 @@ Options:
   -h, --help            This help
 
 Environment:
-  GITHUB_TOKEN          Required for default local upload (repo write / contents)
-  GITHUB_REPOSITORY     Optional owner/name (default yyZe0122/AutoZeAgent)
+  GITHUB_TOKEN            Required for default local upload (repo write / contents)
+  PACKAGE_GITHUB_TOKEN    Required to push Homebrew formula + Scoop manifest
+                          (Contents R/W on yyZe0122/homebrew-tap and scoop-bucket).
+                          Falls back to GITHUB_TOKEN if unset (only works if that
+                          token can write both affiliate repos).
+  GITHUB_REPOSITORY       Optional owner/name (default yyZe0122/AutoZeAgent)
   GORELEASER_PARALLELISM  Default 1
 EOF
 }
@@ -418,9 +424,18 @@ if [[ -z "${GITHUB_TOKEN:-}" ]]; then
   die "No GITHUB_TOKEN. As root: install gh, run 'gh auth login' (repo+workflow scopes), then re-run. Or: export GITHUB_TOKEN=... See docs/release.md."
 fi
 
+# Homebrew/Scoop push token (separate affiliate repos). Fall back to GITHUB_TOKEN
+# only when that token can write homebrew-tap + scoop-bucket (e.g. classic repo scope).
+if [[ -z "${PACKAGE_GITHUB_TOKEN:-}" ]]; then
+  export PACKAGE_GITHUB_TOKEN="${GITHUB_TOKEN}"
+  log "PACKAGE_GITHUB_TOKEN unset; using GITHUB_TOKEN for brew/scoop push"
+else
+  log "using PACKAGE_GITHUB_TOKEN for brew/scoop push"
+fi
+
 log "local goreleaser release + upload ($GR)"
 if [[ "$DRY_RUN" -eq 1 ]]; then
-  log "would run: GITHUB_TOKEN=*** $GR release --clean --parallelism ${PARALLELISM} --release-notes=${NOTES}"
+  log "would run: GITHUB_TOKEN=*** PACKAGE_GITHUB_TOKEN=*** $GR release --clean --parallelism ${PARALLELISM} --release-notes=${NOTES}"
 else
   # Tag must be reachable; goreleaser uses git describe
   git describe --tags --exact-match HEAD >/dev/null 2>&1 \
@@ -440,13 +455,16 @@ Fix the token, then re-run (packaging already works):
 Token checklist:
   Fine-grained PAT (recommended):
     - Resource owner = your user (or org that owns the repo)
-    - Repository access = Only select → this repo
+    - Repository access = Only select → AutoZeAgent + homebrew-tap + scoop-bucket
     - Permissions → Repository → Contents: Read and write
     - Permissions → Repository → Workflows: Read and write
-      (REQUIRED if the tagged commit changes .github/workflows/*;
+      (REQUIRED on AutoZeAgent if the tagged commit changes .github/workflows/*;
        otherwise POST /releases returns 403 "Resource not accessible...")
     - Permissions → Repository → Metadata: Read-only (default)
     - If the org uses SAML SSO: Authorize the token for that org
+  Or split tokens:
+    - GITHUB_TOKEN → AutoZeAgent (Contents + Workflows)
+    - PACKAGE_GITHUB_TOKEN → homebrew-tap + scoop-bucket (Contents R/W)
   Classic PAT:
     - Scopes: repo + workflow  (workflow is not optional when release.yml changed)
   Do not use a read-only or Actions-only token.
@@ -475,6 +493,8 @@ cat <<EOF
 ==> local publish finished for ${TAG}
 
   Release:  https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}
+  Homebrew: https://github.com/yyZe0122/homebrew-tap (Casks/autozeagent.rb)
+  Scoop:    https://github.com/yyZe0122/scoop-bucket (autozeagent.json)
 
   Assets (Pre-release):
     autozeagent_${VER_NUM}_linux_amd64.tar.gz
@@ -486,7 +506,10 @@ cat <<EOF
     checksums.txt
 
   Body: ${NOTES}
-  Install: AUTOZEAGENT_VERSION=${TAG}
+  Install (recommended):
+    brew install --cask yyZe0122/tap/autozeagent
+    scoop bucket add autozeagent https://github.com/yyZe0122/scoop-bucket && scoop install autozeagent
+  Fallback installer: AUTOZEAGENT_VERSION=${TAG}
 
-  unset GITHUB_TOKEN   # when done
+  unset GITHUB_TOKEN PACKAGE_GITHUB_TOKEN   # when done
 EOF

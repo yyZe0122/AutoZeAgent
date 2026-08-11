@@ -64,6 +64,13 @@ jobs:
           echo "path=$notes" >> "$GITHUB_OUTPUT"
           echo "Using release notes: $notes"
 
+      - name: Validate GoReleaser config
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: check
+
       - name: Build and publish release
         uses: goreleaser/goreleaser-action@v7
         with:
@@ -71,4 +78,7 @@ jobs:
           version: "~> v2"
           args: release --clean --parallelism 2 --release-notes=${{ steps.notes.outputs.path }}
         env:
+          # Main repo Release assets only.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Homebrew tap + Scoop bucket (Contents R/W on both affiliate repos).
+          PACKAGE_GITHUB_TOKEN: ${{ secrets.PACKAGE_GITHUB_TOKEN }}
