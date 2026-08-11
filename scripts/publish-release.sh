@@ -334,13 +334,37 @@ if [[ "$UPLOAD_ONLY" -eq 0 ]]; then
   ensure_tag_on_head
   push_main_and_tag
 else
-  log "upload-only: skip push main"
-  if ! git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null 2>&1; then
-    die "upload-only requires local tag ${TAG}"
-  fi
+  log "upload-only: skip push main (unless retagging)"
   head=$(git rev-parse HEAD)
-  tag_commit=$(git rev-parse "${TAG}^{}")
-  [[ "$head" == "$tag_commit" ]] || die "HEAD ($head) != ${TAG} ($tag_commit)"
+  if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null 2>&1; then
+    tag_commit=$(git rev-parse "${TAG}^{}")
+    if [[ "$head" != "$tag_commit" ]]; then
+      if [[ "$FORCE_TAG" -eq 1 ]]; then
+        [[ "$YES" -eq 1 ]] || die "tag ${TAG} is on $tag_commit, HEAD is $head; --force-tag requires --yes"
+        log "move tag ${TAG} to HEAD and push"
+        run "git tag -d \"$TAG\""
+        TAG_MSG=${TAG_MSG:-"AutoZeAgent ${TAG}"}
+        run "git tag -a \"$TAG\" -m \"$TAG_MSG\""
+        if git ls-remote --tags "$REMOTE" "refs/tags/${TAG}" 2>/dev/null | grep -q .; then
+          run "git push \"$REMOTE\" \":refs/tags/${TAG}\""
+        fi
+        run "git push \"$REMOTE\" \"$TAG\""
+      else
+        die "HEAD ($head) != ${TAG} ($tag_commit). Either: git checkout ${TAG}  OR  re-run with --force-tag --yes to move ${TAG} to HEAD and push"
+      fi
+    else
+      log "local tag ${TAG} already on HEAD"
+    fi
+  else
+    if [[ "$FORCE_TAG" -eq 1 ]] || [[ "$YES" -eq 1 ]]; then
+      TAG_MSG=${TAG_MSG:-"AutoZeAgent ${TAG}"}
+      log "create tag ${TAG} on HEAD (upload-only)"
+      run "git tag -a \"$TAG\" -m \"$TAG_MSG\""
+      run "git push \"$REMOTE\" \"$TAG\""
+    else
+      die "upload-only requires local tag ${TAG} on HEAD (or --force-tag --yes)"
+    fi
+  fi
 fi
 
 VER_NUM=${TAG#v}
