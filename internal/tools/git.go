@@ -18,13 +18,12 @@ type gitTool struct {
 	runner *executor.Runner
 }
 
-func newGitTools(roots []string, runner *executor.Runner) ([]Tool, error) {
+func newGitTools(guard *PathGuard, runner *executor.Runner) ([]Tool, error) {
 	if runner == nil {
 		return nil, errors.New("git process runner is required")
 	}
-	guard, err := NewPathGuard(roots)
-	if err != nil {
-		return nil, err
+	if guard == nil {
+		return nil, errors.New("path guard is required")
 	}
 	names := []string{"git_status", "git_diff", "git_add", "git_commit"}
 	result := make([]Tool, 0, len(names))
@@ -54,7 +53,9 @@ func (t *gitTool) Execute(ctx context.Context, raw json.RawMessage) (json.RawMes
 	if err != nil {
 		return nil, err
 	}
-	result, runErr := t.runner.Run(ctx, executor.Request{Command: "git", Arguments: arguments, Directory: repository})
+	result, runErr := t.runner.Run(ctx, executor.Request{
+		Command: "git", Arguments: arguments, Directory: repository, CallID: toolCallIDFromContext(ctx),
+	})
 	encoded, encodeErr := encodeResult(result)
 	if encodeErr != nil {
 		return nil, encodeErr

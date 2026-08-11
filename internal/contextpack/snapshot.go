@@ -248,3 +248,49 @@ func (s *Store) LatestCompaction(ctx context.Context, sessionID string) (Compact
 	}
 	return c, nil
 }
+
+// CountCompactionsSince returns how many durable compactions exist for sessionID
+// with created_at >= sinceUTC (RFC3339Nano comparable strings).
+func (s *Store) CountCompactionsSince(ctx context.Context, sessionID, sinceUTC string) (int, error) {
+	if s == nil {
+		return 0, errors.New("contextpack store is nil")
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	sinceUTC = strings.TrimSpace(sinceUTC)
+	if sessionID == "" || sinceUTC == "" {
+		return 0, errors.New("session_id and since are required")
+	}
+	var n int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM session_compactions
+		WHERE session_id = ? AND created_at >= ?`, sessionID, sinceUTC,
+	).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count session compactions: %w", err)
+	}
+	return n, nil
+}
+
+// AllowLLMCompact reports whether another LLM head summary is allowed under
+// anti-thrash limits. Fail-open (allow) when the store or query fails so packing
+// still works; callers may still fall back to extractive.
+func (s *Store) AllowLLMCompact(ctx context.Context, sessionID string, now time.Time, window time.Duration, max int) bool {
+	if s == nil {
+		return true
+	}
+	if max <= 0 {
+		max = DefaultAntiThrashMax
+	}
+	if window <= 0 {
+		window = DefaultAntiThrashWindow
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	since := now.UTC().Add(-window).Format(time.RFC3339Nano)
+	n, err := s.CountCompactionsSince(ctx, sessionID, since)
+	if err != nil {
+		return true
+	}
+	return n < max
+}

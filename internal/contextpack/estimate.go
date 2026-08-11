@@ -5,6 +5,7 @@ package contextpack
 import (
 	"encoding/json"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"autozeagent.local/autozeagent/pkg/providerapi"
@@ -15,6 +16,15 @@ const CharsPerToken = 4
 
 // PerMessageOverhead accounts for role/framing tokens not in content text.
 const PerMessageOverhead int64 = 6
+
+// Anti-thrash defaults for session LLM compaction (Hermes-style).
+const (
+	// DefaultAntiThrashWindow is the lookback for counting durable compactions.
+	DefaultAntiThrashWindow = 10 * time.Minute
+	// DefaultAntiThrashMax is max LLM compact calls allowed inside the window.
+	// Beyond this, session packing still runs L1–L3 + extractive, not the model.
+	DefaultAntiThrashMax = 3
+)
 
 // EstimateText returns a non-zero token estimate for plain text.
 func EstimateText(text string) int64 {
@@ -79,6 +89,8 @@ func ShouldCompact(estimate, usable int64, overBudget bool) bool {
 }
 
 // SplitHeadTail keeps the last keepUserTurns user turns as tail; rest is head (excluding leading system).
+// The cut is adjusted so assistant tool_call batches are not separated from their tool results
+// (Hermes/OpenClaw tool-pair floor).
 func SplitHeadTail(messages []providerapi.Message, keepUserTurns int) (head, tail []providerapi.Message) {
 	if keepUserTurns < 1 {
 		keepUserTurns = 2
@@ -101,9 +113,40 @@ func SplitHeadTail(messages []providerapi.Message, keepUserTurns int) (head, tai
 		return nil, cloneMessages(messages)
 	}
 	cut := userIdx[len(userIdx)-keepUserTurns]
+	cut = alignToolPairCut(messages, cut, sysEnd)
+	if cut <= sysEnd {
+		return nil, cloneMessages(messages)
+	}
 	head = cloneMessages(messages[sysEnd:cut])
 	tail = cloneMessages(append(append([]providerapi.Message{}, messages[:sysEnd]...), messages[cut:]...))
 	return head, tail
+}
+
+// alignToolPairCut moves cut left so we never split an assistant tool_call from its tool results.
+func alignToolPairCut(messages []providerapi.Message, cut, sysEnd int) int {
+	if cut <= sysEnd || cut >= len(messages) {
+		return cut
+	}
+	// If cut lands on a tool result, walk back to the assistant that owns those calls.
+	if messages[cut].Role == providerapi.RoleTool {
+		for cut > sysEnd && messages[cut-1].Role == providerapi.RoleTool {
+			cut--
+		}
+		if cut > sysEnd && messages[cut-1].Role == providerapi.RoleAssistant && len(messages[cut-1].ToolCalls) > 0 {
+			cut--
+		}
+		return cut
+	}
+	// If cut is mid-batch: previous messages are tools still pending for an earlier assistant.
+	// Walk back while previous is tool; if that leaves an assistant with tools immediately before tools, include it in tail.
+	i := cut
+	for i > sysEnd && messages[i-1].Role == providerapi.RoleTool {
+		i--
+	}
+	if i < cut && i > sysEnd && messages[i-1].Role == providerapi.RoleAssistant && len(messages[i-1].ToolCalls) > 0 {
+		return i - 1
+	}
+	return cut
 }
 
 // ExtractiveSummary builds a non-LLM summary from head messages (fallback).

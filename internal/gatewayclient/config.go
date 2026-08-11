@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"autozeagent.local/autozeagent/internal/app"
-	"autozeagent.local/autozeagent/internal/gateway"
 )
 
 type Health struct {
@@ -14,10 +13,23 @@ type Health struct {
 	Core app.Status `json:"core"`
 }
 
-type ModelConfig = gateway.ModelConfig
+// ModelConfig is the secret-free model snapshot from GET/PUT /v1/config/model.
+// JSON shape matches the gateway server response (not an import of server types).
+type ModelConfig struct {
+	Model  string   `json:"model"`
+	Models []string `json:"models"`
+	// ContextWindow is the selected model's context length in tokens; 0 = unknown.
+	ContextWindow int64 `json:"context_window,omitempty"`
+}
 
 // MCPStatus is the secret-free MCP snapshot from GET /v1/config/mcp.
-type MCPStatus = gateway.MCPStatus
+type MCPStatus struct {
+	Enabled bool `json:"enabled"`
+	Total   int  `json:"total"`
+	OK      int  `json:"ok"`
+	Error   int  `json:"error"`
+	Tools   int  `json:"tools"`
+}
 
 func (c *Client) Health(ctx context.Context) (Health, error) {
 	var health Health

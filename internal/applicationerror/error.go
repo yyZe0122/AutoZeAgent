@@ -8,13 +8,10 @@ import "errors"
 type Code string
 
 const (
-	CodeInvalidRequest          Code = "invalid_request"
-	CodeNotFound                Code = "not_found"
-	CodeConflict                Code = "conflict"
-	CodePlanningPending         Code = "planning_pending"
-	CodePlanChanged             Code = "plan_changed"
-	CodePlanDocumentUnavailable Code = "plan_document_unavailable"
-	CodeUnavailable             Code = "unavailable"
+	CodeInvalidRequest Code = "invalid_request"
+	CodeNotFound       Code = "not_found"
+	CodeConflict       Code = "conflict"
+	CodeUnavailable    Code = "unavailable"
 )
 
 // Error preserves the underlying error while attaching stable classification

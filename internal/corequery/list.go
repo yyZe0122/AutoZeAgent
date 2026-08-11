@@ -52,6 +52,15 @@ type TranscriptOptions struct {
 	Page Page
 }
 
+// MemoryListOptions filters memory_entries for read APIs (ADR-044).
+type MemoryListOptions struct {
+	Page          Page
+	SessionID     string
+	Query         string
+	Kind          string
+	IncludeGlobal bool
+}
+
 func validateListOptions(page Page, sort SortDirection) error {
 	if page.Limit <= 0 || page.Limit > MaxPageSize {
 		return fmt.Errorf("core query limit must be between 1 and %d", MaxPageSize)

@@ -1,4 +1,4 @@
-package gateway
+package gatewayclient
 
 import (
 	"context"
@@ -26,9 +26,9 @@ func TestDoJSONResultReturnsStatus(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client := &Client{httpClient: server.Client(), baseURL: server.URL}
+	tr := &transport{httpClient: server.Client(), baseURL: server.URL}
 	var out map[string]any
-	status, err := client.DoJSONResult(context.Background(), http.MethodPost, "/v1/tasks", map[string]string{"title": "t"}, &out)
+	status, err := tr.DoJSONResult(context.Background(), http.MethodPost, "/v1/tasks", map[string]string{"title": "t"}, &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,8 +48,8 @@ func TestDoJSONResultPropagatesErrorStatus(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client := &Client{httpClient: server.Client(), baseURL: server.URL}
-	status, err := client.DoJSONResult(context.Background(), http.MethodGet, "/v1/x", nil, nil)
+	tr := &transport{httpClient: server.Client(), baseURL: server.URL}
+	status, err := tr.DoJSONResult(context.Background(), http.MethodGet, "/v1/x", nil, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -81,19 +81,18 @@ func TestStreamSSEParsesEventsAndHonorsCancel(t *testing.T) {
 		_, _ = io.WriteString(w, "id: 9\nevent: plan.ready\ndata: line-a\ndata: line-b\n\n")
 		flusher.Flush()
 		once.Do(func() {})
-		// Hold open until client cancels.
 		<-r.Context().Done()
 	}))
 	t.Cleanup(server.Close)
 
-	client := &Client{httpClient: server.Client(), baseURL: server.URL}
+	tr := &transport{httpClient: server.Client(), baseURL: server.URL}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var got []SSEEvent
+	var got []sseEvent
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- client.StreamSSE(ctx, "/v1/events/stream", 7, func(event SSEEvent) error {
+		errCh <- tr.StreamSSE(ctx, "/v1/events/stream", 7, func(event sseEvent) error {
 			got = append(got, event)
 			if len(got) == 2 {
 				cancel()
@@ -129,7 +128,7 @@ func TestStreamSSEParsesEventsAndHonorsCancel(t *testing.T) {
 	}
 }
 
-func TestNewLocalClientUnixRoundTrip(t *testing.T) {
+func TestNewLocalTransportUnixRoundTrip(t *testing.T) {
 	runtimeDir := t.TempDir()
 	socketPath := filepath.Join(runtimeDir, "gateway.sock")
 	listener, err := net.Listen("unix", socketPath)
@@ -149,28 +148,24 @@ func TestNewLocalClientUnixRoundTrip(t *testing.T) {
 		_ = server.Shutdown(ctx)
 	})
 
-	endpoint := Endpoint{Network: "unix", Address: socketPath}
-	raw, err := json.Marshal(endpoint)
+	ep := endpoint{Network: "unix", Address: socketPath}
+	raw, err := json.Marshal(ep)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeEndpointFile(runtimeDir, raw); err != nil {
+	if err := os.WriteFile(filepath.Join(runtimeDir, endpointFilename), raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	client, err := NewLocalClient(runtimeDir)
+	tr, err := newLocalTransport(runtimeDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var out map[string]any
-	if err := client.DoJSON(context.Background(), http.MethodGet, "/v1/health", nil, &out); err != nil {
+	if err := tr.DoJSON(context.Background(), http.MethodGet, "/v1/health", nil, &out); err != nil {
 		t.Fatal(err)
 	}
 	if out["ok"] != true {
 		t.Fatalf("out = %#v", out)
 	}
-}
-
-func writeEndpointFile(runtimeDir string, raw []byte) error {
-	return os.WriteFile(filepath.Join(runtimeDir, endpointFilename), raw, 0o600)
 }

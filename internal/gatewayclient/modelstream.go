@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/url"
 
-	"autozeagent.local/autozeagent/internal/gateway"
 	"autozeagent.local/autozeagent/internal/modelstream"
 	"autozeagent.local/autozeagent/pkg/providerapi"
 )
@@ -24,7 +23,7 @@ func (c *Client) StreamModelEvents(ctx context.Context, sessionID SessionID, run
 	if enc := q.Encode(); enc != "" {
 		path += "?" + enc
 	}
-	return c.inner.StreamSSE(ctx, path, 0, func(event gateway.SSEEvent) error {
+	return c.inner.StreamSSE(ctx, path, 0, func(event sseEvent) error {
 		if len(event.Data) == 0 {
 			return nil
 		}

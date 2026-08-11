@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"autozeagent.local/autozeagent/internal/applicationerror"
 	"autozeagent.local/autozeagent/internal/approval"
 	"autozeagent.local/autozeagent/internal/kernel"
+	"autozeagent.local/autozeagent/internal/runlog"
 	"autozeagent.local/autozeagent/internal/skillcatalog"
 )
 
@@ -22,12 +24,14 @@ const defaultMaxSkillContextBytes = 64 * 1024
 
 var (
 	ErrConflict = errors.New("task submission conflicts with an existing task")
-	// ErrPlanning is retained for gateway compatibility; new submits use chat, not Planner.
-	ErrPlanning = errors.New("task submission planning did not complete")
+	// ErrPlanning marks missing chat configuration (provider/agent required).
+	ErrPlanning = errors.New("task submission chat is not configured")
 )
 
 type Repository interface {
 	CreateSession(context.Context, kernel.SessionID, time.Time) (kernel.Session, error)
+	CreateSessionWithWorkspace(context.Context, kernel.SessionID, string, time.Time) (kernel.Session, error)
+	EnsureSessionWorkspace(context.Context, kernel.SessionID, string) error
 	GetSession(context.Context, kernel.SessionID) (kernel.Session, error)
 	CreateTaskWithSkillSnapshot(context.Context, kernel.TaskID, kernel.SessionID, string, string, []string, string, kernel.ExecutionMode, time.Time) (kernel.Task, error)
 	GetTask(context.Context, kernel.TaskID) (kernel.Task, error)
@@ -79,8 +83,12 @@ type Request struct {
 	Objective     string
 	SkillIDs      []string
 	ExecutionMode kernel.ExecutionMode
+	// Workspace is the client launch directory (absolute); bound to session on create (ADR-046).
+	Workspace     string
 	EnsureSession bool
 	AllowExisting bool
+	// TraceID is optional; empty means chatsession will use run_id after create (ADR-047).
+	TraceID string
 }
 
 type Result struct {
@@ -147,7 +155,7 @@ func (s *Service) Submit(ctx context.Context, request Request) (Result, error) {
 		}
 	}
 	if request.EnsureSession {
-		if err := s.ensureSession(ctx, request.SessionID); err != nil {
+		if err := s.ensureSession(ctx, request.SessionID, request.Workspace); err != nil {
 			return Result{}, classifyError(err)
 		}
 	}
@@ -209,18 +217,34 @@ func (s *Service) startChat(ctx context.Context, task kernel.Task, request Reque
 	switch task.State {
 	case kernel.TaskCreated, kernel.TaskRunning, kernel.TaskCompleted, kernel.TaskFailed:
 		// StartChat is idempotent for already-started turns.
-	case kernel.TaskPlanning, kernel.TaskWaitingApproval:
-		// Legacy tasks from deleted Planner path — do not start chat on them.
+	case kernel.TaskPlanning, kernel.TaskWaitingApproval, kernel.TaskApproved:
+		// Legacy rows from deleted Planner path — do not start chat.
 		return result, nil
 	default:
 		return result, applicationerror.Wrap(applicationerror.CodeConflict, false, fmt.Errorf("%w: task %s is already %s", ErrConflict, task.ID, task.State))
 	}
+	actor := "local-user"
+	// Deterministic job tasks (scheduledtasks) are non-interactive (ADR-043).
+	if strings.HasPrefix(string(task.ID), "scheduled_") {
+		actor = "scheduler"
+	}
+	traceID := strings.TrimSpace(request.TraceID)
+	slog.Info("tasksubmission start chat", runlog.Attrs("tasksubmission", "start_chat", "started", runlog.IDs{
+		SessionID: string(task.SessionID), TaskID: string(task.ID), TraceID: traceID,
+	}, "actor", actor, "execution_mode", string(task.ExecutionMode))...)
 	chatResult, err := s.chat.StartChat(ctx, ChatStartRequest{
-		Task: task, Actor: "local-user", UserText: request.Objective,
+		Task: task, Actor: actor, TraceID: traceID, UserText: request.Objective,
 	})
 	if err != nil {
+		slog.Error("tasksubmission start chat failed", runlog.Attrs("tasksubmission", "start_chat", "failed", runlog.IDs{
+			SessionID: string(task.SessionID), TaskID: string(task.ID), TraceID: traceID,
+		}, "error", err)...)
 		return Result{Task: task}, err
 	}
+	slog.Info("tasksubmission start chat completed", runlog.Attrs("tasksubmission", "start_chat", "succeeded", runlog.IDs{
+		SessionID: string(chatResult.Task.SessionID), TaskID: string(chatResult.Task.ID),
+		RunID: string(chatResult.RunID), PlanID: string(chatResult.PlanID), TraceID: traceID,
+	})...)
 	return Result{Task: chatResult.Task, PlanID: chatResult.PlanID, RunID: chatResult.RunID}, nil
 }
 
@@ -261,30 +285,29 @@ func classifyError(err error) error {
 	}
 }
 
-func planningError(taskID kernel.TaskID, err error) error {
-	return applicationerror.Wrap(
-		applicationerror.CodePlanningPending,
-		true,
-		fmt.Errorf("%w for task %s: %w", ErrPlanning, taskID, err),
-	)
-}
-
-func (s *Service) ensureSession(ctx context.Context, id kernel.SessionID) error {
+func (s *Service) ensureSession(ctx context.Context, id kernel.SessionID, workspace string) error {
+	workspace = strings.TrimSpace(workspace)
 	session, err := s.repository.GetSession(ctx, id)
 	if err == nil {
 		if session.State != kernel.SessionActive {
 			return fmt.Errorf("%w: %s", kernel.ErrSessionClosed, id)
+		}
+		if workspace != "" {
+			_ = s.repository.EnsureSessionWorkspace(ctx, id, workspace)
 		}
 		return nil
 	}
 	if !errors.Is(err, kernel.ErrNotFound) {
 		return err
 	}
-	_, err = s.repository.CreateSession(ctx, id, s.now())
+	_, err = s.repository.CreateSessionWithWorkspace(ctx, id, workspace, s.now())
 	if errors.Is(err, kernel.ErrAlreadyExists) {
 		session, err = s.repository.GetSession(ctx, id)
 		if err == nil && session.State != kernel.SessionActive {
 			return fmt.Errorf("%w: %s", kernel.ErrSessionClosed, id)
+		}
+		if err == nil && workspace != "" {
+			_ = s.repository.EnsureSessionWorkspace(ctx, id, workspace)
 		}
 	}
 	return err

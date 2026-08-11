@@ -16,30 +16,58 @@ func buildChatTimeline(
 	runs []gatewayclient.Run,
 ) []timelineItem {
 	if len(messages) > 0 {
+		toolNames := toolNameByCallID(messages)
 		items := make([]timelineItem, 0, len(messages)+4)
 		for _, msg := range messages {
-			items = append(items, transcriptToItem(msg))
+			items = append(items, transcriptToItem(msg, toolNames))
 		}
 		// Status footer when task is mid-flight.
 		if task != nil {
 			switch task.State {
-			case gatewayclient.TaskStatePlanning:
+			case gatewayclient.TaskStatePlanning, gatewayclient.TaskStateWaitingApproval, gatewayclient.TaskStateApproved:
 				items = append(items, timelineItem{
-					Kind: tlSystem, At: task.UpdatedAt, Title: "planning…", State: task.State,
-				})
-			case gatewayclient.TaskStateWaitingApproval:
-				items = append(items, timelineItem{
-					Kind: tlSystem, At: task.UpdatedAt, Title: "historical: waiting_approval", State: task.State,
+					Kind: tlSystem, At: task.UpdatedAt, Title: "legacy: " + task.State, State: task.State,
 				})
 			case gatewayclient.TaskStateRunning:
+				title := "running"
 				items = append(items, timelineItem{
-					Kind: tlSystem, At: task.UpdatedAt, Title: "running", State: task.State,
+					Kind: tlSystem, At: task.UpdatedAt, Title: title, State: task.State,
 				})
 			}
 		}
 		return items
 	}
 	return buildTimeline(task, plan, runs)
+}
+
+// runningStatusTitle returns the mid-flight status line (permission-aware).
+func runningStatusTitle(task *gatewayclient.Task, pendingPerms int) string {
+	if task == nil {
+		return ""
+	}
+	if task.State != gatewayclient.TaskStateRunning {
+		return string(task.State)
+	}
+	if pendingPerms > 0 {
+		return fmt.Sprintf("waiting permission (%d) · 1–4 or /perm", pendingPerms)
+	}
+	return "running"
+}
+
+// patchRunningStatus updates the last system "running" row title when present.
+func patchRunningStatus(items []timelineItem, title string) []timelineItem {
+	if title == "" || len(items) == 0 {
+		return items
+	}
+	for i := len(items) - 1; i >= 0; i-- {
+		if items[i].Kind == tlSystem && (items[i].State == gatewayclient.TaskStateRunning ||
+			strings.HasPrefix(items[i].Title, "running") ||
+			strings.HasPrefix(items[i].Title, "waiting permission")) {
+			items[i].Title = title
+			break
+		}
+	}
+	return items
 }
 
 // appendLiveDraft adds an in-progress assistant bubble for typewriter UI.
@@ -49,7 +77,7 @@ func appendLiveDraft(items []timelineItem, thinking, content string) []timelineI
 	}
 	var b strings.Builder
 	if think := strings.TrimSpace(thinking); think != "" {
-		b.WriteString("💭 ")
+		b.WriteString("thinking: ")
 		b.WriteString(think)
 		b.WriteByte('\n')
 	}
@@ -62,7 +90,7 @@ func appendLiveDraft(items []timelineItem, thinking, content string) []timelineI
 	})
 }
 
-func transcriptToItem(msg gatewayclient.TranscriptMessage) timelineItem {
+func transcriptToItem(msg gatewayclient.TranscriptMessage, toolNames map[string]string) timelineItem {
 	switch strings.ToLower(msg.Role) {
 	case "user":
 		return timelineItem{
@@ -71,7 +99,7 @@ func transcriptToItem(msg gatewayclient.TranscriptMessage) timelineItem {
 	case "assistant":
 		var b strings.Builder
 		if think := strings.TrimSpace(msg.Thinking); think != "" {
-			b.WriteString("💭 ")
+			b.WriteString("thinking: ")
 			b.WriteString(foldBody(think))
 			b.WriteByte('\n')
 		}
@@ -83,7 +111,8 @@ func transcriptToItem(msg gatewayclient.TranscriptMessage) timelineItem {
 				b.WriteByte('\n')
 			}
 			for _, tc := range msg.ToolCalls {
-				b.WriteString(fmt.Sprintf("⚙ %s(%s)\n", tc.Name, truncate(tc.Arguments, 120)))
+				b.WriteString(formatToolCallLine(tc))
+				b.WriteByte('\n')
 			}
 		}
 		body := strings.TrimRight(b.String(), "\n")
@@ -94,10 +123,11 @@ func transcriptToItem(msg gatewayclient.TranscriptMessage) timelineItem {
 			Kind: tlRun, At: msg.CreatedAt, Title: "assistant", Body: foldBody(body),
 		}
 	case "tool":
-		title := "tool"
-		if msg.ToolCallID != "" {
-			title = "tool " + shortID(msg.ToolCallID)
+		name := ""
+		if toolNames != nil {
+			name = toolNames[msg.ToolCallID]
 		}
+		title := formatToolResultTitle(msg.ToolCallID, name)
 		return timelineItem{
 			Kind: tlSystem, At: msg.CreatedAt, Title: title, Body: foldBody(msg.Content),
 		}

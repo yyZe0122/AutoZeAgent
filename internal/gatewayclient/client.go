@@ -6,14 +6,13 @@ import (
 	"context"
 	"fmt"
 
-	"autozeagent.local/autozeagent/internal/gateway"
 	"autozeagent.local/autozeagent/internal/platform/paths"
 	"autozeagent.local/autozeagent/pkg/eventapi"
 )
 
-// Client wraps gateway.Client with typed workflow helpers.
+// Client is the typed local-gateway facade (HTTP/SSE + workflow helpers).
 type Client struct {
-	inner *gateway.Client
+	inner *transport
 }
 
 // New connects to the local gateway for the given runtime mode.
@@ -27,21 +26,16 @@ func New(mode paths.Mode) (*Client, error) {
 
 // NewFromRuntimeDir connects using an already-resolved runtime directory.
 func NewFromRuntimeDir(runtimeDir string) (*Client, error) {
-	inner, err := gateway.NewLocalClient(runtimeDir)
+	inner, err := newLocalTransport(runtimeDir)
 	if err != nil {
 		return nil, fmt.Errorf("connect to local gateway: %w", err)
 	}
 	return &Client{inner: inner}, nil
 }
 
-// Gateway exposes the underlying low-level client when needed.
-func (c *Client) Gateway() *gateway.Client {
-	return c.inner
-}
-
 // StreamEvents consumes GET /v1/events/stream until ctx is cancelled.
 func (c *Client) StreamEvents(ctx context.Context, after uint64, emit func(eventapi.Envelope) error) error {
-	return c.inner.StreamSSE(ctx, "/v1/events/stream", after, func(event gateway.SSEEvent) error {
+	return c.inner.StreamSSE(ctx, "/v1/events/stream", after, func(event sseEvent) error {
 		if len(event.Data) == 0 {
 			return nil
 		}

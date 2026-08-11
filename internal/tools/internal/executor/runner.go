@@ -21,6 +21,7 @@ type Config struct {
 	AllowedEnv     []string
 	UID            *uint32
 	GID            *uint32
+	Isolation      IsolationConfig
 }
 
 type Runner struct {
@@ -28,6 +29,7 @@ type Runner struct {
 	allowedEnv map[string]struct{}
 	uid        *uint32
 	gid        *uint32
+	isolation  *isolationRuntime
 }
 
 func NewRunner(config Config) (*Runner, error) {
@@ -45,7 +47,21 @@ func NewRunner(config Config) (*Runner, error) {
 		}
 		allowed[name] = struct{}{}
 	}
-	return &Runner{maxOutput: config.MaxOutputBytes, allowedEnv: allowed, uid: config.UID, gid: config.GID}, nil
+	return &Runner{
+		maxOutput:  config.MaxOutputBytes,
+		allowedEnv: allowed,
+		uid:        config.UID,
+		gid:        config.GID,
+		isolation:  newIsolationRuntime(config.Isolation),
+	}, nil
+}
+
+// IsolationStatus returns the effective process isolation baseline after probe.
+func (r *Runner) IsolationStatus() IsolationStatus {
+	if r == nil || r.isolation == nil {
+		return IsolationStatus{Mode: StatusUnsupported, Reason: "runner unavailable"}
+	}
+	return r.isolation.Status()
 }
 
 type Request struct {
@@ -53,6 +69,8 @@ type Request struct {
 	Arguments   []string
 	Directory   string
 	Environment map[string]string
+	// CallID binds the optional systemd transient scope unit name (tool_call_id).
+	CallID string
 }
 
 type Result struct {
@@ -94,14 +112,30 @@ func (r *Runner) Run(ctx context.Context, request Request) (Result, error) {
 		return Result{}, err
 	}
 
-	command := exec.Command(request.Command, request.Arguments...)
+	policy := processPolicy{UID: r.uid, GID: r.gid}
+	cmdName := request.Command
+	cmdArgs := append([]string(nil), request.Arguments...)
+	var unitCleanup func()
+	if r.isolation != nil {
+		if wrapName, wrapArgs, _, cleanup, ok := r.isolation.wrapCommand(ctx, request, policy); ok {
+			cmdName = wrapName
+			cmdArgs = wrapArgs
+			unitCleanup = cleanup
+			// UID/GID are applied via systemd-run properties when wrapped.
+			policy = processPolicy{}
+		}
+	}
+	if unitCleanup != nil {
+		defer unitCleanup()
+	}
+	command := exec.Command(cmdName, cmdArgs...)
 	command.Dir = directory
 	environment, err := r.environment(request.Environment)
 	if err != nil {
 		return Result{}, err
 	}
 	command.Env = environment
-	group, err := prepareProcess(command, processPolicy{UID: r.uid, GID: r.gid})
+	group, err := prepareProcess(command, policy)
 	if err != nil {
 		return Result{}, fmt.Errorf("prepare process isolation: %w", err)
 	}

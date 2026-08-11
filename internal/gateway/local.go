@@ -1,11 +1,13 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/netip"
@@ -206,6 +208,35 @@ func ensureNoActiveEndpoint(runtimeDir string) error {
 	}
 	_ = connection.Close()
 	return errors.New("local gateway is already running")
+}
+
+func readEndpoint(runtimeDir string) (Endpoint, error) {
+	path := filepath.Join(filepath.Clean(runtimeDir), endpointFilename)
+	info, err := os.Lstat(path)
+	if err != nil {
+		return Endpoint{}, fmt.Errorf("read gateway endpoint: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return Endpoint{}, errors.New("gateway endpoint is not a regular file")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return Endpoint{}, fmt.Errorf("read gateway endpoint: %w", err)
+	}
+	var endpoint Endpoint
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&endpoint); err != nil {
+		return Endpoint{}, fmt.Errorf("decode gateway endpoint: %w", err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		return Endpoint{}, errors.New("gateway endpoint must contain one JSON value")
+	}
+	if strings.TrimSpace(endpoint.Network) == "" || strings.TrimSpace(endpoint.Address) == "" {
+		return Endpoint{}, errors.New("gateway endpoint is incomplete")
+	}
+	return endpoint, nil
 }
 
 func validateLocalEndpoint(runtimeDir string, endpoint Endpoint) error {

@@ -35,6 +35,8 @@ systemd-check:
 	sh ./scripts/check-systemd.sh
 
 all: check build
+	@test -x bin/autozeagentd || $(MAKE) build
+	./bin/autozeagentd --check
 
 build:
 	mkdir -p bin
@@ -85,4 +87,5 @@ uninstall:
 	@echo "Removed from $(BINDIR): autozeagent aze autozeagentd"
 
 clean:
+	rm -rf bin dist
 	$(GO) clean -cache

@@ -5,40 +5,109 @@ import (
 )
 
 // completer filters slash commands as the user types "/…".
+// After the first space it may offer argument completions (e.g. /perm decisions).
 type completer struct {
 	active  bool
 	query   string
 	items   []slashCommand
 	cursor  int
 	visible bool
+	// argMode is true when completing after the command token (first space).
+	argMode bool
 }
 
 func (c *completer) update(input string) {
-	input = strings.TrimRight(input, " ")
+	c.updateWith(input, nil, nil)
+}
+
+// updateWith allows argument completion using model/permission lists.
+func (c *completer) updateWith(input string, models []string, permIDs []string) {
+	input = strings.TrimRight(input, "\t")
 	if !strings.HasPrefix(input, "/") {
 		c.active = false
 		c.visible = false
 		c.items = nil
 		c.cursor = 0
 		c.query = ""
+		c.argMode = false
 		return
 	}
-	// Only complete the command token (before first space).
-	token := input
-	if i := strings.IndexByte(input, ' '); i >= 0 {
-		// Already has args — hide completer.
-		c.active = false
-		c.visible = false
-		c.items = nil
+	space := strings.IndexByte(input, ' ')
+	if space < 0 {
+		c.argMode = false
+		c.active = true
+		c.query = strings.ToLower(input)
+		c.items = filterCommands(c.query)
+		if c.cursor >= len(c.items) {
+			c.cursor = 0
+		}
+		c.visible = len(c.items) > 0
 		return
 	}
+	// Argument completion.
+	cmd := canonicalSlash(input[:space])
+	arg := strings.TrimSpace(input[space+1:])
+	c.argMode = true
 	c.active = true
-	c.query = strings.ToLower(token)
-	c.items = filterCommands(c.query)
+	c.query = strings.ToLower(arg)
+	c.items = filterArgCompletions(cmd, arg, models, permIDs)
 	if c.cursor >= len(c.items) {
 		c.cursor = 0
 	}
 	c.visible = len(c.items) > 0
+}
+
+func filterArgCompletions(cmd, arg string, models, permIDs []string) []slashCommand {
+	argLower := strings.ToLower(strings.TrimSpace(arg))
+	var out []slashCommand
+	switch cmd {
+	case "/perm":
+		fields := strings.Fields(arg)
+		if len(fields) == 0 || (len(fields) == 1 && !strings.HasSuffix(arg, " ") && !strings.Contains(arg, " ")) {
+			// Completing decision token.
+			for _, d := range []string{"allow_once", "allow_similar", "allow_permanent", "deny"} {
+				if argLower == "" || strings.HasPrefix(d, argLower) {
+					out = append(out, slashCommand{Name: d, Desc: "permission decision"})
+				}
+			}
+			return out
+		}
+		// Completing id prefix after decision.
+		decision := ""
+		prefix := ""
+		if len(fields) >= 1 {
+			decision = fields[0]
+		}
+		if len(fields) >= 2 {
+			prefix = strings.ToLower(fields[1])
+		} else if strings.HasSuffix(arg, " ") {
+			prefix = ""
+		}
+		for _, id := range permIDs {
+			idLower := strings.ToLower(id)
+			short := id
+			if len(short) > 8 {
+				short = short[:8]
+			}
+			if prefix == "" || strings.HasPrefix(idLower, prefix) || strings.Contains(idLower, prefix) {
+				out = append(out, slashCommand{
+					Name: decision + " " + short,
+					Desc: "pending " + shortID(id),
+					Help: decision + " " + id,
+				})
+			}
+		}
+		return out
+	case "/model":
+		for _, name := range models {
+			if argLower == "" || strings.Contains(strings.ToLower(name), argLower) {
+				out = append(out, slashCommand{Name: name, Desc: "model"})
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func filterCommands(query string) []slashCommand {
@@ -98,6 +167,7 @@ func (c *completer) accept() string {
 	c.active = false
 	c.visible = false
 	c.items = nil
+	c.argMode = false
 	return name
 }
 
@@ -117,6 +187,7 @@ func (c *completer) dismiss() {
 	c.visible = false
 	c.items = nil
 	c.cursor = 0
+	c.argMode = false
 }
 
 func (c *completer) render(max int) string {

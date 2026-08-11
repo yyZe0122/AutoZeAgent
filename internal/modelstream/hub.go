@@ -6,9 +6,13 @@ package modelstream
 import (
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"autozeagent.local/autozeagent/pkg/providerapi"
 )
+
+// Default coalesce window for text/thinking deltas (Crush-style ~33ms).
+const DefaultDebounce = 33 * time.Millisecond
 
 // Envelope wraps a StreamEvent with routing ids for multi-subscriber UIs.
 type Envelope struct {
@@ -20,11 +24,26 @@ type Envelope struct {
 }
 
 // Hub is a process-local pub/sub for model stream envelopes.
+// Consecutive StreamDelta / StreamThinking for the same run are coalesced
+// within Debounce to reduce gateway/TUI pressure.
 type Hub struct {
-	mu      sync.RWMutex
-	seq     atomic.Uint64
-	subs    map[uint64]*subscription
-	nextSub uint64
+	mu       sync.Mutex
+	seq      atomic.Uint64
+	subs     map[uint64]*subscription
+	nextSub  uint64
+	Debounce time.Duration
+
+	// pending coalesced deltas keyed by runID (or sessionID when run empty).
+	pending map[string]*pendingBatch
+}
+
+type pendingBatch struct {
+	sessionID string
+	taskID    string
+	runID     string
+	content   string
+	thinking  string
+	timer     *time.Timer
 }
 
 type subscription struct {
@@ -35,14 +54,113 @@ type subscription struct {
 }
 
 func NewHub() *Hub {
-	return &Hub{subs: make(map[uint64]*subscription)}
+	return &Hub{
+		subs:     make(map[uint64]*subscription),
+		pending:  make(map[string]*pendingBatch),
+		Debounce: DefaultDebounce,
+	}
+}
+
+func (h *Hub) batchKey(sessionID, runID string) string {
+	if runID != "" {
+		return "r:" + runID
+	}
+	return "s:" + sessionID
 }
 
 // Publish sends an envelope to matching subscribers (non-blocking drop if full).
+// StreamDelta/StreamThinking are debounced; other event types flush pending first.
 func (h *Hub) Publish(sessionID, taskID, runID string, event providerapi.StreamEvent) {
 	if h == nil {
 		return
 	}
+	switch event.Type {
+	case providerapi.StreamDelta, providerapi.StreamThinking:
+		h.publishDebounced(sessionID, taskID, runID, event)
+		return
+	default:
+		h.flushKey(h.batchKey(sessionID, runID))
+		h.emit(sessionID, taskID, runID, event)
+	}
+}
+
+// PublishTerminal flushes pending deltas for the run and emits StreamComplete.
+// Call after durable run/task terminal writes so TUI refresh sees committed state.
+func (h *Hub) PublishTerminal(sessionID, taskID, runID string) {
+	if h == nil {
+		return
+	}
+	h.flushKey(h.batchKey(sessionID, runID))
+	h.emit(sessionID, taskID, runID, providerapi.StreamEvent{Type: providerapi.StreamComplete})
+}
+
+func (h *Hub) publishDebounced(sessionID, taskID, runID string, event providerapi.StreamEvent) {
+	key := h.batchKey(sessionID, runID)
+	debounce := h.Debounce
+	if debounce <= 0 {
+		debounce = DefaultDebounce
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	b := h.pending[key]
+	if b == nil {
+		b = &pendingBatch{sessionID: sessionID, taskID: taskID, runID: runID}
+		h.pending[key] = b
+	} else {
+		if sessionID != "" {
+			b.sessionID = sessionID
+		}
+		if taskID != "" {
+			b.taskID = taskID
+		}
+		if runID != "" {
+			b.runID = runID
+		}
+	}
+	switch event.Type {
+	case providerapi.StreamDelta:
+		b.content += event.ContentDelta
+	case providerapi.StreamThinking:
+		b.thinking += event.ThinkingDelta
+	}
+	if b.timer != nil {
+		b.timer.Stop()
+	}
+	b.timer = time.AfterFunc(debounce, func() {
+		h.flushKey(key)
+	})
+}
+
+func (h *Hub) flushKey(key string) {
+	h.mu.Lock()
+	b, ok := h.pending[key]
+	if !ok {
+		h.mu.Unlock()
+		return
+	}
+	delete(h.pending, key)
+	if b.timer != nil {
+		b.timer.Stop()
+		b.timer = nil
+	}
+	sessionID, taskID, runID := b.sessionID, b.taskID, b.runID
+	content, thinking := b.content, b.thinking
+	h.mu.Unlock()
+
+	if content != "" {
+		h.emit(sessionID, taskID, runID, providerapi.StreamEvent{
+			Type: providerapi.StreamDelta, ContentDelta: content,
+		})
+	}
+	if thinking != "" {
+		h.emit(sessionID, taskID, runID, providerapi.StreamEvent{
+			Type: providerapi.StreamThinking, ThinkingDelta: thinking,
+		})
+	}
+}
+
+func (h *Hub) emit(sessionID, taskID, runID string, event providerapi.StreamEvent) {
 	env := Envelope{
 		Seq:       h.seq.Add(1),
 		SessionID: sessionID,
@@ -50,9 +168,14 @@ func (h *Hub) Publish(sessionID, taskID, runID string, event providerapi.StreamE
 		RunID:     runID,
 		Event:     event,
 	}
-	h.mu.RLock()
-	defer h.mu.RUnlock()
+	h.mu.Lock()
+	subs := make([]*subscription, 0, len(h.subs))
 	for _, sub := range h.subs {
+		subs = append(subs, sub)
+	}
+	h.mu.Unlock()
+
+	for _, sub := range subs {
 		if sub.sessionID != "" && sessionID != "" && sub.sessionID != sessionID {
 			continue
 		}

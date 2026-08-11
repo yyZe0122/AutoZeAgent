@@ -161,6 +161,7 @@ func (t *taskTool) Execute(ctx context.Context, raw json.RawMessage) (json.RawMe
 		MaxCostMicros:      parent.MaxCostMicros,
 		ToolTimeoutMillis:  parent.ToolTimeoutMillis,
 		Depth:              parent.Depth + 1,
+		Role:               "subagent",
 	}
 
 	result, err := runner.Run(ctx, req)

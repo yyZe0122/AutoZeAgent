@@ -164,9 +164,6 @@ func TestStartChatSkipsPlannerShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mid.State == kernel.TaskPlanning || mid.State == kernel.TaskWaitingApproval {
-		t.Fatalf("chat task entered planner states: %s", mid.State)
-	}
 	if mid.State != kernel.TaskRunning && mid.State != kernel.TaskCompleted {
 		t.Fatalf("after StartChat state = %s, want running|completed", mid.State)
 	}
@@ -557,13 +554,13 @@ func TestStartChatPlanModeReadOnlyGrants(t *testing.T) {
 	fake.mu.Unlock()
 	for _, name := range req.AllowedTools {
 		switch name {
-		case "fs_read", "fs_list", "fs_stat", "task":
+		case "fs_read", "fs_list", "fs_stat", "fs_glob", "fs_grep", "task", "memory_search", "session_search":
 		default:
 			t.Fatalf("plan mode must not allow %q; tools=%v", name, req.AllowedTools)
 		}
 	}
-	if len(req.AllowedTools) != 4 {
-		t.Fatalf("plan tools = %v, want read/list/stat/task", req.AllowedTools)
+	if len(req.AllowedTools) != 8 {
+		t.Fatalf("plan tools = %v, want read/list/stat/glob/grep/task/memory_search/session_search", req.AllowedTools)
 	}
 	if len(req.Messages) < 1 || req.Messages[0].Role != providerapi.RoleSystem {
 		t.Fatalf("messages = %#v", req.Messages)
@@ -579,8 +576,8 @@ func TestStartChatPlanModeReadOnlyGrants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.State == kernel.TaskPlanning || got.State == kernel.TaskWaitingApproval {
-		t.Fatalf("plan chat entered legacy planner states: %s", got.State)
+	if got.State != kernel.TaskRunning && got.State != kernel.TaskCompleted && got.State != kernel.TaskFailed {
+		t.Fatalf("plan chat state = %s", got.State)
 	}
 }
 
@@ -724,7 +721,12 @@ func TestStartChatAgentModeWriteGrants(t *testing.T) {
 	fake.mu.Lock()
 	req := fake.request
 	fake.mu.Unlock()
-	want := map[string]bool{"fs_read": true, "fs_list": true, "fs_stat": true, "fs_write": true, "fs_patch": true, "fs_mkdir": true, "task": true}
+	want := map[string]bool{
+		"fs_read": true, "fs_list": true, "fs_stat": true, "fs_glob": true, "fs_grep": true,
+		"fs_write": true, "fs_patch": true, "fs_mkdir": true,
+		"task": true, "memory_search": true, "memory_write": true,
+		"memory_promote": true, "session_search": true,
+	}
 	got := map[string]bool{}
 	for _, name := range req.AllowedTools {
 		got[name] = true

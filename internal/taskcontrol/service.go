@@ -8,12 +8,14 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"autozeagent.local/autozeagent/internal/applicationerror"
 	"autozeagent.local/autozeagent/internal/approval"
 	"autozeagent.local/autozeagent/internal/kernel"
+	"autozeagent.local/autozeagent/internal/runlog"
 )
 
 var ErrInvalidRequest = errors.New("invalid task control request")
@@ -95,6 +97,9 @@ func (s *Service) ControlTask(ctx context.Context, request TaskActionRequest) (k
 		return kernel.Task{}, applicationerror.Wrap(applicationerror.CodeInvalidRequest, false, fmt.Errorf("%w: unsupported task action %q", ErrInvalidRequest, request.Action))
 	}
 	if err != nil {
+		slog.Warn("task control failed", runlog.Attrs("taskcontrol", string(request.Action), "failed", runlog.IDs{
+			TaskID: string(request.TaskID),
+		}, "expected_version", request.ExpectedVersion, "error", err)...)
 		return kernel.Task{}, classifyTaskActionError(err)
 	}
 	if request.Action == TaskActionPause || request.Action == TaskActionCancel {
@@ -104,9 +109,15 @@ func (s *Service) ControlTask(ctx context.Context, request TaskActionRequest) (k
 	}
 	if request.Action == TaskActionCancel {
 		if err := s.approvals.RevokeTaskGrants(context.WithoutCancel(ctx), request.TaskID, s.now()); err != nil {
+			slog.Error("task control revoke grants failed", runlog.Attrs("taskcontrol", "cancel", "failed", runlog.IDs{
+				SessionID: string(task.SessionID), TaskID: string(task.ID),
+			}, "error", err)...)
 			return task, err
 		}
 	}
+	slog.Info("task control applied", runlog.Attrs("taskcontrol", string(request.Action), "succeeded", runlog.IDs{
+		SessionID: string(task.SessionID), TaskID: string(task.ID),
+	}, "task_state", string(task.State), "reason", request.Reason)...)
 	return task, nil
 }
 

@@ -24,6 +24,7 @@ import (
 	"autozeagent.local/autozeagent/internal/events"
 	"autozeagent.local/autozeagent/internal/gateway"
 	"autozeagent.local/autozeagent/internal/kernel"
+	"autozeagent.local/autozeagent/internal/memory"
 	"autozeagent.local/autozeagent/internal/modelstream"
 	"autozeagent.local/autozeagent/internal/platform/paths"
 	platformsignals "autozeagent.local/autozeagent/internal/platform/signals"
@@ -36,6 +37,7 @@ import (
 	coresqlite "autozeagent.local/autozeagent/internal/store/sqlite"
 	"autozeagent.local/autozeagent/internal/taskcontrol"
 	"autozeagent.local/autozeagent/internal/tasksubmission"
+	"autozeagent.local/autozeagent/internal/toolpermission"
 	"autozeagent.local/autozeagent/internal/tools"
 	"autozeagent.local/autozeagent/internal/version"
 	"autozeagent.local/autozeagent/pkg/providerapi"
@@ -115,16 +117,6 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := tools.RegisterBuiltins(toolBroker, []string{workingDirectory}, tools.ExecutorConfig{
-		MaxOutputBytes: 4 << 20,
-		AllowedEnv:     []string{"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "HOME", "USERPROFILE"},
-	}); err != nil {
-		return err
-	}
-	taskTool, err := tools.RegisterTaskTool(toolBroker, database.SQL(), nil)
-	if err != nil {
-		return err
-	}
 	migrateFrom := []string{workingDirectory, layout.DataDir}
 	if clientCWD := strings.TrimSpace(os.Getenv("AUTOZEAGENT_CLIENT_CWD")); clientCWD != "" {
 		migrateFrom = append([]string{clientCWD}, migrateFrom...)
@@ -143,6 +135,35 @@ func run(args []string) error {
 	default:
 		slog.Info("provider config ready", "component", "daemon", "operation", "ensure_config", "result", "succeeded",
 			"config_path", ensureResult.Path)
+	}
+	// PathGuard ceiling from chat.workspace / chat.roots (ADR-046).
+	chatCfgForTools, err := providerconfig.LoadChat(layout.ConfigDir)
+	if err != nil {
+		return fmt.Errorf("load chat config: %w", err)
+	}
+	pathRoots := chatCfgForTools.PathCeilingRoots(workingDirectory)
+	if len(pathRoots) == 0 && !chatCfgForTools.WorkspaceAllowAll() {
+		pathRoots = []string{workingDirectory}
+	}
+	pathGuard, err := tools.RegisterBuiltinsWithOptions(toolBroker, pathRoots, chatCfgForTools.WorkspaceAllowAll(), tools.ExecutorConfig{
+		MaxOutputBytes: 4 << 20,
+		AllowedEnv:     []string{"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "HOME", "USERPROFILE"},
+	})
+	if err != nil {
+		return err
+	}
+	if chatCfgForTools.WorkspaceAllowAll() {
+		slog.Warn("chat.workspace.allow_all enabled: path containment disabled",
+			"component", "daemon", "operation", "path_guard", "result", "warning")
+	}
+	taskTool, err := tools.RegisterTaskTool(toolBroker, database.SQL(), nil)
+	if err != nil {
+		return err
+	}
+	// Memory tools registered early; backend attached after memory.Manager is created.
+	memTools, err := tools.RegisterMemoryTools(toolBroker, nil)
+	if err != nil {
+		return err
 	}
 	mcpConfig, err := providerconfig.LoadMCP(layout.ConfigDir)
 	if err != nil {
@@ -189,14 +210,54 @@ func run(args []string) error {
 	}
 	maxIterations := chatCfg.MaxIterationsOrDefault()
 	compactionEnabled := chatCfg.CompactionEnabled()
+	permissionMode := chatCfg.PermissionModeOrDefault()
+	toolBroker.SetPermissionMode(permissionMode)
+
+	// Tool-call permission service (ADR-043); gate attached for ask mode waits.
+	permStore, err := toolpermission.NewStore(database.SQL())
+	if err != nil {
+		return err
+	}
+	permService, err := toolpermission.New(toolpermission.Config{
+		DB: database.SQL(), Store: permStore, Approvals: approvalRepository,
+	})
+	if err != nil {
+		return err
+	}
+	toolBroker.SetPermission(toolpermission.NewGate(permService))
+
+	// In-process memory (ADR-044 productization).
+	var memoryManager *memory.Manager
+	if chatCfg.MemoryEnabled() {
+		memoryStore, err := memory.NewStore(database.SQL())
+		if err != nil {
+			return err
+		}
+		memoryManager, err = memory.New(memory.Config{
+			Store: memoryStore, MaxInjectRunes: chatCfg.MemoryMaxInjectRunes(),
+		})
+		if err != nil {
+			return err
+		}
+		if err := memoryManager.Initialize(context.Background()); err != nil {
+			return fmt.Errorf("memory initialize: %w", err)
+		}
+		defer func() { _ = memoryManager.Shutdown(context.Background()) }()
+		memTools.SetBackend(memoryManager)
+	}
 
 	var agentRunner *agent.Runner
 	if providerRuntime != nil {
+		roleEndpoints, roleErr := buildRoleEndpoints(layout.ConfigDir, providerRuntime.selectedRef)
+		if roleErr != nil {
+			return roleErr
+		}
 		agentRunner, err = agent.New(agent.Config{
 			Provider: providerRuntime.provider, Broker: toolBroker, Records: recordStore,
 			Model: providerRuntime.model, Stream: modelHub,
 			MaxIterations: maxIterations,
-			ContextWindow: contextWindow, Context: contextStore, Calibrator: tokenCalibrator,
+			ContextWindow: contextWindow, Roles: roleEndpoints,
+			Context: contextStore, Calibrator: tokenCalibrator,
 		})
 		if err != nil {
 			return err
@@ -206,20 +267,23 @@ func run(args []string) error {
 	// Chat first so ControlTask can interrupt in-flight chat runs (pause/cancel).
 	var chatService *chatsession.Service
 	if agentRunner != nil {
-		chatRoots := chatCfg.EffectiveRoots(workingDirectory)
+		chatRoots := chatCfg.PathCeilingRoots(workingDirectory)
 		if len(chatRoots) == 0 {
 			chatRoots = []string{workingDirectory}
 		}
 		writeCeiling := chatCfg.AgentWriteCeiling()
 		allowGit := chatCfg.AgentGitEnabled()
 		allowProcess := chatCfg.AgentProcessEnabled()
+		chatCfgCopy := chatCfg
 		chatService, err = chatsession.New(chatsession.Config{
 			DB: database.SQL(), Repository: kernelRepository, Approvals: approvalRepository,
 			Agent: agentRunner, Transcript: queries, WorkspaceRoots: chatRoots,
+			PathGuard: pathGuard, DaemonCWD: workingDirectory, ChatConfig: &chatCfgCopy,
 			AllowWriteCeiling: &writeCeiling, AllowGit: allowGit, AllowProcess: allowProcess,
-			ExtraTools:    mcpToolNames,
+			PermissionMode: permissionMode, ExtraTools: mcpToolNames,
 			ContextWindow: contextWindow, Context: contextStore, Compactor: agentRunner,
 			CompactionEnabled: &compactionEnabled, Calibrator: tokenCalibrator,
+			Memory: memoryManager, Stream: modelHub, ToolCalls: toolBroker,
 			OnError: func(err error) {
 				slog.Error("chat session failure", "component", "chatsession", "operation", "execute", "result", "failed", "error", err)
 			},
@@ -228,8 +292,10 @@ func run(args []string) error {
 			return err
 		}
 		slog.Info("chat workspace configured", "component", "daemon", "operation", "chat_config", "result", "succeeded",
-			"roots", chatRoots, "agent_write_ceiling", writeCeiling, "agent_git", allowGit, "agent_process", allowProcess,
-			"context_window", contextWindow, "max_iterations", maxIterations, "compaction_enabled", compactionEnabled)
+			"ceiling_roots", chatRoots, "allow_all", chatCfg.WorkspaceAllowAll(),
+			"agent_write_ceiling", writeCeiling, "agent_git", allowGit, "agent_process", allowProcess,
+			"context_window", contextWindow, "max_iterations", maxIterations, "compaction_enabled", compactionEnabled,
+			"permission_mode", permissionMode)
 	}
 	// Task control (pause/resume/cancel); chat interrupt when chat is configured.
 	// Assign chat only when non-nil so ChatInterrupter is a true nil interface (not typed nil).
@@ -307,11 +373,32 @@ func run(args []string) error {
 	if mcpRegistry != nil {
 		mcpStatus = mcpStatusAdapter{registry: mcpRegistry}
 	}
+	var sessionCompact gateway.SessionCompactor
+	if chatService != nil {
+		sessionCompact = gateway.SessionCompactFunc(func(ctx context.Context, sessionID kernel.SessionID, focus string) (gateway.SessionCompactResult, error) {
+			r, err := chatService.ForceCompact(ctx, sessionID, focus)
+			if err != nil {
+				return gateway.SessionCompactResult{}, err
+			}
+			return gateway.SessionCompactResult{
+				SessionID: r.SessionID, Summary: r.Summary, Source: r.Source, CompactionID: r.CompactionID,
+			}, nil
+		})
+	}
+	var memoryControl gateway.MemoryControlService
+	if chatService != nil && memoryManager != nil {
+		memoryControl = memoryControlAdapter{chat: chatService}
+	}
 	gatewayAPI, err := gateway.NewAPI(gateway.APIConfig{
 		Queries: queries, TaskSubmissions: taskSubmissionService,
 		TaskControls: taskControl, Jobs: schedulerStore,
 		Core: core, Events: eventStore, Skills: skillCatalog, ModelConfig: modelConfig, ModelSwitcher: modelSwitcher,
-		ModelStream: modelHub, MCP: mcpStatus,
+		ModelStream: modelHub, MCP: mcpStatus, SessionCompact: sessionCompact,
+		ToolPermissions: gateway.ToolPermissionAdapter{
+			Service:   permService,
+			TrustPath: toolpermission.DefaultTrustPath(layout.ConfigDir),
+		},
+		MemoryControl: memoryControl,
 	})
 	if err != nil {
 		return err
@@ -431,6 +518,51 @@ func providerRuntimeFromConfig(configDir string) (*configuredProviderRuntime, er
 	}, nil
 }
 
+// buildRoleEndpoints resolves optional models.subagent / models.compact (ADR-045).
+// Unset roles are omitted so agent falls back to main.
+func buildRoleEndpoints(configDir, mainRef string) (map[string]agent.RoleEndpoint, error) {
+	_, roles, err := providerconfig.LoadModelRoles(configDir)
+	if err != nil {
+		return nil, fmt.Errorf("load model roles: %w", err)
+	}
+	if len(roles) == 0 {
+		return nil, nil
+	}
+	// Cache adapters by full provider/model ref.
+	cache := map[string]agent.RoleEndpoint{}
+	out := make(map[string]agent.RoleEndpoint, len(roles))
+	for role, ref := range roles {
+		ref = strings.TrimSpace(ref)
+		if ref == "" || ref == mainRef {
+			// Same as main: no separate endpoint needed (fallback is main).
+			continue
+		}
+		if ep, ok := cache[ref]; ok {
+			out[role] = ep
+			continue
+		}
+		resolved, err := providerconfig.ResolveModel(configDir, ref)
+		if err != nil {
+			return nil, fmt.Errorf("resolve models.%s: %w", role, err)
+		}
+		provider, err := providers.NewConfigured(*resolved)
+		if err != nil {
+			return nil, fmt.Errorf("configure models.%s: %w", role, err)
+		}
+		ep := agent.RoleEndpoint{
+			Provider: provider, Model: resolved.ModelID, ContextWindow: resolved.ContextWindow,
+		}
+		cache[ref] = ep
+		out[role] = ep
+		slog.Info("model role configured", "component", "daemon", "operation", "model_roles", "result", "succeeded",
+			"role", role, "model", ref, "context_window", resolved.ContextWindow)
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
 func (r *configuredProviderRuntime) SelectModel(_ context.Context, ref string) (gateway.ModelConfig, error) {
 	if r == nil {
 		return gateway.ModelConfig{}, applicationerror.Wrap(applicationerror.CodeUnavailable, false, errors.New("provider runtime is not configured"))
@@ -490,4 +622,38 @@ func (a mcpStatusAdapter) MCPStatus() gateway.MCPStatus {
 		Error:   st.Error,
 		Tools:   st.Tools,
 	}
+}
+
+// memoryControlAdapter maps chatsession memory ops to gateway.MemoryControlService.
+type memoryControlAdapter struct {
+	chat *chatsession.Service
+}
+
+func (a memoryControlAdapter) RefreshMemory(sessionID string) {
+	if a.chat == nil {
+		return
+	}
+	a.chat.RefreshMemory(kernel.SessionID(sessionID))
+}
+
+func (a memoryControlAdapter) ForgetMemory(ctx context.Context, entryID string) error {
+	if a.chat == nil {
+		return errors.New("memory is unavailable")
+	}
+	return a.chat.ForgetMemory(ctx, entryID)
+}
+
+func (a memoryControlAdapter) PromoteMemory(ctx context.Context, entryID string) (corequery.MemoryEntry, error) {
+	if a.chat == nil {
+		return corequery.MemoryEntry{}, errors.New("memory is unavailable")
+	}
+	e, err := a.chat.PromoteMemory(ctx, entryID)
+	if err != nil {
+		return corequery.MemoryEntry{}, err
+	}
+	return corequery.MemoryEntry{
+		ID: e.ID, SessionID: e.SessionID, Content: e.Content, Source: e.Source,
+		Tags: e.Tags, Kind: e.Kind, Priority: e.Priority, ExpiresAt: e.ExpiresAt,
+		CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt,
+	}, nil
 }

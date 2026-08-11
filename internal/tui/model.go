@@ -33,11 +33,13 @@ const (
 	listTasks             // task list (debug / focus)
 	listModels
 	listJobs
-	listSkills // multi-select skill picker for next submit
+	listSkills      // multi-select skill picker for next submit
+	listPermissions // pending tool-call permissions (ADR-043)
 )
 
 const (
 	runPollInterval   = 2 * time.Second
+	permPollInterval  = 2 * time.Second
 	animInterval      = 400 * time.Millisecond
 	commandTimeout    = 30 * time.Second
 	historyLimit      = 50
@@ -47,6 +49,8 @@ const (
 	// timeline body defaults (fold large run results).
 	timelineBodyMaxLines = 12
 	timelineBodyMaxChars = 2400
+	// permOpenGrace is how long decision hotkeys are ignored after auto-open.
+	permOpenGrace = 400 * time.Millisecond
 )
 
 type model struct {
@@ -77,10 +81,11 @@ type model struct {
 	list        listKind
 	selectedIdx int
 
-	tasks    []gatewayclient.Task
-	sessions []gatewayclient.Session
-	jobs     []schedulerapi.Job
-	skills   []gatewayclient.Skill
+	tasks       []gatewayclient.Task
+	sessions    []gatewayclient.Session
+	jobs        []schedulerapi.Job
+	skills      []gatewayclient.Skill
+	permissions []gatewayclient.Permission
 	// selectedSkillIDs is draft selection for the next task submit (kept across turns).
 	selectedSkillIDs []string
 	sessionID        gatewayclient.SessionID
@@ -99,11 +104,22 @@ type model struct {
 
 	usage         gatewayclient.TaskUsage
 	usageOK       bool
+	runUsage      gatewayclient.RunUsage
+	runUsageOK    bool
 	taskContext   gatewayclient.TaskContext
 	contextOK     bool
 	mcpStatus     gatewayclient.MCPStatus
 	mcpOK         bool
 	contextWindow int64 // model context length from ModelConfig; 0 = unknown
+
+	pendingPermCount int
+	lastPermPoll     time.Time
+	// autoOpenedPermList avoids re-opening the picker every poll while pending remains.
+	autoOpenedPermList bool
+	// permGraceUntil ignores decision keys briefly after auto-open (Crush-style).
+	permGraceUntil time.Time
+	// permCycleIdx cycles Enter: once → similar → permanent → deny.
+	permCycleIdx int
 
 	animFrame int
 	animOn    bool
@@ -144,6 +160,8 @@ type refreshDoneMsg struct {
 	messages    []gatewayclient.TranscriptMessage
 	usage       gatewayclient.TaskUsage
 	usageOK     bool
+	runUsage    gatewayclient.RunUsage
+	runUsageOK  bool
 	taskContext gatewayclient.TaskContext
 	contextOK   bool
 	err         error
@@ -176,6 +194,14 @@ type commandDoneMsg struct {
 	sessions      []gatewayclient.Session
 	skills        []gatewayclient.Skill
 	skillIDs      []string // replace selectedSkillIDs when set (toggle apply)
+	permissions   []gatewayclient.Permission
+}
+
+// permPollDoneMsg is a background poll of pending tool permissions.
+type permPollDoneMsg struct {
+	permissions []gatewayclient.Permission
+	err         error
+	openList    bool // true when count went 0→N and list should auto-open once
 }
 
 type sseEventMsg struct {

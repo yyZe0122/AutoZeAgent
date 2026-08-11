@@ -21,13 +21,14 @@ type TaskSubmissionRequest struct {
 	Objective     string    `json:"objective"`
 	SkillIDs      []string  `json:"skill_ids,omitempty"`
 	ExecutionMode string    `json:"execution_mode,omitempty"`
+	// Workspace is the client launch directory (absolute); bound to session (ADR-046).
+	Workspace string `json:"workspace,omitempty"`
 }
 
 type TaskSubmissionResponse struct {
-	Task            Task                   `json:"task"`
-	Plan            *approval.PlanDocument `json:"plan,omitempty"`
-	RunID           RunID                  `json:"run_id,omitempty"`
-	PlanningPending bool                   `json:"planning_pending,omitempty"`
+	Task  Task                   `json:"task"`
+	Plan  *approval.PlanDocument `json:"plan,omitempty"`
+	RunID RunID                  `json:"run_id,omitempty"`
 	// PlanID from client (plan mode) or daemon chat synthetic plan (agent mode).
 	PlanID PlanID `json:"plan_id,omitempty"`
 }
@@ -47,6 +48,7 @@ func (c *Client) SubmitTask(ctx context.Context, request TaskSubmissionRequest) 
 	request.ExecutionMode = mode
 	// Both modes use daemon-owned synthetic chat plans; ignore client plan IDs.
 	request.PlanID = ""
+	request.Workspace = strings.TrimSpace(request.Workspace)
 	var response TaskSubmissionResponse
 	if err := c.inner.DoJSON(ctx, http.MethodPost, "/v1/tasks", request, &response); err != nil {
 		return TaskSubmissionResponse{}, fmt.Errorf("create task: %w", err)

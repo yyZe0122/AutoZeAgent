@@ -107,7 +107,11 @@ func (s *Store) Get(ctx context.Context, jobID string) (schedulerapi.Job, error)
 	if jobID == "" {
 		return schedulerapi.Job{}, errors.New("job_id is required")
 	}
-	return scanJob(s.db.QueryRowContext(ctx, `SELECT `+jobSelectColumns+` FROM jobs WHERE job_id=?`, jobID))
+	job, err := scanJob(s.db.QueryRowContext(ctx, `SELECT `+jobSelectColumns+` FROM jobs WHERE job_id=?`, jobID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return schedulerapi.Job{}, schedulerapi.ErrNotFound
+	}
+	return job, err
 }
 
 func (s *Store) getByIdempotencyKey(ctx context.Context, key string) (schedulerapi.Job, error) {

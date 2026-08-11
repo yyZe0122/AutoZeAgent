@@ -45,13 +45,9 @@ func buildTimeline(task *gatewayclient.Task, plan *gatewayclient.Plan, runs []ga
 	})
 
 	switch task.State {
-	case gatewayclient.TaskStatePlanning:
+	case gatewayclient.TaskStatePlanning, gatewayclient.TaskStateWaitingApproval, gatewayclient.TaskStateApproved:
 		items = append(items, timelineItem{
-			Kind: tlSystem, At: task.UpdatedAt, Title: "planning…", State: task.State,
-		})
-	case gatewayclient.TaskStateWaitingApproval:
-		items = append(items, timelineItem{
-			Kind: tlSystem, At: task.UpdatedAt, Title: "historical: waiting_approval", State: task.State,
+			Kind: tlSystem, At: task.UpdatedAt, Title: "legacy state: " + task.State, State: task.State,
 		})
 	case gatewayclient.TaskStateRunning:
 		items = append(items, timelineItem{
@@ -89,6 +85,9 @@ func buildTimeline(task *gatewayclient.Task, plan *gatewayclient.Plan, runs []ga
 			step = string(*run.StepID)
 		}
 		title := fmt.Sprintf("run %s [%s]", shortID(string(run.ID)), step)
+		if run.ParentRunID != nil && strings.TrimSpace(string(*run.ParentRunID)) != "" {
+			title = fmt.Sprintf("run %s [%s] ←%s", shortID(string(run.ID)), step, shortID(string(*run.ParentRunID)))
+		}
 		body := ""
 		kind := tlRun
 		if run.Error != nil && strings.TrimSpace(*run.Error) != "" {

@@ -8,6 +8,23 @@
   "properties": {
     "$schema": {"type": "string"},
     "model": {"type": "string", "pattern": "^[^/\\s]+/.+$"},
+    "models": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional role → provider/model overrides (ADR-045). Unset roles fall back to top-level model. Do not set models.main.",
+      "properties": {
+        "subagent": {
+          "type": "string",
+          "pattern": "^[^/\\s]+/.+$",
+          "description": "Model for task tool child runs. Omit → main model."
+        },
+        "compact": {
+          "type": "string",
+          "pattern": "^[^/\\s]+/.+$",
+          "description": "Model for session head compaction summaries. Omit → main model."
+        }
+      }
+    },
     "provider": {
       "type": "object",
       "minProperties": 1,
@@ -85,7 +102,28 @@
         "roots": {
           "type": "array",
           "items": {"type": "string", "minLength": 1},
-          "description": "Absolute workspace roots for chat tool grants. Empty = daemon working directory."
+          "description": "Legacy absolute roots (merged into workspace ceiling). Prefer chat.workspace."
+        },
+        "workspace": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Session workspace binding (ADR-046). Client cwd is default session root.",
+          "properties": {
+            "default": {
+              "type": "string",
+              "description": "client_cwd (default) | daemon_cwd | absolute path"
+            },
+            "allow": {
+              "type": "array",
+              "items": {"type": "string", "minLength": 1},
+              "description": "Extra absolute roots always on the path ceiling"
+            },
+            "allow_all": {
+              "type": "boolean",
+              "default": false,
+              "description": "Disable path-root containment (local single-user only; high risk)"
+            }
+          }
         },
         "allow_write": {
           "type": "boolean",
@@ -125,8 +163,21 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 64,
-          "default": 8,
-          "description": "Agent tool-loop cap per chat run (1–64). Omit = 8."
+          "default": 16,
+          "description": "Agent tool-loop cap per chat run (1–64). Omit = 16."
+        },
+        "permission": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Tool-call permission interaction (ADR-043). Omit = preauth.",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["preauth", "ask", "auto"],
+              "default": "preauth",
+              "description": "preauth = deny without grant (default); ask = interactive tool-call queue; auto reserved."
+            }
+          }
         }
       }
     }

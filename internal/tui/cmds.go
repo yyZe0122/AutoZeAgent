@@ -38,12 +38,22 @@ func (m model) handleLineCmd(line string) tea.Cmd {
 		return m.themeCommandCmd(arg)
 	case "/cron":
 		return m.cronCmd(arg)
+	case "/compact":
+		return m.compactCmd(arg)
+	case "/perm":
+		return m.permCmd(arg)
+	case "/memory":
+		return m.memoryCmd(arg)
+	case "/refresh-memory":
+		return m.refreshMemoryCmd()
 	case "/new":
 		// Explicit /new always opens a fresh session (clear focus first).
 		return m.freshSessionCmd(arg)
 	case "/pause", "/resume", "/cancel":
 		action, _ := gatewayclient.ParseTaskAction(name)
 		return m.taskActionCmd(action, arg)
+	case "/retry":
+		return m.retryCmd()
 	case "/back", "/sessions":
 		return func() tea.Msg {
 			return commandDoneMsg{openList: listSessions, status: "sessions"}
@@ -111,6 +121,285 @@ func (m model) cronCmd(arg string) tea.Cmd {
 		}
 	}
 	return m.cronCreateCmd(arg)
+}
+
+func (m model) permCmd(arg string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+		defer cancel()
+		arg = strings.TrimSpace(arg)
+		sessionID := strings.TrimSpace(string(m.sessionID))
+		if sessionID == "…" {
+			sessionID = ""
+		}
+		if arg == "" {
+			items, err := m.gateway.ListPermissions(ctx, sessionID, 20)
+			if err != nil {
+				return commandDoneMsg{err: err}
+			}
+			if len(items) == 0 {
+				return commandDoneMsg{status: "no pending tool permissions", permissions: items}
+			}
+			return commandDoneMsg{
+				openList:    listPermissions,
+				permissions: items,
+				status:      fmt.Sprintf("%d pending · Enter once · /perm once|similar|permanent|deny <id>", len(items)),
+			}
+		}
+		parts := strings.Fields(arg)
+		if len(parts) != 2 {
+			return commandDoneMsg{err: fmt.Errorf("usage: /perm [allow_once|allow_similar|allow_permanent|deny <id-prefix>]")}
+		}
+		decision := strings.ToLower(strings.TrimSpace(parts[0]))
+		prefix := strings.ToLower(strings.TrimSpace(parts[1]))
+		// Aliases: once/similar/permanent; allow_session → allow_similar.
+		switch decision {
+		case "once", "allow_once":
+			decision = "allow_once"
+		case "similar", "allow_similar", "allow_session", "session":
+			decision = "allow_similar"
+		case "permanent", "allow_permanent", "always":
+			decision = "allow_permanent"
+		case "deny":
+		default:
+			return commandDoneMsg{err: fmt.Errorf("decision must be allow_once, allow_similar, allow_permanent, or deny")}
+		}
+		items, err := m.gateway.ListPermissions(ctx, sessionID, 50)
+		if err != nil {
+			return commandDoneMsg{err: err}
+		}
+		var match *gatewayclient.Permission
+		for i := range items {
+			id := strings.ToLower(items[i].ID)
+			if strings.HasPrefix(id, prefix) || strings.Contains(id, prefix) {
+				if match != nil {
+					return commandDoneMsg{err: fmt.Errorf("ambiguous permission prefix %q", prefix)}
+				}
+				t := items[i]
+				match = &t
+			}
+		}
+		if match == nil {
+			return commandDoneMsg{err: fmt.Errorf("no pending permission matching %q", prefix)}
+		}
+		var updated gatewayclient.Permission
+		var decideErr error
+		if decision == "allow_permanent" {
+			// Typed /perm permanent assumes explicit user intent (= second confirm).
+			updated, decideErr = m.gateway.DecidePermissionConfirm(ctx, match.ID, decision, true)
+		} else {
+			updated, decideErr = m.gateway.DecidePermission(ctx, match.ID, decision)
+		}
+		if decideErr != nil {
+			return commandDoneMsg{err: decideErr}
+		}
+		remaining, _ := m.gateway.ListPermissions(ctx, sessionID, 20)
+		msg := commandDoneMsg{
+			status:      fmt.Sprintf("permission %s → %s (%s)", shortID(updated.ID), decision, updated.ToolName),
+			permissions: remaining,
+		}
+		if len(remaining) == 0 {
+			msg.closeList = true
+		}
+		return msg
+	}
+}
+
+func (m model) permDecideCmd(permissionID, decision string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+		defer cancel()
+		var updated gatewayclient.Permission
+		var err error
+		if decision == "allow_permanent" {
+			// Hotkey / Enter cycle for permanent requires confirm (same as typed /perm).
+			updated, err = m.gateway.DecidePermissionConfirm(ctx, permissionID, decision, true)
+		} else {
+			updated, err = m.gateway.DecidePermission(ctx, permissionID, decision)
+		}
+		if err != nil {
+			return commandDoneMsg{err: err}
+		}
+		sessionID := strings.TrimSpace(string(m.sessionID))
+		if sessionID == "…" {
+			sessionID = ""
+		}
+		remaining, _ := m.gateway.ListPermissions(ctx, sessionID, 20)
+		msg := commandDoneMsg{
+			status:      fmt.Sprintf("permission %s → %s (%s)", shortID(updated.ID), decision, updated.ToolName),
+			permissions: remaining,
+		}
+		if len(remaining) == 0 {
+			msg.closeList = true
+		} else {
+			msg.openList = listPermissions
+		}
+		return msg
+	}
+}
+
+func (m model) pollPermissionsCmd(autoOpen bool) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+		defer cancel()
+		sessionID := strings.TrimSpace(string(m.sessionID))
+		if sessionID == "…" {
+			sessionID = ""
+		}
+		items, err := m.gateway.ListPermissions(ctx, sessionID, 20)
+		if err != nil {
+			return permPollDoneMsg{err: err}
+		}
+		return permPollDoneMsg{permissions: items, openList: autoOpen && len(items) > 0}
+	}
+}
+
+func (m model) retryCmd() tea.Cmd {
+	return func() tea.Msg {
+		objective := lastUserMessage(m.messages)
+		if objective == "" {
+			return commandDoneMsg{err: fmt.Errorf("no user message to retry on focused session")}
+		}
+		if m.sessionID == "" || m.sessionID == "…" {
+			return commandDoneMsg{err: fmt.Errorf("focus a session first")}
+		}
+		return m.newTaskCmd(objective)()
+	}
+}
+
+func lastUserMessage(messages []gatewayclient.TranscriptMessage) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if strings.EqualFold(strings.TrimSpace(messages[i].Role), "user") {
+			return strings.TrimSpace(messages[i].Content)
+		}
+	}
+	return ""
+}
+
+func (m model) compactCmd(arg string) tea.Cmd {
+	return func() tea.Msg {
+		sessionID := strings.TrimSpace(string(m.sessionID))
+		if sessionID == "" || sessionID == "…" {
+			return commandDoneMsg{err: fmt.Errorf("focus a session first (send a message or /sessions), then /compact")}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+		defer cancel()
+		result, err := m.gateway.CompactSession(ctx, gatewayclient.SessionID(sessionID), arg)
+		if err != nil {
+			return commandDoneMsg{err: err}
+		}
+		src := result.Source
+		if src == "" {
+			src = "ok"
+		}
+		status := fmt.Sprintf("compacted session (%s)", src)
+		if f := strings.TrimSpace(arg); f != "" {
+			status = fmt.Sprintf("compacted session (%s, focus)", src)
+		}
+		return commandDoneMsg{status: status}
+	}
+}
+
+func (m model) refreshMemoryCmd() tea.Cmd {
+	return func() tea.Msg {
+		sessionID := strings.TrimSpace(string(m.sessionID))
+		if sessionID == "…" {
+			sessionID = ""
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+		defer cancel()
+		if err := m.gateway.RefreshMemory(ctx, sessionID); err != nil {
+			return commandDoneMsg{err: err}
+		}
+		if sessionID == "" {
+			return commandDoneMsg{status: "memory snapshot cleared (all sessions); next turns reinject"}
+		}
+		return commandDoneMsg{status: "memory snapshot refreshed for session; next turn reinjects"}
+	}
+}
+
+func (m model) memoryCmd(arg string) tea.Cmd {
+	return func() tea.Msg {
+		arg = strings.TrimSpace(arg)
+		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+		defer cancel()
+		sessionID := strings.TrimSpace(string(m.sessionID))
+		if sessionID == "…" {
+			sessionID = ""
+		}
+		if arg == "" {
+			entries, err := m.gateway.ListMemory(ctx, sessionID, "", "", 32)
+			if err != nil {
+				return commandDoneMsg{err: err}
+			}
+			return commandDoneMsg{status: formatMemoryList(entries)}
+		}
+		fields := strings.Fields(arg)
+		switch strings.ToLower(fields[0]) {
+		case "refresh":
+			if err := m.gateway.RefreshMemory(ctx, sessionID); err != nil {
+				return commandDoneMsg{err: err}
+			}
+			return commandDoneMsg{status: "memory snapshot refreshed"}
+		case "forget":
+			if len(fields) < 2 {
+				return commandDoneMsg{err: fmt.Errorf("usage: /memory forget <entry_id>")}
+			}
+			if err := m.gateway.ForgetMemory(ctx, fields[1]); err != nil {
+				return commandDoneMsg{err: err}
+			}
+			return commandDoneMsg{status: "forgot " + fields[1]}
+		case "promote":
+			if len(fields) < 2 {
+				return commandDoneMsg{err: fmt.Errorf("usage: /memory promote <entry_id>")}
+			}
+			e, err := m.gateway.PromoteMemory(ctx, fields[1])
+			if err != nil {
+				return commandDoneMsg{err: err}
+			}
+			return commandDoneMsg{status: fmt.Sprintf("promoted → %s (global curated)", e.ID)}
+		default:
+			// Treat remainder as search query.
+			entries, err := m.gateway.ListMemory(ctx, sessionID, arg, "", 32)
+			if err != nil {
+				return commandDoneMsg{err: err}
+			}
+			return commandDoneMsg{status: formatMemoryList(entries)}
+		}
+	}
+}
+
+func formatMemoryList(entries []gatewayclient.MemoryEntry) string {
+	if len(entries) == 0 {
+		return "no memory entries"
+	}
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("%d memory entr", len(entries)))
+	if len(entries) == 1 {
+		b.WriteString("y:\n")
+	} else {
+		b.WriteString("ies:\n")
+	}
+	for i, e := range entries {
+		if i >= 20 {
+			b.WriteString(fmt.Sprintf("… +%d more\n", len(entries)-20))
+			break
+		}
+		scope := e.SessionID
+		if scope == "" {
+			scope = "global"
+		}
+		kind := e.Kind
+		if kind == "" {
+			kind = "?"
+		}
+		content := strings.ReplaceAll(e.Content, "\n", " ")
+		if len([]rune(content)) > 80 {
+			content = string([]rune(content)[:80]) + "…"
+		}
+		b.WriteString(fmt.Sprintf("  %s [%s/%s] %s\n", e.ID, kind, scope, content))
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // cronCreateCmd: /cron <every> <objective> on the current session (TUI primary path).
@@ -249,11 +538,31 @@ func (m model) statusCommandCmd() tea.Cmd {
 			return commandDoneMsg{err: err}
 		}
 		modelCfg, _ := m.gateway.ModelConfig(ctx)
-		summary := fmt.Sprintf("health ok=%v model=%s mode=%s", health.OK, modelCfg.Model, m.mode)
-		if m.task != nil {
-			summary += fmt.Sprintf(" task=%s state=%s", m.task.ID, m.task.State)
+		var b strings.Builder
+		fmt.Fprintf(&b, "health ok=%v model=%s draft=%s", health.OK, modelCfg.Model, m.draftMode)
+		if m.sessionID != "" && m.sessionID != "…" {
+			fmt.Fprintf(&b, " session=%s", shortID(string(m.sessionID)))
 		}
-		return commandDoneMsg{status: summary}
+		if m.task != nil {
+			fmt.Fprintf(&b, " task=%s state=%s", shortID(string(m.task.ID)), m.task.State)
+		}
+		if m.contextOK {
+			fmt.Fprintf(&b, " ctx=%d/%d", m.taskContext.LastPromptTokens, m.taskContext.UsableTokens)
+			if m.taskContext.Pressure > 0 {
+				fmt.Fprintf(&b, " pressure=%.0f%%", m.taskContext.Pressure*100)
+			}
+		}
+		sessionID := strings.TrimSpace(string(m.sessionID))
+		if sessionID == "…" {
+			sessionID = ""
+		}
+		if perms, err := m.gateway.ListPermissions(ctx, sessionID, 20); err == nil {
+			fmt.Fprintf(&b, " perms=%d", len(perms))
+		}
+		if n := len(m.selectedSkillIDs); n > 0 {
+			fmt.Fprintf(&b, " skills=%d", n)
+		}
+		return commandDoneMsg{status: b.String()}
 	}
 }
 
@@ -320,7 +629,7 @@ func (m model) newTaskCmd(objective string) tea.Cmd {
 		defer cancel()
 		req := gatewayclient.TaskSubmissionRequest{
 			Title: gatewayclient.TaskTitle(objective), Objective: objective,
-			ExecutionMode: execMode,
+			ExecutionMode: execMode, Workspace: m.cwd,
 		}
 		if sessionID != "" {
 			req.SessionID = sessionID
@@ -526,6 +835,40 @@ func (m model) refreshCmd(gen uint64, kind refreshKind) tea.Cmd {
 		msg.usageOK = usageOK
 		msg.taskContext = taskContext
 		msg.contextOK = contextOK
+
+		// Parent run usage rollup (self + children); pick root parent when present.
+		if needUsage && len(runs) > 0 {
+			parentID := pickParentRunID(runs)
+			if parentID != "" {
+				if ru, err := gw.RunUsage(ctx, parentID); err == nil {
+					msg.runUsage = ru
+					msg.runUsageOK = true
+				}
+			}
+		}
 		return msg
 	}
+}
+
+// pickParentRunID chooses a top-level run (no parent) that has children, else the first root run.
+func pickParentRunID(runs []gatewayclient.Run) gatewayclient.RunID {
+	hasChild := make(map[string]bool, len(runs))
+	for _, r := range runs {
+		if r.ParentRunID != nil && strings.TrimSpace(string(*r.ParentRunID)) != "" {
+			hasChild[string(*r.ParentRunID)] = true
+		}
+	}
+	var firstRoot gatewayclient.RunID
+	for _, r := range runs {
+		if r.ParentRunID != nil && strings.TrimSpace(string(*r.ParentRunID)) != "" {
+			continue
+		}
+		if firstRoot == "" {
+			firstRoot = r.ID
+		}
+		if hasChild[string(r.ID)] {
+			return r.ID
+		}
+	}
+	return firstRoot
 }

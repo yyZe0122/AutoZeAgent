@@ -68,15 +68,16 @@ type Approval struct {
 }
 
 type Run struct {
-	ID         coreidentity.RunID   `json:"run_id"`
-	TaskID     coreidentity.TaskID  `json:"task_id"`
-	PlanID     coreidentity.PlanID  `json:"plan_id"`
-	StepID     *coreidentity.StepID `json:"step_id,omitempty"`
-	State      string               `json:"state"`
-	StartedAt  string               `json:"started_at"`
-	FinishedAt *string              `json:"finished_at,omitempty"`
-	Error      *string              `json:"error,omitempty"`
-	Result     *string              `json:"result,omitempty"`
+	ID          coreidentity.RunID   `json:"run_id"`
+	TaskID      coreidentity.TaskID  `json:"task_id"`
+	PlanID      coreidentity.PlanID  `json:"plan_id"`
+	StepID      *coreidentity.StepID `json:"step_id,omitempty"`
+	ParentRunID *coreidentity.RunID  `json:"parent_run_id,omitempty"`
+	State       string               `json:"state"`
+	StartedAt   string               `json:"started_at"`
+	FinishedAt  *string              `json:"finished_at,omitempty"`
+	Error       *string              `json:"error,omitempty"`
+	Result      *string              `json:"result,omitempty"`
 }
 
 // TaskUsage is the aggregated provider usage for all runs of a task.
@@ -93,6 +94,33 @@ type TaskUsage struct {
 	CostMicros       int64               `json:"cost_micros"`
 }
 
+// RunUsage is provider usage for one run, with optional direct-child rollup (ADR-039).
+// Self is this run only; Children sums one-level parent_run_id children; Total = Self+Children.
+// Observability only — does not change budget policy.
+type RunUsage struct {
+	RunID            coreidentity.RunID `json:"run_id"`
+	Self             UsageTotals        `json:"self"`
+	Children         UsageTotals        `json:"children"`
+	Total            UsageTotals        `json:"total"`
+	ChildRunCount    int                `json:"child_run_count"`
+	InputTokens      int64              `json:"input_tokens"`
+	OutputTokens     int64              `json:"output_tokens"`
+	TotalTokens      int64              `json:"total_tokens"`
+	CacheReadTokens  int64              `json:"cache_read_tokens"`
+	CacheWriteTokens int64              `json:"cache_write_tokens"`
+	CostMicros       int64              `json:"cost_micros"`
+}
+
+// UsageTotals is a token/cost aggregate slice (self, children, or combined).
+type UsageTotals struct {
+	InputTokens      int64 `json:"input_tokens"`
+	OutputTokens     int64 `json:"output_tokens"`
+	TotalTokens      int64 `json:"total_tokens"`
+	CacheReadTokens  int64 `json:"cache_read_tokens"`
+	CacheWriteTokens int64 `json:"cache_write_tokens"`
+	CostMicros       int64 `json:"cost_micros"`
+}
+
 // CacheHitRate is cache_read / (cache_read + uncached input). ok=false when unknown.
 func (u TaskUsage) CacheHitRate() (rate float64, ok bool) {
 	if u.CacheReadTokens <= 0 && u.CacheWriteTokens <= 0 {
@@ -103,6 +131,13 @@ func (u TaskUsage) CacheHitRate() (rate float64, ok bool) {
 		return 0, false
 	}
 	return float64(u.CacheReadTokens) / float64(den), true
+}
+
+// CacheHitRate uses the rolled-up total (self+children).
+func (u RunUsage) CacheHitRate() (rate float64, ok bool) {
+	return TaskUsage{
+		InputTokens: u.InputTokens, CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens,
+	}.CacheHitRate()
 }
 
 // TaskContext is the last context-pressure snapshot for a task (window fill, not lifetime spend).
@@ -377,7 +412,7 @@ func (s *Store) ListRuns(ctx context.Context, options RunListOptions) ([]Run, er
 		return nil, err
 	}
 	query := `
-        SELECT r.run_id, r.task_id, r.plan_id, r.step_id, r.state, r.started_at, r.finished_at, r.error,
+        SELECT r.run_id, r.task_id, r.plan_id, r.step_id, r.parent_run_id, r.state, r.started_at, r.finished_at, r.error,
                (SELECT json_extract(records.message, '$.content')
                 FROM agent_run_records records
                 WHERE records.run_id = r.run_id AND records.record_type = 'assistant_message'
@@ -412,7 +447,7 @@ func (s *Store) GetRun(ctx context.Context, id coreidentity.RunID) (Run, error) 
 		return Run{}, err
 	}
 	return scanRun(s.db.QueryRowContext(ctx, `
-        SELECT r.run_id, r.task_id, r.plan_id, r.step_id, r.state, r.started_at, r.finished_at, r.error,
+        SELECT r.run_id, r.task_id, r.plan_id, r.step_id, r.parent_run_id, r.state, r.started_at, r.finished_at, r.error,
                (SELECT json_extract(records.message, '$.content')
                 FROM agent_run_records records
                 WHERE records.run_id = r.run_id AND records.record_type = 'assistant_message'
@@ -446,6 +481,71 @@ func (s *Store) TaskUsage(ctx context.Context, taskID coreidentity.TaskID) (Task
 		return TaskUsage{}, fmt.Errorf("task usage: %w", err)
 	}
 	return usage, nil
+}
+
+// RunUsage returns self usage for runID plus one-level child rollup via parent_run_id.
+// Unknown run still returns zeros with RunID set (no ErrNotFound), matching TaskUsage.
+func (s *Store) RunUsage(ctx context.Context, runID coreidentity.RunID) (RunUsage, error) {
+	if err := validateGet(ctx, string(runID)); err != nil {
+		return RunUsage{}, err
+	}
+	out := RunUsage{RunID: runID}
+	self, err := s.sumUsageForRuns(ctx, `a.run_id = ?`, runID)
+	if err != nil {
+		return RunUsage{}, fmt.Errorf("run usage self: %w", err)
+	}
+	children, err := s.sumUsageForRuns(ctx, `
+		a.run_id IN (SELECT run_id FROM runs WHERE parent_run_id = ?)`, runID)
+	if err != nil {
+		return RunUsage{}, fmt.Errorf("run usage children: %w", err)
+	}
+	var childCount int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM runs WHERE parent_run_id = ?`, runID,
+	).Scan(&childCount); err != nil {
+		return RunUsage{}, fmt.Errorf("run usage child count: %w", err)
+	}
+	out.Self = self
+	out.Children = children
+	out.ChildRunCount = childCount
+	out.Total = addUsageTotals(self, children)
+	out.InputTokens = out.Total.InputTokens
+	out.OutputTokens = out.Total.OutputTokens
+	out.TotalTokens = out.Total.TotalTokens
+	out.CacheReadTokens = out.Total.CacheReadTokens
+	out.CacheWriteTokens = out.Total.CacheWriteTokens
+	out.CostMicros = out.Total.CostMicros
+	return out, nil
+}
+
+func (s *Store) sumUsageForRuns(ctx context.Context, whereSQL string, args ...any) (UsageTotals, error) {
+	var u UsageTotals
+	q := `
+		SELECT
+			COALESCE(SUM(CAST(COALESCE(json_extract(a.usage, '$.input_tokens'), 0) AS INTEGER)), 0),
+			COALESCE(SUM(CAST(COALESCE(json_extract(a.usage, '$.output_tokens'), 0) AS INTEGER)), 0),
+			COALESCE(SUM(CAST(COALESCE(json_extract(a.usage, '$.total_tokens'), 0) AS INTEGER)), 0),
+			COALESCE(SUM(CAST(COALESCE(json_extract(a.usage, '$.cache_read_tokens'), 0) AS INTEGER)), 0),
+			COALESCE(SUM(CAST(COALESCE(json_extract(a.usage, '$.cache_write_tokens'), 0) AS INTEGER)), 0),
+			COALESCE(SUM(CAST(COALESCE(json_extract(a.usage, '$.cost.micros'), 0) AS INTEGER)), 0)
+		FROM agent_run_records a
+		WHERE a.record_type = 'assistant_message' AND (` + whereSQL + `)`
+	err := s.db.QueryRowContext(ctx, q, args...).Scan(
+		&u.InputTokens, &u.OutputTokens, &u.TotalTokens,
+		&u.CacheReadTokens, &u.CacheWriteTokens, &u.CostMicros,
+	)
+	return u, err
+}
+
+func addUsageTotals(a, b UsageTotals) UsageTotals {
+	return UsageTotals{
+		InputTokens:      a.InputTokens + b.InputTokens,
+		OutputTokens:     a.OutputTokens + b.OutputTokens,
+		TotalTokens:      a.TotalTokens + b.TotalTokens,
+		CacheReadTokens:  a.CacheReadTokens + b.CacheReadTokens,
+		CacheWriteTokens: a.CacheWriteTokens + b.CacheWriteTokens,
+		CostMicros:       a.CostMicros + b.CostMicros,
+	}
 }
 
 // TaskContext returns the latest context pressure snapshot for taskID.
@@ -530,8 +630,8 @@ func (s *Store) SessionContext(ctx context.Context, sessionID coreidentity.Sessi
 
 func scanRun(row scanner) (Run, error) {
 	var item Run
-	var step, finished, failure, result sql.NullString
-	if err := row.Scan(&item.ID, &item.TaskID, &item.PlanID, &step, &item.State, &item.StartedAt, &finished, &failure, &result); err != nil {
+	var step, parent, finished, failure, result sql.NullString
+	if err := row.Scan(&item.ID, &item.TaskID, &item.PlanID, &step, &parent, &item.State, &item.StartedAt, &finished, &failure, &result); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Run{}, ErrNotFound
 		}
@@ -548,6 +648,10 @@ func scanRun(row scanner) (Run, error) {
 	if step.Valid {
 		value := coreidentity.StepID(step.String)
 		item.StepID = &value
+	}
+	if parent.Valid && strings.TrimSpace(parent.String) != "" {
+		value := coreidentity.RunID(parent.String)
+		item.ParentRunID = &value
 	}
 	if failure.Valid {
 		item.Error = &failure.String

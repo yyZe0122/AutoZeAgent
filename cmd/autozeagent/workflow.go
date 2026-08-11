@@ -50,9 +50,10 @@ func runWorkflow(args []string) error {
 	if !em.Valid() {
 		return fmt.Errorf("execution-mode must be agent or plan")
 	}
+	workspace, _ := os.Getwd()
 	submitted, err := client.SubmitTask(ctx, gatewayclient.TaskSubmissionRequest{
 		Title: gatewayclient.TaskTitle(objective), Objective: objective,
-		ExecutionMode: string(em),
+		ExecutionMode: string(em), Workspace: workspace,
 	})
 	if err != nil {
 		return err

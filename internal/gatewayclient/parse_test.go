@@ -2,20 +2,6 @@ package gatewayclient
 
 import "testing"
 
-func TestParseApprovalAction(t *testing.T) {
-	action, err := ParseApprovalAction("")
-	if err != nil || action != ActionAllowPlan {
-		t.Fatalf("default: got %q %v", action, err)
-	}
-	action, err = ParseApprovalAction("reject")
-	if err != nil || action != ActionReject {
-		t.Fatalf("reject: got %q %v", action, err)
-	}
-	if _, err := ParseApprovalAction("nope"); err == nil {
-		t.Fatal("expected error for unknown action")
-	}
-}
-
 func TestParseTaskAction(t *testing.T) {
 	action, ok := ParseTaskAction("/pause")
 	if !ok || action != TaskActionPause {

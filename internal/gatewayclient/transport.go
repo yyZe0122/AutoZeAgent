@@ -1,4 +1,4 @@
-package gateway
+package gatewayclient
 
 import (
 	"bufio"
@@ -10,47 +10,60 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 )
 
-type Client struct {
+const endpointFilename = "gateway.json"
+
+// endpoint is the published local gateway discovery file (gateway.json).
+// Shape matches the daemon-side descriptor; client keeps a local copy so it
+// does not import the server package.
+type endpoint struct {
+	Network string `json:"network"`
+	Address string `json:"address"`
+	Token   string `json:"token,omitempty"`
+}
+
+// transport is the low-level HTTP/SSE client for the local gateway.
+type transport struct {
 	httpClient *http.Client
 	baseURL    string
 	token      string
 }
 
-func NewLocalClient(runtimeDir string) (*Client, error) {
-	endpoint, err := readEndpoint(runtimeDir)
+func newLocalTransport(runtimeDir string) (*transport, error) {
+	ep, err := readEndpoint(runtimeDir)
 	if err != nil {
 		return nil, err
 	}
-	transport := &http.Transport{Proxy: nil, DisableCompression: true, IdleConnTimeout: 30 * time.Second}
-	if err := validateLocalEndpoint(runtimeDir, endpoint); err != nil {
+	httpTransport := &http.Transport{Proxy: nil, DisableCompression: true, IdleConnTimeout: 30 * time.Second}
+	if err := validateLocalEndpoint(runtimeDir, ep); err != nil {
 		return nil, err
 	}
 	baseURL := "http://local"
-	switch endpoint.Network {
+	switch ep.Network {
 	case "unix":
-		address := filepath.Clean(endpoint.Address)
-		transport.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		address := filepath.Clean(ep.Address)
+		httpTransport.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
 			return (&net.Dialer{}).DialContext(ctx, "unix", address)
 		}
 	case "tcp":
-		baseURL = "http://" + endpoint.Address
+		baseURL = "http://" + ep.Address
 	}
-	return &Client{httpClient: &http.Client{Transport: transport}, baseURL: baseURL, token: endpoint.Token}, nil
+	return &transport{httpClient: &http.Client{Transport: httpTransport}, baseURL: baseURL, token: ep.Token}, nil
 }
 
-func (c *Client) DoJSON(ctx context.Context, method, path string, input, output any) error {
-	_, err := c.DoJSONResult(ctx, method, path, input, output)
+func (t *transport) DoJSON(ctx context.Context, method, path string, input, output any) error {
+	_, err := t.DoJSONResult(ctx, method, path, input, output)
 	return err
 }
 
 // DoJSONResult is like DoJSON but also returns the HTTP status code on success.
-func (c *Client) DoJSONResult(ctx context.Context, method, path string, input, output any) (int, error) {
+func (t *transport) DoJSONResult(ctx context.Context, method, path string, input, output any) (int, error) {
 	if ctx == nil {
 		return 0, errors.New("gateway client context is required")
 	}
@@ -62,7 +75,7 @@ func (c *Client) DoJSONResult(ctx context.Context, method, path string, input, o
 		}
 		body = bytes.NewReader(encoded)
 	}
-	request, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
+	request, err := http.NewRequestWithContext(ctx, method, t.baseURL+path, body)
 	if err != nil {
 		return 0, err
 	}
@@ -70,10 +83,10 @@ func (c *Client) DoJSONResult(ctx context.Context, method, path string, input, o
 	if input != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
-	if c.token != "" {
-		request.Header.Set("Authorization", "Bearer "+c.token)
+	if t.token != "" {
+		request.Header.Set("Authorization", "Bearer "+t.token)
 	}
-	response, err := c.httpClient.Do(request)
+	response, err := t.httpClient.Do(request)
 	if err != nil {
 		return 0, err
 	}
@@ -92,8 +105,8 @@ func (c *Client) DoJSONResult(ctx context.Context, method, path string, input, o
 	return response.StatusCode, nil
 }
 
-// SSEEvent is one Server-Sent Event from StreamSSE.
-type SSEEvent struct {
+// sseEvent is one Server-Sent Event from StreamSSE.
+type sseEvent struct {
 	ID    string
 	Event string
 	Data  []byte
@@ -102,14 +115,14 @@ type SSEEvent struct {
 // StreamSSE opens a long-lived GET to path (relative to the gateway base URL),
 // honoring Last-Event-ID when after > 0. Events are sent until ctx is cancelled
 // or the stream ends. The returned error is nil on clean ctx cancellation.
-func (c *Client) StreamSSE(ctx context.Context, path string, after uint64, emit func(SSEEvent) error) error {
+func (t *transport) StreamSSE(ctx context.Context, path string, after uint64, emit func(sseEvent) error) error {
 	if ctx == nil {
 		return errors.New("gateway client context is required")
 	}
 	if emit == nil {
 		return errors.New("SSE emit callback is required")
 	}
-	requestURL := c.baseURL + path
+	requestURL := t.baseURL + path
 	if after > 0 {
 		separator := "?"
 		if strings.Contains(path, "?") {
@@ -125,10 +138,10 @@ func (c *Client) StreamSSE(ctx context.Context, path string, after uint64, emit 
 	if after > 0 {
 		request.Header.Set("Last-Event-ID", fmt.Sprintf("%d", after))
 	}
-	if c.token != "" {
-		request.Header.Set("Authorization", "Bearer "+c.token)
+	if t.token != "" {
+		request.Header.Set("Authorization", "Bearer "+t.token)
 	}
-	response, err := c.httpClient.Do(request)
+	response, err := t.httpClient.Do(request)
 	if err != nil {
 		return err
 	}
@@ -138,7 +151,7 @@ func (c *Client) StreamSSE(ctx context.Context, path string, after uint64, emit 
 		return fmt.Errorf("gateway returned %s: %s", response.Status, strings.TrimSpace(string(payload)))
 	}
 	reader := bufio.NewReader(response.Body)
-	var current SSEEvent
+	var current sseEvent
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
@@ -165,7 +178,7 @@ func (c *Client) StreamSSE(ctx context.Context, path string, after uint64, emit 
 					return emitErr
 				}
 			}
-			current = SSEEvent{}
+			current = sseEvent{}
 			continue
 		}
 		if strings.HasPrefix(line, ":") {
@@ -191,31 +204,57 @@ func (c *Client) StreamSSE(ctx context.Context, path string, after uint64, emit 
 	}
 }
 
-func readEndpoint(runtimeDir string) (Endpoint, error) {
+func readEndpoint(runtimeDir string) (endpoint, error) {
 	path := filepath.Join(filepath.Clean(runtimeDir), endpointFilename)
 	info, err := os.Lstat(path)
 	if err != nil {
-		return Endpoint{}, fmt.Errorf("read gateway endpoint: %w", err)
+		return endpoint{}, fmt.Errorf("read gateway endpoint: %w", err)
 	}
 	if !info.Mode().IsRegular() {
-		return Endpoint{}, errors.New("gateway endpoint is not a regular file")
+		return endpoint{}, errors.New("gateway endpoint is not a regular file")
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return Endpoint{}, fmt.Errorf("read gateway endpoint: %w", err)
+		return endpoint{}, fmt.Errorf("read gateway endpoint: %w", err)
 	}
-	var endpoint Endpoint
+	var ep endpoint
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&endpoint); err != nil {
-		return Endpoint{}, fmt.Errorf("decode gateway endpoint: %w", err)
+	if err := decoder.Decode(&ep); err != nil {
+		return endpoint{}, fmt.Errorf("decode gateway endpoint: %w", err)
 	}
 	var extra any
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		return Endpoint{}, errors.New("gateway endpoint must contain one JSON value")
+		return endpoint{}, errors.New("gateway endpoint must contain one JSON value")
 	}
-	if strings.TrimSpace(endpoint.Network) == "" || strings.TrimSpace(endpoint.Address) == "" {
-		return Endpoint{}, errors.New("gateway endpoint is incomplete")
+	if strings.TrimSpace(ep.Network) == "" || strings.TrimSpace(ep.Address) == "" {
+		return endpoint{}, errors.New("gateway endpoint is incomplete")
 	}
-	return endpoint, nil
+	return ep, nil
+}
+
+func validateLocalEndpoint(runtimeDir string, ep endpoint) error {
+	switch ep.Network {
+	case "unix":
+		address := filepath.Clean(ep.Address)
+		relative, err := filepath.Rel(filepath.Clean(runtimeDir), address)
+		if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
+			return errors.New("gateway Unix socket escapes runtime directory")
+		}
+	case "tcp":
+		host, _, err := net.SplitHostPort(ep.Address)
+		if err != nil {
+			return fmt.Errorf("invalid gateway loopback address: %w", err)
+		}
+		address, err := netip.ParseAddr(host)
+		if err != nil || !address.IsLoopback() {
+			return errors.New("gateway TCP address must be loopback")
+		}
+		if ep.Token == "" {
+			return errors.New("gateway TCP endpoint requires authentication")
+		}
+	default:
+		return fmt.Errorf("unsupported gateway network %q", ep.Network)
+	}
+	return nil
 }

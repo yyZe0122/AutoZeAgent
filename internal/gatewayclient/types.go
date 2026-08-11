@@ -6,7 +6,8 @@ import (
 	"autozeagent.local/autozeagent/internal/taskcontrol"
 )
 
-// Identity aliases — client-facing IDs without importing kernel.
+// Identity and DTO aliases — monorepo client reuses domain/read types.
+// If this package is ever split into a standalone SDK, replace with local DTOs.
 type (
 	SessionID = kernel.SessionID
 	TaskID    = kernel.TaskID
@@ -19,6 +20,8 @@ type (
 type (
 	Task               = corequery.Task
 	TaskUsage          = corequery.TaskUsage
+	RunUsage           = corequery.RunUsage
+	UsageTotals        = corequery.UsageTotals
 	TaskContext        = corequery.TaskContext
 	Plan               = corequery.Plan
 	Step               = corequery.Step
@@ -34,13 +37,6 @@ type (
 	TaskAction = taskcontrol.TaskAction
 )
 
-// StartResult is the legacy JSON body shape for POST /v1/runs (HTTP 410 Gone).
-type StartResult struct {
-	TaskID TaskID  `json:"task_id"`
-	PlanID PlanID  `json:"plan_id"`
-	RunIDs []RunID `json:"run_ids"`
-}
-
 // Task control action constants.
 const (
 	TaskActionPause  = taskcontrol.TaskActionPause
@@ -50,15 +46,17 @@ const (
 
 // Task state strings as returned by the gateway (corequery uses plain strings).
 const (
-	TaskStateCreated         = string(kernel.TaskCreated)
+	TaskStateCreated   = string(kernel.TaskCreated)
+	TaskStateRunning   = string(kernel.TaskRunning)
+	TaskStatePaused    = string(kernel.TaskPaused)
+	TaskStateCompleted = string(kernel.TaskCompleted)
+	TaskStateFailed    = string(kernel.TaskFailed)
+	TaskStateCancelled = string(kernel.TaskCancelled)
+
+	// Legacy strings for old core.db rows (display only).
 	TaskStatePlanning        = string(kernel.TaskPlanning)
 	TaskStateWaitingApproval = string(kernel.TaskWaitingApproval)
 	TaskStateApproved        = string(kernel.TaskApproved)
-	TaskStateRunning         = string(kernel.TaskRunning)
-	TaskStatePaused          = string(kernel.TaskPaused)
-	TaskStateCompleted       = string(kernel.TaskCompleted)
-	TaskStateFailed          = string(kernel.TaskFailed)
-	TaskStateCancelled       = string(kernel.TaskCancelled)
 )
 
 // Task execution mode (permission posture: agent=build write, plan=read-only chat).

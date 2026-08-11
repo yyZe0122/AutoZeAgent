@@ -1,6 +1,10 @@
 ﻿{
   "$schema": "./configs/autozeagent.schema.json",
   "model": "deepseek/deepseek-chat",
+  "models": {
+    "subagent": "deepseek/deepseek-chat",
+    "compact": "deepseek/deepseek-chat"
+  },
   "provider": {
     "deepseek": {
       "type": "openai-compatible",
@@ -57,12 +61,18 @@
   },
   "chat": {
     "roots": [],
+    "workspace": {
+      "default": "client_cwd",
+      "allow": [],
+      "allow_all": false
+    },
     "allow_write": true,
     "tools": {
       "git": false,
       "process": false
     },
     "compaction": { "enabled": true },
-    "max_iterations": 8
+    "max_iterations": 16,
+    "permission": { "mode": "preauth" }
   }
 }

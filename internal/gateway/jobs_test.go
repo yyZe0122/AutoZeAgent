@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -164,7 +163,7 @@ func TestJobEndpointsReportUnavailableService(t *testing.T) {
 }
 
 func TestJobActionEndpointMapsMissingJob(t *testing.T) {
-	api := &API{jobs: &jobServiceStub{err: sql.ErrNoRows}}
+	api := &API{jobs: &jobServiceStub{err: schedulerapi.ErrNotFound}}
 	request := httptest.NewRequest(http.MethodPost, "/v1/jobs/missing/actions", strings.NewReader(`{"action":"pause","reason":"test"}`))
 	response := httptest.NewRecorder()
 

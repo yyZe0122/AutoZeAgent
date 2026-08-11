@@ -7,23 +7,8 @@ import (
 	"net/url"
 )
 
-type RunStartRequest struct {
-	TaskID       TaskID `json:"task_id"`
-	PlanID       PlanID `json:"plan_id"`
-	PlanRevision uint64 `json:"plan_revision"`
-	PlanHash     string `json:"plan_hash"`
-}
-
 type runListResponse struct {
 	Runs []Run `json:"runs"`
-}
-
-func (c *Client) StartRuns(ctx context.Context, request RunStartRequest) (StartResult, error) {
-	var started StartResult
-	if err := c.inner.DoJSON(ctx, http.MethodPost, "/v1/runs", request, &started); err != nil {
-		return StartResult{}, fmt.Errorf("start run: %w", err)
-	}
-	return started, nil
 }
 
 func (c *Client) GetRun(ctx context.Context, runID RunID) (Run, error) {
@@ -32,6 +17,16 @@ func (c *Client) GetRun(ctx context.Context, runID RunID) (Run, error) {
 		return Run{}, fmt.Errorf("get run: %w", err)
 	}
 	return run, nil
+}
+
+// RunUsage returns self + one-level child token/cost rollup for runID (ADR-039).
+func (c *Client) RunUsage(ctx context.Context, runID RunID) (RunUsage, error) {
+	var usage RunUsage
+	path := "/v1/runs/" + url.PathEscape(string(runID)) + "/usage"
+	if err := c.inner.DoJSON(ctx, http.MethodGet, path, nil, &usage); err != nil {
+		return RunUsage{}, fmt.Errorf("run usage: %w", err)
+	}
+	return usage, nil
 }
 
 func (c *Client) ListRuns(ctx context.Context, taskID TaskID, limit int) ([]Run, error) {

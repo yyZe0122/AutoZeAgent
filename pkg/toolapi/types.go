@@ -14,6 +14,11 @@ import (
 // as a recoverable tool result that can be fed back to the model.
 var ErrDenied = errors.New("tool call denied")
 
+// ErrPermissionRequired is returned when a tool call is waiting for interactive
+// permission (ADR-043). Broker may wait in-process; if wait fails, runners treat
+// this like a denial recoverable to the model.
+var ErrPermissionRequired = errors.New("tool call requires permission")
+
 var validNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // ValidName reports whether name is safe for outbound provider tool protocols

@@ -28,7 +28,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		m.animFrame++
 		var cmds []tea.Cmd
-		if m.wantsAnim() {
+		if m.wantsAnim() || m.pendingPermCount > 0 || m.needsRunPoll() {
 			m.animOn = true
 			cmds = append(cmds, tickCmd())
 		} else {
@@ -39,7 +39,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if !m.refreshing && m.needsRunPoll() && time.Since(m.lastRunPoll) >= runPollInterval {
 			cmds = append(cmds, m.scheduleRefresh(refreshFull))
 		}
+		if m.shouldPollPermissions() && time.Since(m.lastPermPoll) >= permPollInterval {
+			m.lastPermPoll = time.Now()
+			autoOpen := !m.autoOpenedPermList && m.list == listNone && !m.completer.visible
+			cmds = append(cmds, m.pollPermissionsCmd(autoOpen))
+		}
 		return m, tea.Batch(cmds...)
+
+	case permPollDoneMsg:
+		return m.applyPermPoll(msg)
 
 	case refreshDoneMsg:
 		return m.applyRefresh(msg)
@@ -95,8 +103,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
-	m.completer.update(m.input.Value())
+	m.refreshCompleter()
 	return m, cmd
+}
+
+func (m *model) refreshCompleter() {
+	permIDs := make([]string, 0, len(m.permissions))
+	for _, p := range m.permissions {
+		permIDs = append(permIDs, p.ID)
+	}
+	m.completer.updateWith(m.input.Value(), m.models, permIDs)
 }
 
 func (m model) applyRefresh(msg refreshDoneMsg) (tea.Model, tea.Cmd) {
@@ -150,6 +166,10 @@ func (m model) applyRefresh(msg refreshDoneMsg) (tea.Model, tea.Cmd) {
 			m.usage = msg.usage
 			m.usageOK = true
 		}
+		if msg.runUsageOK {
+			m.runUsage = msg.runUsage
+			m.runUsageOK = true
+		}
 		if msg.contextOK {
 			m.taskContext = msg.taskContext
 			m.contextOK = true
@@ -161,6 +181,9 @@ func (m model) applyRefresh(msg refreshDoneMsg) (tea.Model, tea.Cmd) {
 			m.liveRunID = ""
 		}
 		m.timeline = buildChatTimeline(m.messages, m.task, m.plan, m.runs)
+		if m.pendingPermCount > 0 {
+			m.timeline = patchRunningStatus(m.timeline, runningStatusTitle(m.task, m.pendingPermCount))
+		}
 		if m.liveContent != "" || m.liveThinking != "" {
 			m.timeline = appendLiveDraft(m.timeline, m.liveThinking, m.liveContent)
 		}
@@ -178,9 +201,14 @@ func (m model) applyRefresh(msg refreshDoneMsg) (tea.Model, tea.Cmd) {
 		m.dirty = false
 		cmds = append(cmds, m.scheduleRefresh(refreshFull))
 	}
-	if m.wantsAnim() && !m.animOn {
+	if (m.wantsAnim() || m.pendingPermCount > 0) && !m.animOn {
 		m.animOn = true
 		cmds = append(cmds, tickCmd())
+	}
+	if m.shouldPollPermissions() && time.Since(m.lastPermPoll) >= permPollInterval {
+		m.lastPermPoll = time.Now()
+		autoOpen := !m.autoOpenedPermList && m.list == listNone
+		cmds = append(cmds, m.pollPermissionsCmd(autoOpen))
 	}
 	return m, tea.Batch(cmds...)
 }
@@ -224,6 +252,13 @@ func (m model) applyCommand(msg commandDoneMsg) (tea.Model, tea.Cmd) {
 	if msg.skills != nil {
 		m.skills = msg.skills
 	}
+	if msg.permissions != nil {
+		m.permissions = msg.permissions
+		m.pendingPermCount = len(msg.permissions)
+		if m.pendingPermCount == 0 {
+			m.autoOpenedPermList = false
+		}
+	}
 	if msg.skillIDs != nil {
 		m.selectedSkillIDs = append([]string(nil), msg.skillIDs...)
 	}
@@ -238,6 +273,8 @@ func (m model) applyCommand(msg commandDoneMsg) (tea.Model, tea.Cmd) {
 		m.tlCache = timelineRenderCache{}
 		m.usage = gatewayclient.TaskUsage{}
 		m.usageOK = false
+		m.runUsage = gatewayclient.RunUsage{}
+		m.runUsageOK = false
 		m.taskContext = gatewayclient.TaskContext{}
 		m.contextOK = false
 		m.viewportContent = ""
@@ -277,16 +314,12 @@ func (m model) applyCommand(msg commandDoneMsg) (tea.Model, tea.Cmd) {
 		if msg.taskID != "" {
 			id := msg.taskID
 			// Keep optimistic objective if we already focused this task/placeholder.
-			defaultState := gatewayclient.TaskStateRunning
-			if m.draftMode == modePlan {
-				defaultState = gatewayclient.TaskStatePlanning
-			}
 			if m.task == nil || (m.task.ID != id && m.task.ID != "…") {
-				m.task = &gatewayclient.Task{ID: id, State: defaultState, ExecutionMode: string(m.draftMode)}
+				m.task = &gatewayclient.Task{ID: id, State: gatewayclient.TaskStateRunning, ExecutionMode: string(m.draftMode)}
 			} else {
 				m.task.ID = id
 				if m.task.State == "" {
-					m.task.State = defaultState
+					m.task.State = gatewayclient.TaskStateRunning
 				}
 			}
 			if msg.sessionID != "" {
@@ -327,7 +360,9 @@ func (m model) applyModelStream(env modelstream.Envelope) (tea.Model, tea.Cmd) {
 		m.liveThinking += env.Event.ThinkingDelta
 	case providerapi.StreamToolCall:
 		if env.Event.ToolCall != nil {
-			m.liveContent += fmt.Sprintf("\n⚙ %s(%s)", env.Event.ToolCall.Name, truncate(env.Event.ToolCall.Arguments, 80))
+			m.liveContent += "\n" + formatToolCallLine(gatewayclient.TranscriptToolCall{
+				Name: env.Event.ToolCall.Name, Arguments: env.Event.ToolCall.Arguments,
+			})
 		}
 	case providerapi.StreamComplete:
 		m.liveContent = ""
@@ -346,6 +381,42 @@ func (m model) applyModelStream(env modelstream.Envelope) (tea.Model, tea.Cmd) {
 	m.timeline = appendLiveDraft(m.timeline, m.liveThinking, m.liveContent)
 	m.syncViewport(true)
 	return m, nil
+}
+
+func (m model) applyPermPoll(msg permPollDoneMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		return m, nil
+	}
+	prev := m.pendingPermCount
+	m.permissions = msg.permissions
+	m.pendingPermCount = len(msg.permissions)
+	if m.pendingPermCount == 0 {
+		m.autoOpenedPermList = false
+		if m.list == listPermissions {
+			m.closeList()
+		}
+	} else if msg.openList && prev == 0 && m.list == listNone {
+		m.openPermissionsWithGrace()
+		m.statusMsg = fmt.Sprintf("%d tool permission(s) pending · 1 once · 2 similar · 3 permanent · 4 deny", m.pendingPermCount)
+	} else if m.list == listPermissions {
+		// Keep picker in sync with latest rows.
+		if m.selectedIdx >= len(m.permissions) && len(m.permissions) > 0 {
+			m.selectedIdx = len(m.permissions) - 1
+		}
+	}
+	if m.task != nil && m.task.State == gatewayclient.TaskStateRunning {
+		m.timeline = patchRunningStatus(m.timeline, runningStatusTitle(m.task, m.pendingPermCount))
+		m.syncViewport(false)
+	}
+	m.layout()
+	return m, nil
+}
+
+func (m *model) shouldPollPermissions() bool {
+	if m.needsRunPoll() {
+		return true
+	}
+	return m.pendingPermCount > 0
 }
 
 func (m model) applySSE(envelope eventapi.Envelope) (tea.Model, tea.Cmd) {
@@ -369,6 +440,22 @@ func (m model) applySSE(envelope eventapi.Envelope) (tea.Model, tea.Cmd) {
 }
 
 func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Permission modal hotkeys (four tiers) while listPermissions is open.
+	if m.list == listPermissions && msg.Type == tea.KeyRunes && len(msg.Runes) == 1 {
+		if decision, ok := permHotkeyDecision(string(msg.Runes)); ok {
+			if m.permInGrace() {
+				m.statusMsg = "permission grace · 1–4 after a moment"
+				return m, nil
+			}
+			if m.selectedIdx < 0 || m.selectedIdx >= len(m.permissions) {
+				return m, nil
+			}
+			p := m.permissions[m.selectedIdx]
+			m.busy = true
+			return m, m.permDecideCmd(p.ID, decision)
+		}
+	}
+
 	switch msg.Type {
 	case tea.KeyCtrlC:
 		m.input.SetValue("")
@@ -403,9 +490,20 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyTab:
 		if m.completer.visible {
 			if name := m.completer.accept(); name != "" {
-				m.input.SetValue(name + " ")
+				if strings.HasPrefix(name, "/") {
+					m.input.SetValue(name + " ")
+				} else {
+					// Argument completion: replace from first space.
+					cur := m.input.Value()
+					if i := strings.IndexByte(cur, ' '); i >= 0 {
+						cmd := cur[:i]
+						m.input.SetValue(cmd + " " + name + " ")
+					} else {
+						m.input.SetValue(name + " ")
+					}
+				}
 				m.input.CursorEnd()
-				m.completer.update(m.input.Value())
+				m.refreshCompleter()
 			}
 			m.layout()
 			return m, nil
@@ -472,16 +570,34 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEnter:
 		// Two-stage slash completer: first Enter completes prefix → full name;
 		// second Enter (or Enter when already complete) executes.
+		// In arg mode, first Enter inserts the arg into the line.
 		if m.completer.visible {
 			name := m.completer.selectedName()
 			if name != "" {
 				typed := strings.TrimSpace(m.input.Value())
+				if m.completer.argMode {
+					// Build full command line from cmd + selected arg.
+					space := strings.IndexByte(typed, ' ')
+					cmd := typed
+					if space >= 0 {
+						cmd = typed[:space]
+					}
+					line := strings.TrimSpace(cmd + " " + name)
+					m.completer.dismiss()
+					m.input.SetValue("")
+					m.historyIdx = -1
+					m.pushHistory(line)
+					m.helpOpen = false
+					m.busy = true
+					m.layout()
+					return m, m.handleLineCmd(line)
+				}
 				if !inputIsCompleteCommand(typed, name) {
 					m.completer.dismiss()
 					m.input.SetValue(name)
 					m.input.CursorEnd()
 					m.historyIdx = -1
-					m.completer.update(m.input.Value())
+					m.refreshCompleter()
 					m.layout()
 					return m, nil
 				}
@@ -681,7 +797,7 @@ func (m *model) needsRunPoll() bool {
 		switch m.task.State {
 		case gatewayclient.TaskStateCompleted, gatewayclient.TaskStateFailed, gatewayclient.TaskStateCancelled:
 			return false
-		case gatewayclient.TaskStateRunning, gatewayclient.TaskStatePlanning, gatewayclient.TaskStateWaitingApproval:
+		case gatewayclient.TaskStateRunning:
 			return true
 		}
 	}

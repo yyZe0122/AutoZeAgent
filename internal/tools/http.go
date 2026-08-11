@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 
@@ -54,8 +55,11 @@ func (t *httpGetTool) Authorization(raw json.RawMessage) (Authorization, error) 
 }
 
 func (t *httpGetTool) Execute(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
-	input, _, err := t.parse(raw)
+	input, parsed, err := t.parse(raw)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateHTTPGetURLHost(ctx, parsed.Hostname()); err != nil {
 		return nil, err
 	}
 	limit := input.MaxBytes
@@ -106,6 +110,20 @@ func (t *httpGetTool) parse(raw json.RawMessage) (httpGetInput, *url.URL, error)
 	}
 	if parsed.Hostname() == "" || parsed.User != nil {
 		return input, nil, errors.New("URL host is required and userinfo is forbidden")
+	}
+	// Cheap host-literal checks before Execute (Authorization / early fail).
+	// Defer DNS-heavy failures to Execute with request context.
+	host := strings.ToLower(parsed.Hostname())
+	if _, err2 := netip.ParseAddr(host); err2 == nil {
+		if err := validateHTTPGetURLHost(context.Background(), host); err != nil {
+			return input, nil, err
+		}
+	} else if _, blocked := blockedHostExact[host]; blocked ||
+		strings.HasSuffix(host, ".localhost") || strings.HasSuffix(host, ".local") ||
+		strings.HasPrefix(host, "metadata.") {
+		if err := validateHTTPGetURLHost(context.Background(), host); err != nil {
+			return input, nil, err
+		}
 	}
 	return input, parsed, nil
 }

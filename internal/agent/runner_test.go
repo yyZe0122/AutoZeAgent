@@ -301,14 +301,19 @@ func TestRunnerRespectsMaxIterations(t *testing.T) {
 	request := testRunRequest()
 	request.AllowedTools = []string{"test_read"}
 	result, err := runner.Run(context.Background(), request)
-	if !errors.Is(err, ErrMaxIterations) {
-		t.Fatalf("Run() error = %v, want ErrMaxIterations", err)
+	// Soft landing: final iteration advertises no tools and returns a text stop message
+	// instead of hard-failing with ErrMaxIterations when the model only emits tool calls.
+	if err != nil {
+		t.Fatalf("Run() error = %v, want nil (soft landing)", err)
 	}
 	if result.Iterations != 2 {
 		t.Fatalf("iterations = %d, want 2", result.Iterations)
 	}
 	if provider.calls != 2 {
 		t.Fatalf("provider calls = %d, want 2", provider.calls)
+	}
+	if strings.TrimSpace(result.Content) == "" {
+		t.Fatal("expected soft-landing content")
 	}
 }
 
@@ -487,6 +492,112 @@ func testRunRequest() RunRequest {
 			{Role: providerapi.RoleSystem, Content: "Follow the plan."},
 			{Role: providerapi.RoleUser, Content: "Inspect progress."},
 		},
+	}
+}
+
+func TestSnapshotForRoleFallsBackAndOverrides(t *testing.T) {
+	mainP := &sequenceProvider{}
+	subP := &sequenceProvider{}
+	compactP := &sequenceProvider{}
+	store, _, _ := openAgentFixture(t)
+	runner, err := New(Config{
+		Provider: mainP, Broker: &recordingBroker{}, Records: store, Model: "main-model",
+		ContextWindow: 8000,
+		Roles: map[string]RoleEndpoint{
+			"subagent": {Provider: subP, Model: "sub-model", ContextWindow: 4000},
+			"compact":  {Provider: compactP, Model: "compact-model", ContextWindow: 2000},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, m, cw := runner.snapshotForRole("")
+	if p != mainP || m != "main-model" || cw != 8000 {
+		t.Fatalf("main empty role: %v %q %d", p, m, cw)
+	}
+	p, m, cw = runner.snapshotForRole("main")
+	if p != mainP || m != "main-model" || cw != 8000 {
+		t.Fatalf("main named: %v %q %d", p, m, cw)
+	}
+	p, m, cw = runner.snapshotForRole("subagent")
+	if p != subP || m != "sub-model" || cw != 4000 {
+		t.Fatalf("subagent: %v %q %d", p, m, cw)
+	}
+	p, m, cw = runner.snapshotForRole("compact")
+	if p != compactP || m != "compact-model" || cw != 2000 {
+		t.Fatalf("compact: %v %q %d", p, m, cw)
+	}
+	p, m, cw = runner.snapshotForRole("unknown")
+	if p != mainP || m != "main-model" || cw != 8000 {
+		t.Fatalf("unknown role should fall back: %v %q %d", p, m, cw)
+	}
+}
+
+func TestCompactSummaryUsesCompactRole(t *testing.T) {
+	mainP := &sequenceProvider{responses: []providerapi.CompletionResponse{
+		{Content: "main-summary"},
+	}}
+	compactP := &sequenceProvider{responses: []providerapi.CompletionResponse{
+		{Content: "cheap-summary"},
+	}}
+	store, _, _ := openAgentFixture(t)
+	runner, err := New(Config{
+		Provider: mainP, Broker: &recordingBroker{}, Records: store, Model: "main-model",
+		Roles: map[string]RoleEndpoint{
+			"compact": {Provider: compactP, Model: "cheap-model"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum, err := runner.CompactSummary(context.Background(), []providerapi.Message{
+		{Role: providerapi.RoleUser, Content: "hello world for compaction"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum != "cheap-summary" {
+		t.Fatalf("summary = %q", sum)
+	}
+	if compactP.calls != 1 || mainP.calls != 0 {
+		t.Fatalf("compact calls=%d main calls=%d", compactP.calls, mainP.calls)
+	}
+	if len(compactP.requests) != 1 || compactP.requests[0].Model != "cheap-model" {
+		t.Fatalf("compact request model = %v", compactP.requests)
+	}
+}
+
+func TestRunUsesSubagentRole(t *testing.T) {
+	mainP := &sequenceProvider{responses: []providerapi.CompletionResponse{
+		{Content: "main-reply"},
+	}}
+	subP := &sequenceProvider{responses: []providerapi.CompletionResponse{
+		{Content: "sub-reply"},
+	}}
+	store, _, _ := openAgentFixture(t)
+	runner, err := New(Config{
+		Provider: mainP, Broker: &recordingBroker{}, Records: store, Model: "main-model",
+		Roles: map[string]RoleEndpoint{
+			"subagent": {Provider: subP, Model: "sub-model"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := testRunRequest()
+	req.Role = "subagent"
+	result, err := runner.Run(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != "sub-reply" {
+		t.Fatalf("content = %q", result.Content)
+	}
+	if subP.calls != 1 || mainP.calls != 0 {
+		t.Fatalf("sub calls=%d main calls=%d", subP.calls, mainP.calls)
+	}
+	if len(subP.requests) != 1 || subP.requests[0].Model != "sub-model" {
+		t.Fatalf("sub models = %v", subP.requests)
 	}
 }
 

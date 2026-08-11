@@ -2,6 +2,11 @@
 // Scheduler emits chat task requests; it cannot execute tools or create Core tasks directly.
 package schedulerapi
 
+import "errors"
+
+// ErrNotFound is returned when a job id does not exist.
+var ErrNotFound = errors.New("job not found")
+
 const (
 	CapabilityCreate      = "scheduler.create"
 	CapabilityGet         = "scheduler.get"

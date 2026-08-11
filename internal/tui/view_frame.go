@@ -159,6 +159,12 @@ func (m model) renderMetricsPanel(height int) string {
 		if m.usage.CostMicros > 0 {
 			b.WriteString(styleDim.Render(fmt.Sprintf("  cost %dµ\n", m.usage.CostMicros)))
 		}
+		if m.runUsageOK && m.runUsage.ChildRunCount > 0 {
+			b.WriteString(styleDim.Render(fmt.Sprintf("  parent %s · children %s (%d)\n",
+				formatTokens(m.runUsage.Self.TotalTokens),
+				formatTokens(m.runUsage.Children.TotalTokens),
+				m.runUsage.ChildRunCount)))
+		}
 	} else {
 		b.WriteString(styleDim.Render("  —") + "\n")
 	}
@@ -237,6 +243,16 @@ func (m model) renderStatusLine() string {
 	if m.errMsg != "" {
 		return styleError.Render(truncate(m.errMsg, width))
 	}
+	if m.pendingPermCount > 0 {
+		line := fmt.Sprintf("%d tool permission(s) pending · 1–4 decide · /perm", m.pendingPermCount)
+		if m.statusMsg != "" {
+			line = m.statusMsg
+			if idx := strings.IndexByte(line, '\n'); idx >= 0 {
+				line = line[:idx] + "…"
+			}
+		}
+		return styleError.Render(truncate(line, width))
+	}
 	if m.statusMsg != "" {
 		line := m.statusMsg
 		if idx := strings.IndexByte(line, '\n'); idx >= 0 {
@@ -244,7 +260,7 @@ func (m model) renderStatusLine() string {
 		}
 		return styleStatus.Render(truncate(line, width))
 	}
-	return styleStatus.Render("Tab mode · / help · /skills · /theme · PgUp scroll")
+	return styleStatus.Render("Tab mode · /help · /skills · /perm · /compact · PgUp scroll")
 }
 
 // syncViewport rebuilds the main conversation content.

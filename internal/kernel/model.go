@@ -49,6 +49,9 @@ type Session struct {
 	Version   uint64
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	// Workspace is the absolute client launch directory for this session (ADR-046).
+	// Empty until set from task submit or left unset for legacy sessions.
+	Workspace string
 }
 
 func NewSession(id SessionID, now time.Time) (Session, error) {
@@ -72,36 +75,25 @@ func (s *Session) Close(now time.Time) error {
 type TaskState string
 
 const (
-	TaskCreated         TaskState = "created"
+	TaskCreated   TaskState = "created"
+	TaskRunning   TaskState = "running"
+	TaskPaused    TaskState = "paused"
+	TaskCompleted TaskState = "completed"
+	TaskFailed    TaskState = "failed"
+	TaskCancelled TaskState = "cancelled"
+)
+
+// Legacy task states may still appear in old core.db rows (read-only display).
+// New code must not transition into them.
+const (
 	TaskPlanning        TaskState = "planning"
 	TaskWaitingApproval TaskState = "waiting_approval"
 	TaskApproved        TaskState = "approved"
-	TaskRunning         TaskState = "running"
-	TaskPaused          TaskState = "paused"
-	TaskCompleted       TaskState = "completed"
-	TaskFailed          TaskState = "failed"
-	TaskCancelled       TaskState = "cancelled"
 )
 
 var taskTransitions = map[TaskState]map[TaskState]struct{}{
 	TaskCreated: {
-		TaskPlanning:  {},
-		TaskRunning:   {}, // agent/session chat: skip planner + human approval
-		TaskCancelled: {},
-	},
-	TaskPlanning: {
-		TaskWaitingApproval: {},
-		TaskFailed:          {},
-		TaskCancelled:       {},
-	},
-	TaskWaitingApproval: {
-		TaskApproved:  {},
-		TaskPlanning:  {},
-		TaskCancelled: {},
-	},
-	TaskApproved: {
 		TaskRunning:   {},
-		TaskPlanning:  {},
 		TaskCancelled: {},
 	},
 	TaskRunning: {
@@ -114,15 +106,24 @@ var taskTransitions = map[TaskState]map[TaskState]struct{}{
 		TaskRunning:   {},
 		TaskCancelled: {},
 	},
+	// Legacy states: only allow cancel (or no forward transitions).
+	TaskPlanning: {
+		TaskCancelled: {},
+	},
+	TaskWaitingApproval: {
+		TaskCancelled: {},
+	},
+	TaskApproved: {
+		TaskCancelled: {},
+	},
 	TaskFailed: {
-		TaskPlanning:  {},
 		TaskCancelled: {},
 	},
 }
 
 // ExecutionMode is the task-level posture set at create time.
-// plan: Planner → human approve → Start (grants enforce tool scope).
-// agent: session chat via chatsession (skips Planner; workspace pre-grants).
+// agent: build (workspace write grants via chatsession).
+// plan: read-only chat (same chatsession path; no write grants).
 type ExecutionMode string
 
 const (
@@ -206,40 +207,29 @@ func (t *Task) Cancel(now time.Time) error {
 	return t.Transition(TaskCancelled, now)
 }
 
-func (t *Task) Replan(now time.Time) error {
-	if t.State != TaskFailed {
-		return &TransitionError{Aggregate: "task", From: string(t.State), To: string(TaskPlanning)}
-	}
-	return t.Transition(TaskPlanning, now)
-}
-
 type PlanState string
 
 const (
-	PlanDraft           PlanState = "draft"
+	PlanDraft      PlanState = "draft"
+	PlanApproved   PlanState = "approved"
+	PlanSuperseded PlanState = "superseded"
+	// Legacy plan states (old rows only; no new transitions into them).
 	PlanWaitingApproval PlanState = "waiting_approval"
-	PlanApproved        PlanState = "approved"
 	PlanRejected        PlanState = "rejected"
-	PlanSuperseded      PlanState = "superseded"
 )
 
 var planTransitions = map[PlanState]map[PlanState]struct{}{
 	PlanDraft: {
-		PlanWaitingApproval: {},
-		PlanApproved:        {}, // session-chat synthetic workspace plan (no human gate)
-		PlanSuperseded:      {},
-	},
-	PlanWaitingApproval: {
-		PlanApproved:   {},
-		PlanRejected:   {},
-		PlanDraft:      {},
+		PlanApproved:   {}, // session-chat synthetic workspace plan
 		PlanSuperseded: {},
 	},
 	PlanApproved: {
 		PlanSuperseded: {},
 	},
+	PlanWaitingApproval: {
+		PlanSuperseded: {},
+	},
 	PlanRejected: {
-		PlanDraft:      {},
 		PlanSuperseded: {},
 	},
 }

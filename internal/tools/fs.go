@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -22,17 +24,13 @@ type fileTool struct {
 	guard *PathGuard
 }
 
-func newFileTools(roots []string) ([]Tool, error) {
-	guard, err := NewPathGuard(roots)
-	if err != nil {
-		return nil, err
-	}
-	names := []string{"fs_read", "fs_list", "fs_stat", "fs_write", "fs_patch", "fs_mkdir"}
+func newFileTools(guard *PathGuard) []Tool {
+	names := []string{"fs_read", "fs_list", "fs_stat", "fs_glob", "fs_grep", "fs_write", "fs_patch", "fs_mkdir"}
 	result := make([]Tool, 0, len(names))
 	for _, name := range names {
 		result = append(result, &fileTool{name: name, guard: guard})
 	}
-	return result, nil
+	return result
 }
 
 func (t *fileTool) Definition() toolapi.Definition {
@@ -87,6 +85,24 @@ func (t *fileTool) authorizationPath(raw json.RawMessage) (string, error) {
 			return "", err
 		}
 		path = input.Path
+	case "fs_glob":
+		var input globInput
+		if err := decodeStrict(raw, &input); err != nil {
+			return "", err
+		}
+		path = input.Path
+		if strings.TrimSpace(path) == "" {
+			path = "."
+		}
+	case "fs_grep":
+		var input grepInput
+		if err := decodeStrict(raw, &input); err != nil {
+			return "", err
+		}
+		path = input.Path
+		if strings.TrimSpace(path) == "" {
+			path = "."
+		}
 	default:
 		return "", ErrUnknownTool
 	}
@@ -104,6 +120,10 @@ func (t *fileTool) Execute(ctx context.Context, raw json.RawMessage) (json.RawMe
 		return t.list(ctx, raw)
 	case "fs_stat":
 		return t.stat(ctx, raw)
+	case "fs_glob":
+		return t.glob(ctx, raw)
+	case "fs_grep":
+		return t.grep(ctx, raw)
 	case "fs_write":
 		return t.write(ctx, raw)
 	case "fs_patch":
@@ -310,6 +330,364 @@ func (t *fileTool) patch(ctx context.Context, raw json.RawMessage) (json.RawMess
 	return encodeResult(map[string]any{"path": path, "replacements": replacements, "size_bytes": len(updated)})
 }
 
+const (
+	defaultGlobMaxResults = 200
+	maxGlobMaxResults     = 1000
+	defaultGrepMaxMatches = 50
+	maxGrepMaxMatches     = 200
+	defaultGrepMaxFiles   = 100
+	maxGrepMaxFiles       = 500
+	grepMaxFileBytes      = 1 << 20 // 1 MiB per file
+	grepMaxPatternLen     = 256
+	grepMaxWalkFiles      = 5000
+)
+
+type globInput struct {
+	Pattern string `json:"pattern"`
+	Path    string `json:"path,omitempty"`
+	Max     int    `json:"max,omitempty"`
+}
+
+func (t *fileTool) glob(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	var input globInput
+	if err := decodeStrict(raw, &input); err != nil {
+		return nil, err
+	}
+	pattern := strings.TrimSpace(input.Pattern)
+	if pattern == "" {
+		return nil, errors.New("pattern is required")
+	}
+	if strings.Contains(pattern, "**") {
+		return nil, errors.New("recursive ** patterns are not supported; use a single-level glob or path subtree")
+	}
+	base := strings.TrimSpace(input.Path)
+	if base == "" {
+		base = "."
+	}
+	root, err := t.guard.Resolve(base)
+	if err != nil {
+		return nil, err
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, errors.New("path must be a directory for fs_glob")
+	}
+	limit := input.Max
+	if limit <= 0 {
+		limit = defaultGlobMaxResults
+	}
+	if limit > maxGlobMaxResults {
+		limit = maxGlobMaxResults
+	}
+	// filepath.Glob is non-recursive; match under root only.
+	matches, err := filepath.Glob(filepath.Join(root, pattern))
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(matches)
+	out := make([]string, 0, minInt(len(matches), limit))
+	truncated := false
+	for _, match := range matches {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		resolved, err := t.guard.Resolve(match)
+		if err != nil {
+			continue
+		}
+		if len(out) >= limit {
+			truncated = true
+			break
+		}
+		out = append(out, resolved)
+	}
+	return encodeResult(map[string]any{
+		"path": root, "pattern": pattern, "matches": out,
+		"count": len(out), "truncated": truncated,
+	})
+}
+
+type grepInput struct {
+	Pattern         string `json:"pattern"`
+	Path            string `json:"path,omitempty"`
+	Glob            string `json:"glob,omitempty"`
+	MaxMatches      int    `json:"max_matches,omitempty"`
+	MaxFiles        int    `json:"max_files,omitempty"`
+	Literal         bool   `json:"literal,omitempty"`
+	CaseInsensitive bool   `json:"case_insensitive,omitempty"`
+}
+
+type grepMatch struct {
+	Path    string `json:"path"`
+	Line    int    `json:"line"`
+	Content string `json:"content"`
+}
+
+func (t *fileTool) grep(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	var input grepInput
+	if err := decodeStrict(raw, &input); err != nil {
+		return nil, err
+	}
+	pattern := strings.TrimSpace(input.Pattern)
+	if pattern == "" {
+		return nil, errors.New("pattern is required")
+	}
+	if len(pattern) > grepMaxPatternLen {
+		return nil, errors.New("pattern too long")
+	}
+	base := strings.TrimSpace(input.Path)
+	if base == "" {
+		base = "."
+	}
+	root, err := t.guard.Resolve(base)
+	if err != nil {
+		return nil, err
+	}
+	maxMatches := input.MaxMatches
+	if maxMatches <= 0 {
+		maxMatches = defaultGrepMaxMatches
+	}
+	if maxMatches > maxGrepMaxMatches {
+		maxMatches = maxGrepMaxMatches
+	}
+	maxFiles := input.MaxFiles
+	if maxFiles <= 0 {
+		maxFiles = defaultGrepMaxFiles
+	}
+	if maxFiles > maxGrepMaxFiles {
+		maxFiles = maxGrepMaxFiles
+	}
+	matcher, err := compileGrepMatcher(pattern, input.Literal, input.CaseInsensitive)
+	if err != nil {
+		return nil, err
+	}
+	fileGlob := strings.TrimSpace(input.Glob)
+	if strings.Contains(fileGlob, "**") {
+		return nil, errors.New("recursive ** in glob is not supported")
+	}
+
+	info, err := os.Stat(root)
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	if !info.IsDir() {
+		files = []string{root}
+	} else {
+		files, err = t.collectGrepFiles(ctx, root, fileGlob, maxFiles)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	matches := make([]grepMatch, 0, maxMatches)
+	filesScanned := 0
+	truncated := false
+	for _, filePath := range files {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if len(matches) >= maxMatches {
+			truncated = true
+			break
+		}
+		filesScanned++
+		fileMatches, fileTrunc, err := grepFile(ctx, filePath, matcher, maxMatches-len(matches))
+		if err != nil {
+			// Skip unreadable / binary files.
+			continue
+		}
+		matches = append(matches, fileMatches...)
+		if fileTrunc {
+			truncated = true
+		}
+	}
+	if len(matches) >= maxMatches {
+		truncated = true
+	}
+	return encodeResult(map[string]any{
+		"path": root, "pattern": pattern, "matches": matches,
+		"match_count": len(matches), "files_scanned": filesScanned,
+		"truncated": truncated,
+	})
+}
+
+type grepMatcher interface {
+	MatchString(s string) bool
+}
+
+type literalMatcher struct {
+	needle string
+}
+
+func (m literalMatcher) MatchString(s string) bool {
+	return strings.Contains(s, m.needle)
+}
+
+func compileGrepMatcher(pattern string, literal, caseInsensitive bool) (grepMatcher, error) {
+	if literal || !looksLikeRegex(pattern) {
+		needle := pattern
+		if caseInsensitive {
+			needle = strings.ToLower(needle)
+			return caseFoldLiteralMatcher{needle: needle}, nil
+		}
+		return literalMatcher{needle: needle}, nil
+	}
+	expr := pattern
+	if caseInsensitive {
+		expr = "(?i)" + expr
+	}
+	re, err := compileBoundedRegex(expr)
+	if err != nil {
+		return nil, err
+	}
+	return re, nil
+}
+
+type caseFoldLiteralMatcher struct {
+	needle string
+}
+
+func (m caseFoldLiteralMatcher) MatchString(s string) bool {
+	return strings.Contains(strings.ToLower(s), m.needle)
+}
+
+func looksLikeRegex(pattern string) bool {
+	return strings.ContainsAny(pattern, `.*+?[](){}^$|\`)
+}
+
+// compileBoundedRegex uses the standard library with a length guard already applied.
+func compileBoundedRegex(expr string) (grepMatcher, error) {
+	re, err := regexp.Compile(expr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid pattern: %w", err)
+	}
+	return regexpMatcher{re: re}, nil
+}
+
+type regexpMatcher struct {
+	re *regexp.Regexp
+}
+
+func (m regexpMatcher) MatchString(s string) bool {
+	return m.re.MatchString(s)
+}
+
+func (t *fileTool) collectGrepFiles(ctx context.Context, root, fileGlob string, maxFiles int) ([]string, error) {
+	var files []string
+	walked := 0
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if d.IsDir() {
+			name := d.Name()
+			if name == ".git" || name == "node_modules" || name == "vendor" || name == "bin" || name == "dist" {
+				if path != root {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+		walked++
+		if walked > grepMaxWalkFiles {
+			return errGrepWalkLimit
+		}
+		if fileGlob != "" {
+			ok, matchErr := filepath.Match(fileGlob, d.Name())
+			if matchErr != nil || !ok {
+				return nil
+			}
+		}
+		resolved, resErr := t.guard.Resolve(path)
+		if resErr != nil {
+			return nil
+		}
+		files = append(files, resolved)
+		if len(files) >= maxFiles {
+			return errGrepFileLimit
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, errGrepFileLimit) && !errors.Is(err, errGrepWalkLimit) {
+		return nil, err
+	}
+	sort.Strings(files)
+	return files, nil
+}
+
+var (
+	errGrepFileLimit = errors.New("grep file limit")
+	errGrepWalkLimit = errors.New("grep walk limit")
+)
+
+func grepFile(ctx context.Context, path string, matcher grepMatcher, remaining int) ([]grepMatch, bool, error) {
+	if remaining <= 0 {
+		return nil, true, nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, false, err
+	}
+	if info.Size() > grepMaxFileBytes {
+		return nil, false, errors.New("file too large")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, false, err
+	}
+	defer file.Close()
+	content, err := io.ReadAll(io.LimitReader(file, grepMaxFileBytes+1))
+	if err != nil {
+		return nil, false, err
+	}
+	if int64(len(content)) > grepMaxFileBytes {
+		return nil, false, errors.New("file too large")
+	}
+	if err := validateTextContent(content); err != nil {
+		return nil, false, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
+	lines := strings.Split(string(content), "\n")
+	out := make([]grepMatch, 0, minInt(remaining, 8))
+	truncated := false
+	for i, line := range lines {
+		if len(out) >= remaining {
+			truncated = true
+			break
+		}
+		// Drop trailing \r from CRLF.
+		line = strings.TrimSuffix(line, "\r")
+		if matcher.MatchString(line) {
+			out = append(out, grepMatch{Path: path, Line: i + 1, Content: truncateRunes(line, 240)})
+		}
+	}
+	return out, truncated, nil
+}
+
+func truncateRunes(s string, n int) string {
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n]) + "…"
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func (t *fileTool) mkdir(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 	var input struct {
 		Path string `json:"path"`
@@ -368,6 +746,8 @@ func fileDescription(name string) string {
 		"fs_read":  "Read a file inside configured filesystem roots." + pathHint,
 		"fs_list":  "List a directory inside configured filesystem roots." + pathHint,
 		"fs_stat":  "Read file metadata inside configured filesystem roots." + pathHint,
+		"fs_glob":  "Match files under a directory with a single-level glob (no **). Prefer over shell find." + pathHint,
+		"fs_grep":  "Search file contents under a path (literal or simple regex). Prefer over process_exec grep." + pathHint,
 		"fs_write": "Atomically write a file inside configured filesystem roots." + pathHint,
 		"fs_patch": "Replace an exact text occurrence in a file." + pathHint,
 		"fs_mkdir": "Create a directory inside configured filesystem roots." + pathHint,
@@ -380,6 +760,8 @@ func fileSchema(name string) string {
 		"fs_read":  `{"type":"object","additionalProperties":false,"required":["path"],"properties":{"path":` + pathProp + `,"max_bytes":{"type":"integer","minimum":1}}}`,
 		"fs_list":  `{"type":"object","additionalProperties":false,"required":["path"],"properties":{"path":` + pathProp + `}}`,
 		"fs_stat":  `{"type":"object","additionalProperties":false,"required":["path"],"properties":{"path":` + pathProp + `}}`,
+		"fs_glob":  `{"type":"object","additionalProperties":false,"required":["pattern"],"properties":{"pattern":{"type":"string"},"path":` + pathProp + `,"max":{"type":"integer","minimum":1,"maximum":1000}}}`,
+		"fs_grep":  `{"type":"object","additionalProperties":false,"required":["pattern"],"properties":{"pattern":{"type":"string"},"path":` + pathProp + `,"glob":{"type":"string"},"max_matches":{"type":"integer","minimum":1,"maximum":200},"max_files":{"type":"integer","minimum":1,"maximum":500},"literal":{"type":"boolean"},"case_insensitive":{"type":"boolean"}}}`,
 		"fs_write": `{"type":"object","additionalProperties":false,"required":["path","content"],"properties":{"path":` + pathProp + `,"content":{"type":"string"}}}`,
 		"fs_patch": `{"type":"object","additionalProperties":false,"required":["path","old","new"],"properties":{"path":` + pathProp + `,"old":{"type":"string"},"new":{"type":"string"},"replace_all":{"type":"boolean"}}}`,
 		"fs_mkdir": `{"type":"object","additionalProperties":false,"required":["path"],"properties":{"path":` + pathProp + `}}`,

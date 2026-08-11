@@ -143,9 +143,9 @@ func (m model) runActivity() runActivity {
 		return activityIdle
 	}
 	switch m.task.State {
-	case gatewayclient.TaskStateWaitingApproval, gatewayclient.TaskStatePaused:
+	case gatewayclient.TaskStatePaused:
 		return activityWaiting
-	case gatewayclient.TaskStateRunning, gatewayclient.TaskStatePlanning:
+	case gatewayclient.TaskStateRunning:
 		return activityActive
 	case gatewayclient.TaskStateCompleted, gatewayclient.TaskStateFailed, gatewayclient.TaskStateCancelled:
 		// fall through — check live runs
@@ -156,9 +156,6 @@ func (m model) runActivity() runActivity {
 		default:
 			return activityActive
 		}
-	}
-	if m.task.State == gatewayclient.TaskStateWaitingApproval {
-		return activityWaiting
 	}
 	switch m.task.State {
 	case gatewayclient.TaskStateCompleted, gatewayclient.TaskStateFailed, gatewayclient.TaskStateCancelled:
@@ -171,9 +168,6 @@ func (m model) runActivity() runActivity {
 func (m model) activityLabel() string {
 	switch m.runActivity() {
 	case activityActive:
-		if m.task != nil && m.task.State == gatewayclient.TaskStatePlanning {
-			return "planning"
-		}
 		return "running"
 	case activityWaiting:
 		if m.task != nil && m.task.State == gatewayclient.TaskStatePaused {

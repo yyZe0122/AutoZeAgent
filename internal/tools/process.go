@@ -23,13 +23,12 @@ type processInput struct {
 	Environment map[string]string `json:"environment,omitempty"`
 }
 
-func newProcessTool(roots []string, runner *executor.Runner) (Tool, error) {
+func newProcessTool(guard *PathGuard, runner *executor.Runner) (Tool, error) {
 	if runner == nil {
 		return nil, errors.New("process runner is required")
 	}
-	guard, err := NewPathGuard(roots)
-	if err != nil {
-		return nil, err
+	if guard == nil {
+		return nil, errors.New("path guard is required")
 	}
 	return &processTool{guard: guard, runner: runner}, nil
 }
@@ -73,6 +72,7 @@ func (t *processTool) Execute(ctx context.Context, raw json.RawMessage) (json.Ra
 	}
 	result, runErr := t.runner.Run(ctx, executor.Request{
 		Command: input.Command, Arguments: input.Arguments, Directory: directory, Environment: input.Environment,
+		CallID: toolCallIDFromContext(ctx),
 	})
 	encoded, encodeErr := encodeResult(result)
 	if encodeErr != nil {

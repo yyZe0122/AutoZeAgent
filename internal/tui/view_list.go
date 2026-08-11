@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -26,6 +27,8 @@ func (m *model) listLen() int {
 		return len(m.tasks)
 	case listSkills:
 		return len(m.skills)
+	case listPermissions:
+		return len(m.permissions)
 	default:
 		return 0
 	}
@@ -47,6 +50,12 @@ func (m *model) listTitle() string {
 			return "Skills"
 		}
 		return fmt.Sprintf("Skills (%d selected)", n)
+	case listPermissions:
+		n := len(m.permissions)
+		if n == 0 {
+			return "Permissions"
+		}
+		return fmt.Sprintf("Permissions (%d pending)", n)
 	default:
 		return "Picker"
 	}
@@ -64,6 +73,8 @@ func (m *model) listHint() string {
 		return "↑↓ select · Enter focus task · Esc close"
 	case listSkills:
 		return "↑↓ · Enter toggle · Esc done (applies to next submit)"
+	case listPermissions:
+		return "↑↓ · 1 once · 2 similar · 3 permanent · 4 deny · Enter cycle · Esc · /perm …"
 	default:
 		return "↑↓ · Enter · Esc"
 	}
@@ -127,6 +138,21 @@ func (m *model) listLine(i int) string {
 			sk.ID,
 			src,
 			styleDim.Render(truncate(label, 40)),
+		)
+	case listPermissions:
+		if i < 0 || i >= len(m.permissions) {
+			return ""
+		}
+		p := m.permissions[i]
+		path := p.Path
+		if path == "" {
+			path = "—"
+		}
+		return fmt.Sprintf("%s  %s  %s  %s",
+			shortID(p.ID),
+			p.ToolName,
+			styleDim.Render(truncate(path, 36)),
+			styleDim.Render(p.Risk),
 		)
 	default:
 		if i < 0 || i >= len(m.tasks) {
@@ -205,6 +231,8 @@ func renderPickerOverlay(m *model, width int) string {
 			empty = "No sessions yet. Type a message to start."
 		case listSkills:
 			empty = "No skills found. Add <id>/SKILL.md under config or .autozeagent/skills."
+		case listPermissions:
+			empty = "No pending permissions. (chat.permission.mode=ask + ungranted high-risk tools)"
 		default:
 			empty = "No tasks yet."
 		}
@@ -251,6 +279,9 @@ func (m *model) openList(kind listKind) {
 				break
 			}
 		}
+	case listPermissions:
+		m.permCycleIdx = 0
+		// Caller sets permGraceUntil when auto-opening; manual /perm has no grace.
 	case listSessions:
 		// Keep current task/timeline mounted; picker floats above.
 	case listSkills:
@@ -258,10 +289,40 @@ func (m *model) openList(kind listKind) {
 	}
 }
 
+func (m *model) openPermissionsWithGrace() {
+	m.openList(listPermissions)
+	m.permGraceUntil = time.Now().Add(permOpenGrace)
+	m.autoOpenedPermList = true
+}
+
 func (m *model) closeList() {
 	m.list = listNone
 	m.selectedIdx = 0
+	m.permCycleIdx = 0
+	m.permGraceUntil = time.Time{}
 }
+
+func (m *model) permInGrace() bool {
+	return m.list == listPermissions && !m.permGraceUntil.IsZero() && time.Now().Before(m.permGraceUntil)
+}
+
+// permHotkeyDecision maps 1–4 / o s p d to four-tier decisions (ADR-043/046).
+func permHotkeyDecision(key string) (decision string, ok bool) {
+	switch key {
+	case "1", "o":
+		return "allow_once", true
+	case "2", "s":
+		return "allow_similar", true
+	case "3", "p":
+		return "allow_permanent", true
+	case "4", "d":
+		return "deny", true
+	default:
+		return "", false
+	}
+}
+
+var permCycleOrder = []string{"allow_once", "allow_similar", "allow_permanent", "deny"}
 
 func (m *model) listEnter() tea.Cmd {
 	switch m.list {
@@ -330,6 +391,19 @@ func (m *model) listEnter() tea.Cmd {
 		}
 		m.errMsg = ""
 		return nil
+	case listPermissions:
+		if m.permInGrace() {
+			m.statusMsg = "permission open · wait a moment (grace) · 1–4 decide"
+			return nil
+		}
+		if m.selectedIdx < 0 || m.selectedIdx >= len(m.permissions) {
+			return nil
+		}
+		p := m.permissions[m.selectedIdx]
+		decision := permCycleOrder[m.permCycleIdx%len(permCycleOrder)]
+		m.permCycleIdx = (m.permCycleIdx + 1) % len(permCycleOrder)
+		m.busy = true
+		return m.permDecideCmd(p.ID, decision)
 	default:
 		return nil
 	}

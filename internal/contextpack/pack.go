@@ -58,7 +58,7 @@ func Pack(messages []providerapi.Message, opt PackOptions) PackResult {
 		opt.PressureTrigger = DefaultPressureTrigger
 	}
 
-	out := cloneMessages(messages)
+	out := RepairToolMessages(cloneMessages(messages))
 	result := PackResult{Budget: opt.Budget}
 
 	// L1: per-message body trim (same policy as agent.trimMessagesForProvider).

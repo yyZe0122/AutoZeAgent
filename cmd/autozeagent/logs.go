@@ -24,6 +24,8 @@ type logFilters struct {
 	level     string
 	component string
 	runID     string
+	sessionID string
+	taskID    string
 }
 
 func runLogs(args []string) error {
@@ -34,6 +36,8 @@ func runLogs(args []string) error {
 	level := flags.String("level", "", "filter by log level")
 	component := flags.String("component", "", "filter by component")
 	runID := flags.String("run", "", "filter by run ID")
+	sessionID := flags.String("session", "", "filter by session ID")
+	taskID := flags.String("task", "", "filter by task ID")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -64,6 +68,8 @@ func runLogs(args []string) error {
 		level:     levelValue,
 		component: strings.TrimSpace(*component),
 		runID:     strings.TrimSpace(*runID),
+		sessionID: strings.TrimSpace(*sessionID),
+		taskID:    strings.TrimSpace(*taskID),
 	})
 }
 
@@ -84,6 +90,8 @@ func writeLogs(output io.Writer, logPath string, filters logFilters) error {
 			Level     string `json:"level"`
 			Component string `json:"component"`
 			RunID     string `json:"run_id"`
+			SessionID string `json:"session_id"`
+			TaskID    string `json:"task_id"`
 		}
 		if err := json.Unmarshal([]byte(line), &record); err != nil {
 			continue
@@ -95,6 +103,12 @@ func writeLogs(output io.Writer, logPath string, filters logFilters) error {
 			continue
 		}
 		if filters.runID != "" && record.RunID != filters.runID {
+			continue
+		}
+		if filters.sessionID != "" && record.SessionID != filters.sessionID {
+			continue
+		}
+		if filters.taskID != "" && record.TaskID != filters.taskID {
 			continue
 		}
 		lines[matched%filters.tail] = line

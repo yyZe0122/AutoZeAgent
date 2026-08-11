@@ -38,6 +38,10 @@ func (f *fakeGateway) SessionMessages(context.Context, gatewayclient.SessionID, 
 	return nil, nil
 }
 
+func (f *fakeGateway) CompactSession(context.Context, gatewayclient.SessionID, string) (gatewayclient.CompactResult, error) {
+	return gatewayclient.CompactResult{Source: "llm"}, nil
+}
+
 func (f *fakeGateway) TaskMessages(context.Context, gatewayclient.TaskID, int) ([]gatewayclient.TranscriptMessage, error) {
 	return nil, nil
 }
@@ -104,8 +108,36 @@ func (f *fakeGateway) ListRuns(context.Context, gatewayclient.TaskID, int) ([]ga
 	return nil, nil
 }
 
+func (f *fakeGateway) RunUsage(_ context.Context, id gatewayclient.RunID) (gatewayclient.RunUsage, error) {
+	return gatewayclient.RunUsage{RunID: id}, nil
+}
+
 func (f *fakeGateway) ListJobs(context.Context, bool) ([]schedulerapi.Job, error) {
 	return f.jobs, nil
+}
+
+func (f *fakeGateway) ListPermissions(context.Context, string, int) ([]gatewayclient.Permission, error) {
+	return nil, nil
+}
+
+func (f *fakeGateway) DecidePermission(context.Context, string, string) (gatewayclient.Permission, error) {
+	return gatewayclient.Permission{}, nil
+}
+
+func (f *fakeGateway) DecidePermissionConfirm(context.Context, string, string, bool) (gatewayclient.Permission, error) {
+	return gatewayclient.Permission{}, nil
+}
+
+func (f *fakeGateway) ListMemory(context.Context, string, string, string, int) ([]gatewayclient.MemoryEntry, error) {
+	return nil, nil
+}
+
+func (f *fakeGateway) RefreshMemory(context.Context, string) error { return nil }
+
+func (f *fakeGateway) ForgetMemory(context.Context, string) error { return nil }
+
+func (f *fakeGateway) PromoteMemory(context.Context, string) (gatewayclient.MemoryEntry, error) {
+	return gatewayclient.MemoryEntry{}, nil
 }
 
 func (f *fakeGateway) CreateJob(_ context.Context, request schedulerapi.CreateRequest) (schedulerapi.Job, error) {

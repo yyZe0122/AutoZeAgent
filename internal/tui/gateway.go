@@ -24,6 +24,7 @@ type Gateway interface {
 	ListSessions(ctx context.Context, limit int) ([]gatewayclient.Session, error)
 	SessionMessages(ctx context.Context, id gatewayclient.SessionID, limit int) ([]gatewayclient.TranscriptMessage, error)
 	TaskMessages(ctx context.Context, id gatewayclient.TaskID, limit int) ([]gatewayclient.TranscriptMessage, error)
+	CompactSession(ctx context.Context, id gatewayclient.SessionID, focus string) (gatewayclient.CompactResult, error)
 
 	ListTasks(ctx context.Context, limit int) ([]gatewayclient.Task, error)
 	GetTask(ctx context.Context, id gatewayclient.TaskID) (gatewayclient.Task, error)
@@ -36,9 +37,19 @@ type Gateway interface {
 	FindPlanForTask(ctx context.Context, taskID gatewayclient.TaskID) (gatewayclient.Plan, error)
 
 	ListRuns(ctx context.Context, taskID gatewayclient.TaskID, limit int) ([]gatewayclient.Run, error)
+	RunUsage(ctx context.Context, id gatewayclient.RunID) (gatewayclient.RunUsage, error)
 
 	ListJobs(ctx context.Context, includeArchived bool) ([]schedulerapi.Job, error)
 	CreateJob(ctx context.Context, request schedulerapi.CreateRequest) (schedulerapi.Job, error)
+
+	ListPermissions(ctx context.Context, sessionID string, limit int) ([]gatewayclient.Permission, error)
+	DecidePermission(ctx context.Context, permissionID, decision string) (gatewayclient.Permission, error)
+	DecidePermissionConfirm(ctx context.Context, permissionID, decision string, confirm bool) (gatewayclient.Permission, error)
+
+	ListMemory(ctx context.Context, sessionID, query, kind string, limit int) ([]gatewayclient.MemoryEntry, error)
+	RefreshMemory(ctx context.Context, sessionID string) error
+	ForgetMemory(ctx context.Context, entryID string) error
+	PromoteMemory(ctx context.Context, entryID string) (gatewayclient.MemoryEntry, error)
 }
 
 // Compile-time check: production client satisfies the TUI surface.

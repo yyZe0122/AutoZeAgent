@@ -8,10 +8,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"autozeagent.local/autozeagent/internal/kernel"
+	"autozeagent.local/autozeagent/internal/runlog"
 	"autozeagent.local/autozeagent/internal/tasksubmission"
 	"autozeagent.local/autozeagent/pkg/schedulerapi"
 )
@@ -119,6 +121,12 @@ func (r *Runner) accept(ctx context.Context, request schedulerapi.TaskRequest) e
 		mode = kernel.ExecutionModeAgent
 	}
 	taskID := taskIDFor(request.IdempotencyKey)
+	ids := runlog.IDs{
+		SessionID: request.SessionID,
+		TaskID:    string(taskID),
+	}
+	slog.Info("scheduled task submit started", runlog.Attrs("scheduledtasks", "accept", "started", ids,
+		"job_id", request.JobID, "job_run_id", request.RunID, "execution_mode", string(mode))...)
 	result, err := r.submissions.Submit(ctx, tasksubmission.Request{
 		TaskID:        taskID,
 		SessionID:     kernel.SessionID(request.SessionID),
@@ -130,6 +138,8 @@ func (r *Runner) accept(ctx context.Context, request schedulerapi.TaskRequest) e
 		AllowExisting: true,
 	})
 	if err != nil {
+		slog.Error("scheduled task submit failed", runlog.Attrs("scheduledtasks", "accept", "failed", ids,
+			"job_run_id", request.RunID, "error", err)...)
 		ackErr := r.client.AcknowledgeScheduledTask(ctx, schedulerapi.AcknowledgeRequest{
 			RunID: request.RunID, LeaseID: request.LeaseID, Status: "failed", Error: err.Error(),
 		})
@@ -138,8 +148,15 @@ func (r *Runner) accept(ctx context.Context, request schedulerapi.TaskRequest) e
 	if err := r.client.AcknowledgeScheduledTask(ctx, schedulerapi.AcknowledgeRequest{
 		RunID: request.RunID, LeaseID: request.LeaseID, CoreTaskID: string(result.Task.ID), Status: "task_created",
 	}); err != nil {
+		slog.Error("scheduled task ack failed", runlog.Attrs("scheduledtasks", "ack", "failed", runlog.IDs{
+			SessionID: string(result.Task.SessionID), TaskID: string(result.Task.ID), RunID: string(result.RunID),
+		}, "job_run_id", request.RunID, "error", err)...)
 		return fmt.Errorf("acknowledge scheduled Core task %s: %w", result.Task.ID, err)
 	}
+	slog.Info("scheduled task accepted", runlog.Attrs("scheduledtasks", "accept", "succeeded", runlog.IDs{
+		SessionID: string(result.Task.SessionID), TaskID: string(result.Task.ID), RunID: string(result.RunID),
+		PlanID: string(result.PlanID),
+	}, "job_run_id", request.RunID)...)
 	return nil
 }
 

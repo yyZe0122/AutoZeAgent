@@ -346,8 +346,11 @@ func TestLoadChatParsesAndValidates(t *testing.T) {
 	if roots := chat.EffectiveRoots("/fallback"); len(roots) != 1 || roots[0] != "/abs/workspace" {
 		t.Fatalf("EffectiveRoots = %v", roots)
 	}
-	if !chat.CompactionEnabled() || chat.MaxIterationsOrDefault() != 8 {
+	if !chat.CompactionEnabled() || chat.MaxIterationsOrDefault() != 16 {
 		t.Fatalf("defaults: compaction=%v max_iter=%d", chat.CompactionEnabled(), chat.MaxIterationsOrDefault())
+	}
+	if chat.PermissionModeOrDefault() != PermissionModePreauth {
+		t.Fatalf("permission mode default = %q", chat.PermissionModeOrDefault())
 	}
 
 	bad := `{
@@ -415,5 +418,133 @@ func TestLoadChatCompactionAndMaxIterations(t *testing.T) {
 	}
 	if _, err := LoadChat(root); err == nil {
 		t.Fatal("expected max_iterations range error")
+	}
+}
+
+func TestLoadChatPermissionMode(t *testing.T) {
+	root := t.TempDir()
+	base := `{
+  "model": "deepseek/deepseek-chat",
+  "provider": {
+    "deepseek": {
+      "type": "openai-compatible",
+      "options": {"baseURL": "https://api.deepseek.com"},
+      "models": {"deepseek-chat": {}}
+    }
+  },
+  "chat": %s
+}`
+	write := func(chatJSON string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(root, Filename), []byte(fmt.Sprintf(base, chatJSON)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(`{"permission": {"mode": "ask"}}`)
+	chat, err := LoadChat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if chat.PermissionModeOrDefault() != PermissionModeAsk {
+		t.Fatalf("mode = %q", chat.PermissionModeOrDefault())
+	}
+	write(`{"permission": {"mode": "auto"}}`)
+	chat, err = LoadChat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// auto reserved → preauth until implemented
+	if chat.PermissionModeOrDefault() != PermissionModePreauth {
+		t.Fatalf("auto should resolve to preauth, got %q", chat.PermissionModeOrDefault())
+	}
+	write(`{"permission": {"mode": "wide-open"}}`)
+	if _, err := LoadChat(root); err == nil {
+		t.Fatal("expected invalid permission mode error")
+	}
+}
+
+func TestLoadModelRolesAndValidation(t *testing.T) {
+	root := t.TempDir()
+	base := `{
+  "model": "deepseek/deepseek-chat",
+  "models": %s,
+  "provider": {
+    "deepseek": {
+      "type": "openai-compatible",
+      "options": {"baseURL": "https://api.deepseek.com"},
+      "models": {
+        "deepseek-chat": {},
+        "deepseek-flash": {}
+      }
+    },
+    "openai": {
+      "type": "openai",
+      "options": {"baseURL": "https://api.openai.com"},
+      "models": {"gpt-cheap": {}}
+    }
+  }
+}`
+	write := func(modelsJSON string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(root, Filename), []byte(fmt.Sprintf(base, modelsJSON)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write(`{}`)
+	main, roles, err := LoadModelRoles(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if main != "deepseek/deepseek-chat" || roles != nil {
+		t.Fatalf("main=%q roles=%v", main, roles)
+	}
+	if _, err := Load(root); err != nil {
+		t.Fatal(err)
+	}
+
+	write(`{"compact": "openai/gpt-cheap", "subagent": "deepseek/deepseek-flash"}`)
+	main, roles, err = LoadModelRoles(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if main != "deepseek/deepseek-chat" {
+		t.Fatalf("main = %q", main)
+	}
+	if roles[RoleCompact] != "openai/gpt-cheap" || roles[RoleSubagent] != "deepseek/deepseek-flash" {
+		t.Fatalf("roles = %v", roles)
+	}
+	if _, err := Load(root); err != nil {
+		t.Fatal(err)
+	}
+
+	write(`{"compact": ""}`)
+	main, roles, err = LoadModelRoles(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if main != "deepseek/deepseek-chat" || roles != nil {
+		t.Fatalf("empty compact should omit role: main=%q roles=%v", main, roles)
+	}
+
+	write(`{"main": "deepseek/deepseek-flash"}`)
+	if _, err := Load(root); err == nil {
+		t.Fatal("expected models.main rejection")
+	}
+	write(`{"vision": "deepseek/deepseek-chat"}`)
+	if _, err := Load(root); err == nil {
+		t.Fatal("expected unknown role rejection")
+	}
+	write(`{"compact": "missing/model"}`)
+	if _, err := Load(root); err == nil {
+		t.Fatal("expected missing provider rejection")
+	}
+	write(`{"compact": "deepseek/nope"}`)
+	if _, err := Load(root); err == nil {
+		t.Fatal("expected missing model rejection")
+	}
+	write(`{"compact": "not-a-ref"}`)
+	if _, err := Load(root); err == nil {
+		t.Fatal("expected bad ref format rejection")
 	}
 }

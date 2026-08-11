@@ -37,6 +37,11 @@ func NewRepository(db *sql.DB) (*Repository, error) {
 }
 
 func (r *Repository) CreateSession(ctx context.Context, id SessionID, now time.Time) (Session, error) {
+	return r.CreateSessionWithWorkspace(ctx, id, "", now)
+}
+
+// CreateSessionWithWorkspace creates a session and stores workspace in metadata (ADR-046).
+func (r *Repository) CreateSessionWithWorkspace(ctx context.Context, id SessionID, workspace string, now time.Time) (Session, error) {
 	if ctx == nil {
 		return Session{}, errors.New("create session context is required")
 	}
@@ -44,6 +49,8 @@ func (r *Repository) CreateSession(ctx context.Context, id SessionID, now time.T
 	if err != nil {
 		return Session{}, err
 	}
+	workspace = strings.TrimSpace(workspace)
+	session.Workspace = workspace
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Session{}, fmt.Errorf("begin create session: %w", err)
@@ -53,11 +60,12 @@ func (r *Repository) CreateSession(ctx context.Context, id SessionID, now time.T
 	_, err = tx.ExecContext(ctx, `
         INSERT INTO sessions (
             session_id, state, created_at, updated_at, metadata, version
-        ) VALUES (?, ?, ?, ?, '{}', ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?)`,
 		session.ID,
 		session.State,
 		formatTime(session.CreatedAt),
 		formatTime(session.UpdatedAt),
+		sessionMetadataJSON(workspace),
 		session.Version,
 	)
 	if err != nil {
@@ -66,10 +74,18 @@ func (r *Repository) CreateSession(ctx context.Context, id SessionID, now time.T
 		}
 		return Session{}, fmt.Errorf("insert session: %w", err)
 	}
-	if _, err := r.events.AppendTx(ctx, tx, aggregateEvent(
+	details := map[string]any{"state": session.State}
+	if workspace != "" {
+		details["workspace"] = workspace
+	}
+	ev, err := aggregateEvent(
 		"session", string(session.ID), session.Version, "session.created", session.CreatedAt,
-		map[string]any{"state": session.State},
-	)); err != nil {
+		details,
+	)
+	if err != nil {
+		return Session{}, err
+	}
+	if _, err := r.events.AppendTx(ctx, tx, ev); err != nil {
 		return Session{}, fmt.Errorf("append session event: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -78,12 +94,39 @@ func (r *Repository) CreateSession(ctx context.Context, id SessionID, now time.T
 	return session, nil
 }
 
+// EnsureSessionWorkspace sets metadata.workspace when empty (first bind wins).
+func (r *Repository) EnsureSessionWorkspace(ctx context.Context, id SessionID, workspace string) error {
+	if ctx == nil {
+		return errors.New("ensure session workspace context is required")
+	}
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return nil
+	}
+	session, err := r.GetSession(ctx, id)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(session.Workspace) != "" {
+		return nil
+	}
+	_, err = r.db.ExecContext(ctx, `
+		UPDATE sessions SET metadata = ?, updated_at = ?
+		WHERE session_id = ?`,
+		sessionMetadataJSON(workspace), formatTime(time.Now().UTC()), id,
+	)
+	if err != nil {
+		return fmt.Errorf("set session workspace: %w", err)
+	}
+	return nil
+}
+
 func (r *Repository) GetSession(ctx context.Context, id SessionID) (Session, error) {
 	if ctx == nil {
 		return Session{}, errors.New("get session context is required")
 	}
 	return scanSession(r.db.QueryRowContext(ctx, `
-        SELECT session_id, state, version, created_at, updated_at
+        SELECT session_id, state, version, created_at, updated_at, metadata
         FROM sessions WHERE session_id = ?`, id))
 }
 
@@ -98,7 +141,7 @@ func (r *Repository) CloseSession(ctx context.Context, id SessionID, expectedVer
 	defer tx.Rollback()
 
 	session, err := scanSession(tx.QueryRowContext(ctx, `
-        SELECT session_id, state, version, created_at, updated_at
+        SELECT session_id, state, version, created_at, updated_at, metadata
         FROM sessions WHERE session_id = ?`, id))
 	if err != nil {
 		return Session{}, err
@@ -121,10 +164,14 @@ func (r *Repository) CloseSession(ctx context.Context, id SessionID, expectedVer
 	if err := requireOneVersionedRow(result, "session", string(id), expectedVersion); err != nil {
 		return Session{}, err
 	}
-	if _, err := r.events.AppendTx(ctx, tx, aggregateEvent(
+	ev, err := aggregateEvent(
 		"session", string(session.ID), session.Version, "session.state_changed", session.UpdatedAt,
 		map[string]any{"from_state": previous, "to_state": session.State},
-	)); err != nil {
+	)
+	if err != nil {
+		return Session{}, err
+	}
+	if _, err := r.events.AppendTx(ctx, tx, ev); err != nil {
 		return Session{}, fmt.Errorf("append session transition event: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -173,7 +220,7 @@ func (r *Repository) CreateTaskWithSkillSnapshot(
 	defer tx.Rollback()
 
 	session, err := scanSession(tx.QueryRowContext(ctx, `
-        SELECT session_id, state, version, created_at, updated_at
+        SELECT session_id, state, version, created_at, updated_at, metadata
         FROM sessions WHERE session_id = ?`, sessionID))
 	if err != nil {
 		return Task{}, err
@@ -210,7 +257,7 @@ func (r *Repository) CreateTaskWithSkillSnapshot(
 	); err != nil {
 		return Task{}, fmt.Errorf("insert task skill snapshot: %w", err)
 	}
-	if _, err := r.events.AppendTx(ctx, tx, aggregateEvent(
+	ev, err := aggregateEvent(
 		"task", string(task.ID), task.Version, "task.created", task.CreatedAt,
 		map[string]any{
 			"session_id":         task.SessionID,
@@ -221,137 +268,17 @@ func (r *Repository) CreateTaskWithSkillSnapshot(
 			"skill_ids":          snapshot.SkillIDs,
 			"skill_content_hash": snapshot.ContentHash,
 		},
-	)); err != nil {
+	)
+	if err != nil {
+		return Task{}, err
+	}
+	if _, err := r.events.AppendTx(ctx, tx, ev); err != nil {
 		return Task{}, fmt.Errorf("append task created event: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return Task{}, fmt.Errorf("commit create task: %w", err)
 	}
 	return task, nil
-}
-func (r *Repository) CreatePlanForApproval(
-	ctx context.Context,
-	id PlanID,
-	taskID TaskID,
-	expectedTaskVersion uint64,
-	revision uint64,
-	scopeHash string,
-	document []byte,
-	drafts []PlanStepDraft,
-	reason string,
-	now time.Time,
-) (Plan, Task, error) {
-	if ctx == nil {
-		return Plan{}, Task{}, errors.New("create plan for approval context is required")
-	}
-	if len(drafts) == 0 {
-		return Plan{}, Task{}, fmt.Errorf("%w: plan requires at least one step", ErrInvalidAggregate)
-	}
-	if len(document) == 0 || !json.Valid(document) {
-		return Plan{}, Task{}, fmt.Errorf("%w: canonical plan document must be valid JSON", ErrInvalidAggregate)
-	}
-	digest := sha256.Sum256(document)
-	if hex.EncodeToString(digest[:]) != strings.TrimSpace(scopeHash) {
-		return Plan{}, Task{}, fmt.Errorf("%w: canonical plan document hash differs from scope hash", ErrInvalidAggregate)
-	}
-	plan, err := NewPlan(id, taskID, revision, scopeHash, now)
-	if err != nil {
-		return Plan{}, Task{}, err
-	}
-	for _, draft := range drafts {
-		step, err := NewPlanStep(draft.ID, id, draft.Position, draft.Title, draft.EffectLevel, now)
-		if err != nil {
-			return Plan{}, Task{}, err
-		}
-		for _, existing := range plan.Steps {
-			if existing.ID == step.ID || existing.Position == step.Position {
-				return Plan{}, Task{}, fmt.Errorf("%w: duplicate plan step ID or position", ErrInvalidAggregate)
-			}
-		}
-		plan.Steps = append(plan.Steps, step)
-	}
-	if err := plan.Transition(PlanWaitingApproval, now); err != nil {
-		return Plan{}, Task{}, err
-	}
-
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return Plan{}, Task{}, fmt.Errorf("begin create plan for approval: %w", err)
-	}
-	defer tx.Rollback()
-
-	task, err := scanTask(tx.QueryRowContext(ctx, `
-        SELECT task_id, session_id, title, objective, state, execution_mode, version, created_at, updated_at
-        FROM tasks WHERE task_id = ?`, taskID))
-	if err != nil {
-		return Plan{}, Task{}, err
-	}
-	if task.Version != expectedTaskVersion {
-		return Plan{}, Task{}, versionConflict("task", string(taskID), expectedTaskVersion, task.Version)
-	}
-	previousTaskState := task.State
-	if err := task.Transition(TaskWaitingApproval, now); err != nil {
-		return Plan{}, Task{}, err
-	}
-
-	_, err = tx.ExecContext(ctx, `
-        INSERT INTO plans (plan_id, task_id, revision, state, scope_hash, created_at, version, updated_at, document)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		plan.ID, plan.TaskID, plan.Revision, plan.State, plan.ScopeHash,
-		formatTime(plan.CreatedAt), plan.Version, formatTime(plan.UpdatedAt), string(document),
-	)
-	if err != nil {
-		if existsByID(ctx, tx, "plans", "plan_id", string(plan.ID)) {
-			return Plan{}, Task{}, fmt.Errorf("%w: plan %s", ErrAlreadyExists, plan.ID)
-		}
-		return Plan{}, Task{}, fmt.Errorf("insert plan: %w", err)
-	}
-	for _, step := range plan.Steps {
-		_, err := tx.ExecContext(ctx, `
-            INSERT INTO plan_steps (
-                step_id, plan_id, position, title, state, effect_level, created_at, version, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			step.ID, step.PlanID, step.Position, step.Title, step.State, step.EffectLevel,
-			formatTime(step.CreatedAt), step.Version, formatTime(step.UpdatedAt),
-		)
-		if err != nil {
-			return Plan{}, Task{}, fmt.Errorf("insert plan step %s: %w", step.ID, err)
-		}
-	}
-	if _, err := r.events.AppendTx(ctx, tx, aggregateEvent(
-		"plan", string(plan.ID), plan.Version, "plan.created", plan.UpdatedAt,
-		map[string]any{
-			"task_id": plan.TaskID, "revision": plan.Revision, "state": plan.State,
-			"scope_hash": plan.ScopeHash, "step_count": len(plan.Steps),
-		},
-	)); err != nil {
-		return Plan{}, Task{}, fmt.Errorf("append plan creation event: %w", err)
-	}
-	result, err := tx.ExecContext(ctx, `
-        UPDATE tasks SET state = ?, version = ?, updated_at = ?
-        WHERE task_id = ? AND version = ?`,
-		task.State, task.Version, formatTime(task.UpdatedAt), task.ID, expectedTaskVersion,
-	)
-	if err != nil {
-		return Plan{}, Task{}, fmt.Errorf("update task for plan approval: %w", err)
-	}
-	if err := requireOneVersionedRow(result, "task", string(task.ID), expectedTaskVersion); err != nil {
-		return Plan{}, Task{}, err
-	}
-	if _, err := r.events.AppendTx(ctx, tx, aggregateEvent(
-		"task", string(task.ID), task.Version, "task.state_changed", task.UpdatedAt,
-		map[string]any{
-			"from_state": previousTaskState,
-			"to_state":   task.State,
-			"reason":     strings.TrimSpace(reason),
-		},
-	)); err != nil {
-		return Plan{}, Task{}, fmt.Errorf("append task transition event: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return Plan{}, Task{}, fmt.Errorf("commit create plan for approval: %w", err)
-	}
-	return plan, task, nil
 }
 
 // CreateApprovedWorkspacePlan persists a synthetic workspace plan already approved
@@ -456,14 +383,18 @@ func (r *Repository) CreateApprovedWorkspacePlan(
 			return Plan{}, Task{}, fmt.Errorf("insert workspace plan step %s: %w", step.ID, err)
 		}
 	}
-	if _, err := r.events.AppendTx(ctx, tx, aggregateEvent(
+	ev, err := aggregateEvent(
 		"plan", string(plan.ID), plan.Version, "plan.workspace_auth", plan.UpdatedAt,
 		map[string]any{
 			"task_id": plan.TaskID, "revision": plan.Revision, "state": plan.State,
 			"scope_hash": plan.ScopeHash, "step_count": len(plan.Steps),
 			"reason": strings.TrimSpace(reason),
 		},
-	)); err != nil {
+	)
+	if err != nil {
+		return Plan{}, Task{}, err
+	}
+	if _, err := r.events.AppendTx(ctx, tx, ev); err != nil {
 		return Plan{}, Task{}, fmt.Errorf("append workspace plan event: %w", err)
 	}
 	result, err := tx.ExecContext(ctx, `
@@ -477,14 +408,18 @@ func (r *Repository) CreateApprovedWorkspacePlan(
 	if err := requireOneVersionedRow(result, "task", string(task.ID), expectedTaskVersion); err != nil {
 		return Plan{}, Task{}, err
 	}
-	if _, err := r.events.AppendTx(ctx, tx, aggregateEvent(
+	ev, err = aggregateEvent(
 		"task", string(task.ID), task.Version, "task.state_changed", task.UpdatedAt,
 		map[string]any{
 			"from_state": previousTaskState,
 			"to_state":   task.State,
 			"reason":     strings.TrimSpace(reason),
 		},
-	)); err != nil {
+	)
+	if err != nil {
+		return Plan{}, Task{}, err
+	}
+	if _, err := r.events.AppendTx(ctx, tx, ev); err != nil {
 		return Plan{}, Task{}, fmt.Errorf("append task transition event: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -535,18 +470,6 @@ func (r *Repository) CancelTask(
 	})
 }
 
-func (r *Repository) ReplanFailedTask(
-	ctx context.Context,
-	id TaskID,
-	expectedVersion uint64,
-	reason string,
-	now time.Time,
-) (Task, error) {
-	return r.changeTask(ctx, id, expectedVersion, reason, now, func(task *Task) error {
-		return task.Replan(now)
-	})
-}
-
 func (r *Repository) changeTask(
 	ctx context.Context,
 	id TaskID,
@@ -589,14 +512,18 @@ func (r *Repository) changeTask(
 	if err := requireOneVersionedRow(result, "task", string(id), expectedVersion); err != nil {
 		return Task{}, err
 	}
-	if _, err := r.events.AppendTx(ctx, tx, aggregateEvent(
+	ev, err := aggregateEvent(
 		"task", string(task.ID), task.Version, "task.state_changed", task.UpdatedAt,
 		map[string]any{
 			"from_state": previous,
 			"to_state":   task.State,
 			"reason":     strings.TrimSpace(reason),
 		},
-	)); err != nil {
+	)
+	if err != nil {
+		return Task{}, err
+	}
+	if _, err := r.events.AppendTx(ctx, tx, ev); err != nil {
 		return Task{}, fmt.Errorf("append task transition event: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -605,46 +532,8 @@ func (r *Repository) changeTask(
 	return task, nil
 }
 
-// InitialPlanningTasks returns plan-mode tasks that entered planning but have
-// never persisted a plan. Agent-mode tasks briefly pass through planning while
-// chatsession creates a synthetic workspace plan; recovery must not hijack them
-// into the LLM Planner. Tasks that already have a plan are excluded.
-func (r *Repository) InitialPlanningTasks(ctx context.Context, limit int) ([]Task, error) {
-	if ctx == nil {
-		return nil, errors.New("initial planning tasks context is required")
-	}
-	if limit <= 0 || limit > 1000 {
-		return nil, errors.New("initial planning task limit must be between 1 and 1000")
-	}
-	rows, err := r.db.QueryContext(ctx, `
-        SELECT task_id, session_id, title, objective, state, execution_mode, version, created_at, updated_at
-        FROM tasks
-        WHERE state = ?
-          AND execution_mode = ?
-          AND NOT EXISTS (SELECT 1 FROM plans WHERE plans.task_id = tasks.task_id)
-        ORDER BY updated_at, task_id
-        LIMIT ?`, TaskPlanning, ExecutionModePlan, limit)
-	if err != nil {
-		return nil, fmt.Errorf("query initial planning tasks: %w", err)
-	}
-	defer rows.Close()
-
-	result := make([]Task, 0)
-	for rows.Next() {
-		task, err := scanTask(rows)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, task)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate initial planning tasks: %w", err)
-	}
-	return result, nil
-}
-
 // RecoverableTasks returns non-terminal tasks that Kernel must restore after a
-// process restart. Failed tasks are included so they can enter replanning.
+// process restart.
 func (r *Repository) RecoverableTasks(ctx context.Context, limit int) ([]Task, error) {
 	if ctx == nil {
 		return nil, errors.New("recover tasks context is required")
@@ -683,9 +572,9 @@ type scanner interface {
 
 func scanSession(row scanner) (Session, error) {
 	var session Session
-	var id, state, createdAt, updatedAt string
+	var id, state, createdAt, updatedAt, metadata string
 	var version int64
-	if err := row.Scan(&id, &state, &version, &createdAt, &updatedAt); err != nil {
+	if err := row.Scan(&id, &state, &version, &createdAt, &updatedAt, &metadata); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Session{}, ErrNotFound
 		}
@@ -704,7 +593,35 @@ func scanSession(row scanner) (Session, error) {
 	session.Version = uint64(version)
 	session.CreatedAt = created
 	session.UpdatedAt = updated
+	session.Workspace = workspaceFromMetadata(metadata)
 	return session, nil
+}
+
+func sessionMetadataJSON(workspace string) string {
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return "{}"
+	}
+	raw, err := json.Marshal(map[string]string{"workspace": workspace})
+	if err != nil {
+		return "{}"
+	}
+	return string(raw)
+}
+
+func workspaceFromMetadata(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "{}" {
+		return ""
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(raw), &meta); err != nil {
+		return ""
+	}
+	if v, ok := meta["workspace"].(string); ok {
+		return strings.TrimSpace(v)
+	}
+	return ""
 }
 
 func scanTask(row scanner) (Task, error) {
@@ -805,10 +722,10 @@ func aggregateEvent(
 	eventType string,
 	occurredAt time.Time,
 	payload any,
-) eventapi.Envelope {
+) (eventapi.Envelope, error) {
 	encoded, err := json.Marshal(payload)
 	if err != nil {
-		panic(fmt.Sprintf("marshal kernel event payload: %v", err))
+		return eventapi.Envelope{}, fmt.Errorf("marshal kernel event payload: %w", err)
 	}
 	return eventapi.Envelope{
 		ID:               fmt.Sprintf("kernel/%s/%s/v/%d", aggregateType, aggregateID, version),
@@ -820,7 +737,7 @@ func aggregateEvent(
 		Producer:         "kernel",
 		SchemaVersion:    1,
 		Payload:          encoded,
-	}
+	}, nil
 }
 
 func versionConflict(aggregate, id string, expected, actual uint64) error {

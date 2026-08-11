@@ -5,7 +5,16 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 )
+
+// CompactResult is the response from POST /v1/sessions/{id}/compact.
+type CompactResult struct {
+	SessionID    string `json:"session_id"`
+	Summary      string `json:"summary"`
+	Source       string `json:"source"`
+	CompactionID string `json:"compaction_id,omitempty"`
+}
 
 type sessionListResponse struct {
 	Sessions []Session `json:"sessions"`
@@ -57,4 +66,18 @@ func (c *Client) TaskMessages(ctx context.Context, id TaskID, limit int) ([]Tran
 		return nil, fmt.Errorf("task messages: %w", err)
 	}
 	return response.Messages, nil
+}
+
+// CompactSession forces durable head summarization for the session (manual /compact).
+func (c *Client) CompactSession(ctx context.Context, id SessionID, focus string) (CompactResult, error) {
+	var result CompactResult
+	body := map[string]string{}
+	if f := strings.TrimSpace(focus); f != "" {
+		body["focus"] = f
+	}
+	path := "/v1/sessions/" + url.PathEscape(string(id)) + "/compact"
+	if err := c.inner.DoJSON(ctx, http.MethodPost, path, body, &result); err != nil {
+		return CompactResult{}, fmt.Errorf("compact session: %w", err)
+	}
+	return result, nil
 }
