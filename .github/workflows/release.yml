@@ -51,11 +51,24 @@ jobs:
             exit 1
           }
 
+      - name: Resolve release notes
+        id: notes
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          notes="docs/changelog/${tag}.md"
+          if [ ! -f "$notes" ]; then
+            echo "Missing release notes file: $notes" >&2
+            echo "Add docs/changelog/${tag}.md before tagging." >&2
+            exit 1
+          fi
+          echo "path=$notes" >> "$GITHUB_OUTPUT"
+          echo "Using release notes: $notes"
+
       - name: Build and publish release
         uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean --parallelism 2
+          args: release --clean --parallelism 2 --release-notes=${{ steps.notes.outputs.path }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

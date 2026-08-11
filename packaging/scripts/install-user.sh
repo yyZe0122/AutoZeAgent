@@ -23,16 +23,6 @@ case "$(uname -m)" in
     ;;
 esac
 
-ASSET="autozeagent_${OS}_${ARCH}.tar.gz"
-if [ "$VERSION" = "latest" ]; then
-  BASE_URL="https://github.com/${REPOSITORY}/releases/latest/download"
-else
-  BASE_URL="https://github.com/${REPOSITORY}/releases/download/${VERSION}"
-fi
-
-TMP_DIR=$(mktemp -d 2>/dev/null || mktemp -d -t autozeagent)
-trap 'rm -rf "$TMP_DIR"' EXIT HUP INT TERM
-
 fetch() {
   url=$1
   output=$2
@@ -45,6 +35,42 @@ fetch() {
     exit 1
   fi
 }
+
+# Resolve GitHub release tag (v0.1.0) and numeric version for asset names (0.1.0).
+# Prefer an explicit AUTOZEAGENT_VERSION; "latest" uses the API (includes pre-releases
+# only when it is the newest release — pin VERSION for Pre-release installs).
+resolve_tag() {
+  if [ "$VERSION" != "latest" ]; then
+    echo "$VERSION"
+    return
+  fi
+  api="https://api.github.com/repos/${REPOSITORY}/releases/latest"
+  body=""
+  if command -v curl >/dev/null 2>&1; then
+    body=$(curl --fail --location --silent --show-error "$api" || true)
+  elif command -v wget >/dev/null 2>&1; then
+    body=$(wget -q -O - "$api" || true)
+  fi
+  tag=$(printf '%s' "$body" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+  if [ -z "$tag" ]; then
+    echo "Could not resolve latest release tag for ${REPOSITORY}." >&2
+    echo "Set AUTOZEAGENT_VERSION=vX.Y.Z (required for Pre-release-only repos)." >&2
+    exit 1
+  fi
+  echo "$tag"
+}
+
+TAG=$(resolve_tag)
+case "$TAG" in
+  v*) VER_NUM=${TAG#v} ;;
+  *) VER_NUM=$TAG; TAG="v$TAG" ;;
+esac
+
+ASSET="autozeagent_${VER_NUM}_${OS}_${ARCH}.tar.gz"
+BASE_URL="https://github.com/${REPOSITORY}/releases/download/${TAG}"
+
+TMP_DIR=$(mktemp -d 2>/dev/null || mktemp -d -t autozeagent)
+trap 'rm -rf "$TMP_DIR"' EXIT HUP INT TERM
 
 fetch "$BASE_URL/$ASSET" "$TMP_DIR/$ASSET"
 fetch "$BASE_URL/checksums.txt" "$TMP_DIR/checksums.txt"
@@ -80,7 +106,7 @@ else
 fi
 chmod 0755 "$INSTALL_DIR/autozeagent" "$INSTALL_DIR/autozeagentd" "$INSTALL_DIR/aze"
 
-echo "AutoZeAgent installed to $INSTALL_DIR."
+echo "AutoZeAgent ${TAG} installed to $INSTALL_DIR."
 echo "Interactive TUI: aze  (or autozeagent with no arguments)"
 case ":$PATH:" in
   *":$INSTALL_DIR:"*) ;;

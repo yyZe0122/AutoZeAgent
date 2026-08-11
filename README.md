@@ -29,28 +29,38 @@ Design KB: [`docs/architecture/`](docs/architecture/) · living backlog: [`docs/
 
 ## Install / 安装
 
-**Prebuilt (recommended):** [latest release](https://github.com/yyZe0122/AutoZeAgent/releases/latest) — `autozeagent`, `aze`, `autozeagentd` + `checksums.txt`.
+**Prebuilt (recommended):** [Releases](https://github.com/yyZe0122/AutoZeAgent/releases) — each archive holds **`autozeagent` + `aze` + `autozeagentd`**, plus configs/scripts and `checksums.txt`.
+
+Naming: `autozeagent_{version}_{os}_{arch}.tar.gz` / `.zip` (version without leading `v`). Example for **v0.1.0**:
 
 | Platform | AMD64 | ARM64 |
 | --- | --- | --- |
-| Windows | `autozeagent_windows_amd64.zip` | `autozeagent_windows_arm64.zip` |
-| Linux | `autozeagent_linux_amd64.tar.gz` | `autozeagent_linux_arm64.tar.gz` |
-| macOS | `autozeagent_darwin_amd64.tar.gz` | `autozeagent_darwin_arm64.tar.gz` |
+| Windows | `autozeagent_0.1.0_windows_amd64.zip` | `autozeagent_0.1.0_windows_arm64.zip` |
+| Linux | `autozeagent_0.1.0_linux_amd64.tar.gz` | `autozeagent_0.1.0_linux_arm64.tar.gz` |
+| macOS | `autozeagent_0.1.0_darwin_amd64.tar.gz` | `autozeagent_0.1.0_darwin_arm64.tar.gz` |
+
+Release notes: [`docs/changelog/`](docs/changelog/) · publication: [`docs/release.md`](docs/release.md).
 
 ### One-line (public releases) / 一键安装（公开 Release）
 
+Pin a tag when the release is **Pre-release** (`latest` may not point at it):
+
+Pre-release 时请固定版本（`latest` 可能不指向该 tag）：
+
 ```powershell
 # Windows (user PATH; no admin)
+$env:AUTOZEAGENT_VERSION = 'v0.1.0'
 irm "https://raw.githubusercontent.com/yyZe0122/AutoZeAgent/main/packaging/scripts/install.ps1" | iex
 ```
 
 ```bash
 # Linux / macOS → ~/.local/bin
+export AUTOZEAGENT_VERSION=v0.1.0
 curl -fsSL "https://raw.githubusercontent.com/yyZe0122/AutoZeAgent/main/packaging/scripts/install-user.sh" | sh
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Optional: `AUTOZEAGENT_VERSION`, `AUTOZEAGENT_INSTALL_DIR`.
+Optional: `AUTOZEAGENT_INSTALL_DIR`, `AUTOZEAGENT_REPOSITORY`.
 
 ```bash
 autozeagent version && autozeagentd --check

@@ -74,7 +74,9 @@ archives:
       - autozeagent
       - aze
       - autozeagentd
-    name_template: "autozeagent_{{ .Os }}_{{ .Arch }}"
+    # Versioned names (must match packaging/scripts/install-*.{sh,ps1}).
+    # Tag v0.1.0 → .Version is 0.1.0 (no leading v).
+    name_template: "autozeagent_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats:
       - tar.gz
     format_overrides:
@@ -104,11 +106,13 @@ checksum:
   name_template: checksums.txt
   algorithm: sha256
 
+release:
+  name_template: "AutoZeAgent v{{ .Version }}"
+  draft: false
+  # Alpha first binary: mark Pre-release on GitHub.
+  prerelease: true
+  mode: replace
+
+# Body comes from CI: goreleaser ... --release-notes=docs/changelog/<tag>.md
 changelog:
-  use: git
-  sort: asc
-  filters:
-    exclude:
-      - '^docs:'
-      - '^test:'
-      - '^chore:'
+  disable: true

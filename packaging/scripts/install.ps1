@@ -32,12 +32,33 @@ switch ($architecture.ToUpperInvariant()) {
     default { throw "Unsupported Windows architecture: $architecture" }
 }
 
-$asset = "autozeagent_windows_$arch.zip"
-if ($Version -eq 'latest') {
-    $baseUrl = "https://github.com/$Repository/releases/latest/download"
-} else {
-    $baseUrl = "https://github.com/$Repository/releases/download/$Version"
+function Get-ReleaseTag {
+    param([string]$Repo, [string]$Requested)
+    if ($Requested -ne 'latest') {
+        return $Requested
+    }
+    $api = "https://api.github.com/repos/$Repo/releases/latest"
+    try {
+        $rel = Invoke-RestMethod -UseBasicParsing -Uri $api
+    } catch {
+        throw "Could not resolve latest release for $Repo. Set AUTOZEAGENT_VERSION=vX.Y.Z (required for Pre-release-only repos). $_"
+    }
+    if ([string]::IsNullOrWhiteSpace($rel.tag_name)) {
+        throw "Latest release response missing tag_name for $Repo."
+    }
+    return [string]$rel.tag_name
 }
+
+$tag = Get-ReleaseTag -Repo $Repository -Requested $Version
+if ($tag.StartsWith('v')) {
+    $verNum = $tag.Substring(1)
+} else {
+    $verNum = $tag
+    $tag = "v$tag"
+}
+
+$asset = "autozeagent_${verNum}_windows_${arch}.zip"
+$baseUrl = "https://github.com/$Repository/releases/download/$tag"
 
 $tempDir = Join-Path ([IO.Path]::GetTempPath()) ('autozeagent-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $tempDir | Out-Null
@@ -90,7 +111,7 @@ try {
         }
     }
 
-    Write-Host "AutoZeAgent installed to $InstallDir."
+    Write-Host "AutoZeAgent $tag installed to $InstallDir."
     Write-Host 'Run: autozeagent version'
     Write-Host 'Interactive TUI: aze  (or autozeagent with no arguments)'
     Write-Host 'Open a new terminal if the command is not yet available.'

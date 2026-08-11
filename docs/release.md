@@ -2,47 +2,81 @@
 
 Moved out of the root README so install/run docs stay short. Chinese notes follow each block where useful.
 
-从根 README 外移：日常安装/运行见仓库根目录 README；本页仅发布与公开前审核。
+从根 README 外移：日常安装/运行见仓库根目录 README；本页仅发布、资产命名与公开前审核。
 
-## Private-first workflow / 私密优先
+## Asset naming / 资产命名
 
-The first GitHub repository must stay **private** until CI, package builds, secret scans, history review, and manual inspection of release assets all pass.
+GoReleaser builds **one archive per OS/arch**. Each archive contains **three binaries** (`autozeagent`, `aze`, `autozeagentd`) plus configs and packaging scripts.
 
-首个仓库须保持**私密**，直到 CI、安装包构建、密钥扫描、历史审查和 Release 产物人工检查全部通过。
+每个平台一个归档；归档内含 **三个二进制** 与配置/脚本。
 
-While private, only authorized collaborators should test cloned source and private release assets. Root README one-line installers that use `raw.githubusercontent.com` are for **public** releases, not the private review path.
+| Pattern | Example (tag `v0.1.0`) |
+| --- | --- |
+| `autozeagent_{version}_{os}_{arch}.tar.gz` | `autozeagent_0.1.0_linux_amd64.tar.gz` |
+| `autozeagent_{version}_windows_{arch}.zip` | `autozeagent_0.1.0_windows_amd64.zip` |
+| `checksums.txt` | SHA-256 of all archives (fixed name) |
 
-私密期间仅授权协作者测试；README 中基于 `raw.githubusercontent.com` 的一键安装面向**公开** Release。
+- `{version}` = tag **without** leading `v` (GoReleaser `.Version`).
+- Installers (`packaging/scripts/install-user.sh`, `install.ps1`) must stay in sync with this pattern.
+- Prefer `AUTOZEAGENT_VERSION=v0.1.0` when the release is marked **Pre-release** (GitHub `latest` may skip it).
 
-### Local release matrix / 本地发布矩阵
+## Release notes / 更新日志
 
-Build the full matrix before creating a GitHub Release:
+1. Add `docs/changelog/vX.Y.Z.md` (bilingual body: highlights, asset table, verify, install).
+2. Tag must match the file name: tag `v0.1.0` → `docs/changelog/v0.1.0.md`.
+3. CI runs: `goreleaser release … --release-notes=docs/changelog/${tag}.md`.
+4. Missing notes file **fails** the release job on purpose.
+
+## One-shot publish (root) / 一键发布
+
+On the build host, only **root** may commit, tag, and push (scheme A). Use:
 
 ```bash
-goreleaser release --snapshot --clean --parallelism 1
+sudo -i
+cd /home/yyze/projects/AutoZeAgent
+./scripts/publish-release.sh v0.1.0
+# if release pipeline files are still uncommitted:
+./scripts/publish-release.sh v0.1.0 --commit-paths release
 ```
 
-### Authenticated private download / 私密产物下载
+Script: [`scripts/publish-release.sh`](../scripts/publish-release.sh)
 
-```bash
-gh auth login
-gh release download v0.1.0 --repo yyZe0122/AutoZeAgent
-```
+| Flag | Meaning |
+| --- | --- |
+| `--commit-paths release` | Commit goreleaser/changelog/installers/README whitelist |
+| `--commit-paths all --yes` | Commit entire dirty tree (careful) |
+| `--snapshot-only` | `make check` + local GoReleaser snapshot only |
+| `--dry-run` | Print steps |
+| `--force-tag --yes` | Replace existing local/remote tag |
 
-### Tag and publish / 打标签发布
+Requires `docs/changelog/vX.Y.Z.md` for the tag. Pushes `main` then annotated tag; **CI** builds and uploads assets (script does not `gh release upload`).
 
-Only after the target commit passes the audit checklist below:
+## Tag and publish (manual) / 手动打标签
 
 ```bash
 git tag -a v0.1.0 -m "AutoZeAgent v0.1.0"
 git push origin v0.1.0
 ```
 
-（push 权限按本机约定：可读 yyze、推送 root。）
+Workflow (`.github/workflows/release.yml`):
 
-The tag workflow re-runs verification, builds six platform archives, writes `checksums.txt`, and publishes a GitHub Release (private while the repo is private).
+1. `go mod verify` + `make check`
+2. Shell / PowerShell installer syntax checks
+3. GoReleaser: six archives + `checksums.txt`, GitHub Release title `AutoZeAgent v0.1.0`, **prerelease: true** (see `.goreleaser.yaml`), body from changelog file
 
-标签工作流会再次验证、生成六平台包与 `checksums.txt`，并发布 Release（仓库私密时产物亦受限）。
+### Local matrix (optional) / 本地矩阵
+
+```bash
+goreleaser release --snapshot --clean --parallelism 1
+# dist/autozeagent_<snapshot-version>_{os}_{arch}.*
+```
+
+### Authenticated download / 私密下载
+
+```bash
+gh auth login
+gh release download v0.1.0 --repo yyZe0122/AutoZeAgent
+```
 
 ## Private-to-public audit checklist / 转公开清单
 
@@ -60,7 +94,7 @@ Complete every item before changing repository visibility.
   - 扫描历史与产物中的密钥与个人数据。
 - Authorized tester downloads every private release asset, verifies checksums, inspects layout, runs smoke checks.
   - 授权测试员下载并校验每个私密 Release 产物。
-- Replace placeholders, review GitHub settings/permissions, read [repository visibility docs](https://docs.github.com/repositories/managing-your-repositorys-settings-and-features/managing-repository-settings/setting-repository-visibility) before switching to public.
+- Replace placeholders, review GitHub settings/permissions, and read [repository visibility docs](https://docs.github.com/repositories/managing-your-repositorys-settings-and-features/managing-repository-settings/setting-repository-visibility) before switching to public.
   - 替换占位符、复核仓库设置，转公开前阅读 GitHub 可见性文档。
 
 ## Linux system install (brief) / 系统安装（摘要）
@@ -78,4 +112,4 @@ sudo systemctl enable --now autozeagent
 
 Details: [`packaging/install/systemd.md`](../packaging/install/systemd.md).
 
-Also see root [README](../README.md) for user install and run.
+Also see root [README](../README.md) and [v0.1.0 notes](changelog/v0.1.0.md).
