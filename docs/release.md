@@ -60,25 +60,32 @@ Script: [`scripts/publish-release.sh`](../scripts/publish-release.sh)
 
 Requires `docs/changelog/vX.Y.Z.md` and `GITHUB_TOKEN` for the default path.
 
-### GITHUB_TOKEN (local upload)
+### Auth for local upload / 本地上传鉴权
 
-Create at https://github.com/settings/tokens (do not commit the value).
+**推荐（root）：`gh auth login`**，脚本会自动 `gh auth token` → `GITHUB_TOKEN`。
+
+```bash
+# install gh (root), then:
+gh auth login
+# GitHub.com → HTTPS → Login with a web browser (or paste token)
+# When asked for scopes / fine-grained: need Contents + Workflows write
+# Classic login scopes must include: repo, workflow, read:org (as offered)
+```
+
+Or export a PAT yourself:
 
 | Type | Required access |
 | --- | --- |
-| **Fine-grained** (recommended) | This repo only; **Contents: Read and write**; Metadata: Read. Org + SAML → **Authorize** token for the org. |
-| **Classic** | Scope **`repo`** (private repositories). |
+| **Fine-grained** | This repo; **Contents: R/W**; **Workflows: R/W** (needed if tag commit touches `.github/workflows/`); Metadata: Read |
+| **Classic** | **`repo` + `workflow`** |
+
+Why **Workflows**? `POST /repos/.../releases` returns `403 Resource not accessible by personal access token` when the target commit modifies workflow files and the token cannot. Our pipeline often changes `release.yml`.
 
 ```bash
-export GITHUB_TOKEN='…'   # paste once; then unset when done
-# quick probe (expect 200):
-curl -sS -o /dev/null -w "%{http_code}\n" \
-  -H "Authorization: Bearer $GITHUB_TOKEN" \
-  -H "Accept: application/vnd.github+json" \
-  https://api.github.com/repos/yyZe0122/AutoZeAgent
+# optional manual token
+export GITHUB_TOKEN='…'
+# probe read (200) and create draft release (201, not 403) — see script 403 help
 ```
-
-`403 Resource not accessible by personal access token` on `POST .../releases` means the token lacks **Contents write** (or wrong repo/owner, or SSO not authorized)—not a GoReleaser packaging bug. Rebuild is fine; re-run with `--upload-only --skip-check --skip-snapshot` after fixing the token.
 
 If the Release page only shows **Source code** zip/tar.gz, binaries were never uploaded (Actions billing lock and/or failed local token). Use local upload with a correct PAT, not `--via-actions`, until billing is healthy.
 

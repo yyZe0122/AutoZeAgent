@@ -396,8 +396,26 @@ fi
 # --- Default: local GoReleaser upload ---
 [[ -n "$GR" ]] || GR=$(find_goreleaser) || die "goreleaser not found (install: go install github.com/goreleaser/goreleaser/v2@latest)"
 
+# Prefer explicit GITHUB_TOKEN; else use `gh auth token` after `gh auth login` (root).
 if [[ -z "${GITHUB_TOKEN:-}" ]]; then
-  die "GITHUB_TOKEN is required for local upload. Create a PAT (see docs/release.md), export GITHUB_TOKEN=..., re-run. Or --via-actions if Actions billing works."
+  GH_BIN=""
+  if command -v gh >/dev/null 2>&1; then
+    GH_BIN=$(command -v gh)
+  elif [[ -x /usr/local/bin/gh ]]; then
+    GH_BIN=/usr/local/bin/gh
+  elif [[ -x /home/yyze/.local/bin/gh ]]; then
+    GH_BIN=/home/yyze/.local/bin/gh
+  fi
+  if [[ -n "$GH_BIN" ]] && "$GH_BIN" auth status >/dev/null 2>&1; then
+    tok=$("$GH_BIN" auth token 2>/dev/null || true)
+    if [[ -n "$tok" ]]; then
+      export GITHUB_TOKEN="$tok"
+      log "using token from: $GH_BIN auth token"
+    fi
+  fi
+fi
+if [[ -z "${GITHUB_TOKEN:-}" ]]; then
+  die "No GITHUB_TOKEN. As root: install gh, run 'gh auth login' (repo+workflow scopes), then re-run. Or: export GITHUB_TOKEN=... See docs/release.md."
 fi
 
 log "local goreleaser release + upload ($GR)"
@@ -424,12 +442,23 @@ Token checklist:
     - Resource owner = your user (or org that owns the repo)
     - Repository access = Only select → this repo
     - Permissions → Repository → Contents: Read and write
+    - Permissions → Repository → Workflows: Read and write
+      (REQUIRED if the tagged commit changes .github/workflows/*;
+       otherwise POST /releases returns 403 "Resource not accessible...")
     - Permissions → Repository → Metadata: Read-only (default)
     - If the org uses SAML SSO: Authorize the token for that org
   Classic PAT:
-    - Scope: repo (full) for private repos
+    - Scopes: repo + workflow  (workflow is not optional when release.yml changed)
   Do not use a read-only or Actions-only token.
   Do not paste the token into git or chat.
+
+  Probe create-release permission (expect 201 or 422, not 403):
+    curl -sS -o /tmp/rel_probe.json -w "%{http_code}\\n" \\
+      -X POST -H "Authorization: Bearer $GITHUB_TOKEN" \\
+      -H "Accept: application/vnd.github+json" \\
+      https://api.github.com/repos/yyZe0122/AutoZeAgent/releases \\
+      -d '{"tag_name":"v0.0.0-permcheck","name":"permcheck","draft":true,"prerelease":true}'
+    # 201 = ok (then DELETE the draft); 403 = fix token; 422 = often tag/name clash but auth ok
 
 Test API access (should return 200, not 403/401):
   curl -sS -o /dev/null -w "%{http_code}\n" \
