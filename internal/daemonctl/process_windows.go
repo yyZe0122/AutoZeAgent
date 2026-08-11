@@ -35,13 +35,7 @@ func processAlive(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	// On Windows FindProcess always succeeds; probe with a zero-timeout wait via signal is unsupported.
-	// Use OpenProcess semantics via duplicate handle check: Signal is not implemented — try Kill with 0.
-	// os.FindProcess + syscall: send signal 0 is not available; use process handle wait.
+	// FindProcess always succeeds on Windows; probe via OpenProcess + exit code.
 	const stillActive = 259 // STILL_ACTIVE
 	handle, err := syscall.OpenProcess(syscall.PROCESS_QUERY_INFORMATION, false, uint32(pid))
 	if err != nil {
@@ -56,5 +50,6 @@ func processAlive(pid int) bool {
 }
 
 func isNoSuchProcess(err error) bool {
-	return errors.Is(err, os.ErrProcessDone) || errors.Is(err, syscall.ERROR_INVALID_PARAMETER)
+	// ERROR_INVALID_PARAMETER = 87 (invalid PID / handle semantics on Windows).
+	return errors.Is(err, os.ErrProcessDone) || errors.Is(err, syscall.Errno(87))
 }
