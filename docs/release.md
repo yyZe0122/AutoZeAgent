@@ -24,47 +24,49 @@ GoReleaser builds **one archive per OS/arch**. Each archive contains **three bin
 
 1. Add `docs/changelog/vX.Y.Z.md` (bilingual body: highlights, asset table, verify, install).
 2. Tag must match the file name: tag `v0.1.0` → `docs/changelog/v0.1.0.md`.
-3. CI runs: `goreleaser release … --release-notes=docs/changelog/${tag}.md`.
-4. Missing notes file **fails** the release job on purpose.
+3. Publish uses: `goreleaser release … --release-notes=docs/changelog/${tag}.md`.
+4. Missing notes file **fails** the publish script / CI on purpose.
 
 ## One-shot publish (root) / 一键发布
 
-On the build host, only **root** may commit, tag, and push (scheme A). Use:
+**Default = local build + upload** (no GitHub Actions minutes). Only **root** may commit/tag/push on this host (scheme A).
 
 ```bash
 sudo -i
 cd /home/yyze/projects/AutoZeAgent
+
+# PAT with repo (or fine-grained: contents read/write on this repo). Never commit the token.
+export GITHUB_TOKEN=ghp_...
+
 ./scripts/publish-release.sh v0.1.0
-# if release pipeline files are still uncommitted:
+# uncommitted release pipeline files:
 ./scripts/publish-release.sh v0.1.0 --commit-paths release
+# tag already on HEAD (e.g. after a failed Actions attempt):
+./scripts/publish-release.sh v0.1.0 --upload-only
 ```
 
 Script: [`scripts/publish-release.sh`](../scripts/publish-release.sh)
 
 | Flag | Meaning |
 | --- | --- |
+| *(default)* | `make check` → optional snapshot → push main/tag → **local** `goreleaser release` upload |
+| `--upload-only` | Skip push; HEAD must already be tag; local upload only |
+| `--via-actions` | Push tag only; let GitHub Actions publish (**needs billing OK**) |
 | `--commit-paths release` | Commit goreleaser/changelog/installers/README whitelist |
 | `--commit-paths all --yes` | Commit entire dirty tree (careful) |
-| `--snapshot-only` | `make check` + local GoReleaser snapshot only |
-| `--dry-run` | Print steps |
+| `--snapshot-only` | `make check` + snapshot only |
 | `--force-tag --yes` | Replace existing local/remote tag |
+| `--dry-run` | Print steps |
 
-Requires `docs/changelog/vX.Y.Z.md` for the tag. Pushes `main` then annotated tag; **CI** builds and uploads assets (script does not `gh release upload`).
+Requires `docs/changelog/vX.Y.Z.md` and `GITHUB_TOKEN` for the default path.
 
-## Tag and publish (manual) / 手动打标签
+If the Release page only shows **Source code** zip/tar.gz, Actions never uploaded binaries (e.g. *account locked due to billing issue*). Use the default local upload path, not `--via-actions`.
 
-```bash
-git tag -a v0.1.0 -m "AutoZeAgent v0.1.0"
-git push origin v0.1.0
-```
+### Optional: GitHub Actions / 可选 CI
 
-Workflow (`.github/workflows/release.yml`):
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) still runs on `v*` tags when Actions is enabled and billing is healthy. Prefer **local upload** when hosted runners are unavailable.
 
-1. `go mod verify` + `make check`
-2. Shell / PowerShell installer syntax checks
-3. GoReleaser: six archives + `checksums.txt`, GitHub Release title `AutoZeAgent v0.1.0`, **prerelease: true** (see `.goreleaser.yaml`), body from changelog file
-
-### Local matrix (optional) / 本地矩阵
+### Local snapshot only / 仅本地快照
 
 ```bash
 goreleaser release --snapshot --clean --parallelism 1
