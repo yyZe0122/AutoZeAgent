@@ -20,6 +20,9 @@ coverage.*
 *.pid
 *.sock
 
+# Runtime logs (daemon structured JSONL)
+*.jsonl
+
 # Secrets and machine-local configuration
 .env
 .env.*
@@ -36,6 +39,18 @@ coverage.*
 *.pfx
 *.jks
 .netrc
+permissions-trust.json
+**/permissions-trust.json
+.secrets/
+**/secrets.yaml
+**/credentials.json
+**/service-account.json
+**/token.json
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+id_github_*
 
 # Personal notes and agent workspaces
 /本地执行文档.md
