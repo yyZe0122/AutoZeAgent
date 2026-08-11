@@ -3,7 +3,6 @@
 ## 状态
 
 已接受，2026-07-17。  
-更新：2026-08-03（注入路径由 Planner 改为 `chatsession`；TUI `/skills` 产品路径）。
 
 ## 背景
 
@@ -43,7 +42,7 @@ Skill 选择是 Task 初次规划输入的一部分。Task 创建时必须在同
 
 注入只读快照，**从不**在运行时重新读取 `SKILL.md`。Skill 内容不写入 append-only Agent Run Record（属于任务输入，不是执行阶段对话恢复记录）。空选择不注入额外 system message。
 
-TUI `/skills`（及可选 CLI）通过 Gateway `GET /v1/skills` 列出元数据，并在 `POST /v1/tasks` 时附带显式 `skill_ids`；不按 objective 自动匹配。
+主路径为 TUI `/skills`：经 Gateway `GET /v1/skills` 列出元数据，并在 `POST /v1/tasks` 时附带显式 `skill_ids`；不按 objective 自动匹配。CLI `skills list` / `run --skill` **未实现**（可选尾巴，见 `docs/optimization/current.md`）。
 
 ## 后果
 

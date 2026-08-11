@@ -2,7 +2,7 @@
 
 - 状态：Accepted（已实现首版）
 - 日期：2026-07-31
-- 更新：2026-07-31 实现：migration 015、`task` 工具、`runmeta` context
+- 更新：2026-08-11 可观测：`GET /v1/runs/{id}/usage` 父 Run self+children 上卷（T5）
 
 ## 背景
 
@@ -28,6 +28,7 @@
 
 - Grant：子 Run **不得扩大**父的 workspace roots / 读写天花板；父为 plan（只读）则子只读。
 - 预算：子消耗计入父 Task 用量聚合；子 Run 使用父剩余 token/cost 上限（或明确份额），超限 fail-closed。
+- 可观测（读路径）：`corequery.RunUsage(runID)` = 本 Run + 一层 `parent_run_id` 子 Run 的 assistant usage 汇总；Gateway `GET /v1/runs/{id}/usage`；TUI Metrics 在存在子 Run 时展示 parent/children 旁注。不改预算策略。
 - 高风险工具：子 **不得** 自行扩大；仅当父 agent 已因 `chat.tools`（或其它合法 Grant）具备 `git_*` / `process_exec` 时，子才可经 `allowed_tools ⊆ 父` 继承。`http_get` 仍不由 chat 预授权。首版：子 allowed_tools ⊆ 父 allowed_tools。
 
 ### 工具 `task` 语义（首版）
@@ -45,9 +46,10 @@
 
 - 异步并行子 Run、跨 Task 子代理、新进程/模块框架。
 - 恢复交互 Planner 审批轨。
-- Job/cron 触发子 Run（cron 另案）。
+- Job/cron 直接生成子 Run（定时 Job 只提交顶层 chat task，见 ADR-042；子 Run 仍仅由模型 `task` 工具触发）。
 
 ## 后果
 
-- 实现前须落地 migration + kernel + `task` 工具 + 预算/深度测试。
-- TUI 父子树展示可选，非首版阻塞。
+- 首版已落地：migration 015、`task` 工具、`runmeta`、预算/深度 fail-closed。
+- TUI timeline 在子 Run 标题展示 `←parent` 短链；完整父子树 UI 非目标。
+- Run-scoped usage 上卷已落地（可观测 only）；Task 级 `…/usage` 仍含全部 runs。

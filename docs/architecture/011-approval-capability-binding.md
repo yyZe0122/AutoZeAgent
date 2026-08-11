@@ -2,7 +2,6 @@
 
 - 状态：Accepted
 - 日期：2026-07-13
-- 更新：2026-08-03（grant command/args 匹配 scheme A）
 
 ## 背景
 
@@ -18,7 +17,7 @@ Core 使用固定风险等级 R0-R4。默认策略只允许 R0 纯本地读取�
 
 Capability Grant 只能从已批准 Plan 中完全相同的 Capability Scope 签发，不能在签发时扩大范围。Grant 绑定 Approval、Task、Plan、Plan Hash、Step、Capability、路径、命令及参数、网络域名、最大运行时间、最大调用次数和过期时间。一次性授权固定为一次调用。每次授权校验成功后，在 SQLite 事务中原子增加使用次数；过期、撤销、次数耗尽或任一绑定字段不匹配时拒绝执行。
 
-**Command/Arguments 匹配（scheme A，P4.3）：**
+**Command/Arguments 匹配（scheme A）：**
 
 - Grant 的 `command` 为空 → 接受请求中的任意 command（仍受 path / capability / 时限等约束）；
 - Grant 的 `arguments` 为空 → 接受请求中的任意 arguments；
@@ -26,7 +25,7 @@ Capability Grant 只能从已批准 Plan 中完全相同的 Capability Scope 签
 
 因此 session chat 可为 `process_exec` / `git_*` 签发「仅路径范围」的预授权（空 command/args），而不必为每次动态 argv 预写死命令。非空 command/args 的 Grant 仍为精确匹配。路径、域名、次数、过期规则不变。
 
-批准、拒绝、修改请求、Grant 签发和 Grant 撤销均写入不可变 Core Event Store。审批与 Grant 元数据保存在 `core.db`，不依赖 Skill 正文或已删除的进程外模块。Session chat 的 workspace 预授权（ADR-038，含可选 `chat.tools`）同样写入真实 Grant。
+批准、拒绝、修改请求、Grant 签发和 Grant 撤销均写入不可变 Core Event Store。审批与 Grant 元数据保存在 `core.db`，不依赖 Skill 正文或已删除的进程外模块。Session chat 的 workspace 预授权（ADR-038/046，含可选 `chat.tools` 与 ask 模式 `allow_once|similar|permanent`）同样写入真实 Grant；永久信任表在 ConfigDir，不替代 Grant 校验。
 
 ## 边界
 

@@ -65,8 +65,8 @@
     <text x="1186" y="320" text-anchor="end" class="small">Control plane / 控制平面</text>
 
     <rect x="98" y="382" width="240" height="118" rx="14" fill="#0f1c35" stroke="#60a5fa"/>
-    <text x="218" y="420" text-anchor="middle" class="box-title">Planner &amp; Agent</text>
-    <text x="218" y="446" text-anchor="middle" class="box-subtitle">规划器与智能体</text>
+    <text x="218" y="420" text-anchor="middle" class="box-title">chatsession · agent</text>
+    <text x="218" y="446" text-anchor="middle" class="box-subtitle">双轨会话与智能体</text>
     <text x="218" y="472" text-anchor="middle" class="small">Bounded execution / 有界执行</text>
 
     <rect x="379" y="382" width="220" height="118" rx="14" fill="#0f1c35" stroke="#a78bfa"/>

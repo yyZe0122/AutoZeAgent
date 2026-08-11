@@ -3,6 +3,8 @@
 - 状态：Accepted
 - 日期：2026-07-13
 - 更新：2026-07-30
+- 更新：2026-08-03（双轨 chat / chat-native Job）
+- 更新：2026-08-10（session workspace / permission tiers，ADR-046）
 
 ## 保护目标
 
@@ -11,13 +13,16 @@
 ## 当前威胁
 
 - Prompt injection 导致工具滥用或越权路径/命令；
-- 计划批准后参数被替换（须 Plan Hash + Grant 绑定）；
+- Grant 绑定 Plan Hash 后参数被替换（须 Hash + Grant 匹配）；
 - 路径穿越和符号链接/junction 逃逸；
-- Session chat 预授权过宽（默认应只读 workspace；见 ADR-038）；
-- 本地 Gateway 被同机其它用户滥用（socket 权限 / Windows token）；
-- Scheduler 或 Gateway 试图绕过 Broker；
+- Session chat 预授权过宽（plan 只读；agent 写受 `chat.allow_write`；git/process 默认关，见 ADR-038）；
+- `chat.workspace.allow_all` 或过宽 `allow`/唤起目录（默认 session 根 = client cwd，ADR-046）；
+- `allow_permanent` 信任表（ConfigDir `permissions-trust.json`）被误批后跨会话复用；
+- 无人值守 cron agent（ADR-042）与交互 agent 同权，误配 roots/`chat.tools` 扩大面；Job 路径不 wait permission（fail closed）；
+- 本地 Gateway 被同机其它用户滥用（socket 权限 / Windows token；任意本地客户端可 decide permission）；
+- Scheduler 或 Gateway 试图绕过 Broker（Job 只提交 chat task，不执行 tool）；
 - 日志泄漏 Secret；
-- SSRF（HTTP 工具域名审批 ≠ 完整 SSRF 防护）。
+- SSRF（HTTP 工具域名审批 ≠ 完整 SSRF 防护；`http_get` 仍不 chat 预授权）。
 
 ## 历史威胁（已删除架构）
 

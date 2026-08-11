@@ -6,7 +6,7 @@
 
 ## 背景
 
-Job 表、claim/lease 与 list/pause/resume/cancel 已存在（ADR-017），但 `POST /v1/jobs` 与 `scheduledtasks` runner 在删除交互 Planner 后停用，旧桥接强制 `plan` / `requires_plan`，与双轨 chat 不一致。
+Job 表、claim/lease 与 list/pause/resume/cancel 已存在（ADR-017）。本 ADR 将到期 fire 定义为 chat-native 提交（经 `tasksubmission` → `chatsession`），默认 `execution_mode=agent`。
 
 ## 决策
 

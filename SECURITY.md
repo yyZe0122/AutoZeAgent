@@ -25,10 +25,11 @@ Reports involving the following areas are especially useful:
 
 - policy, approval, or capability-grant bypasses;
 - filesystem traversal, symlink, or junction escapes;
-- command execution outside the Tool Broker;
+- command execution outside the Tool Broker (including MCP tools);
 - local gateway authentication or endpoint discovery;
 - secret resolution, log redaction, or configuration disclosure;
 - task/run isolation, recovery, and duplicate tool execution;
+- scheduled job create/fire that bypasses chat grants or the Tool Broker;
 - SQLite integrity, audit tampering, or unauthorized state changes;
 - denial of service caused by unbounded provider or tool behavior.
 
@@ -37,8 +38,8 @@ Reports involving the following areas are especially useful:
 AutoZeAgent can execute tools and communicate with external model providers. Operators should:
 
 - run it with the least operating-system privilege required;
-- restrict allowed filesystem roots and capabilities;
-- review plans and approval requests;
+- restrict filesystem access via `chat.workspace` / `chat.roots` (default session root = launch directory; avoid `allow_all` unless you accept full local-user path reach);
+- verify policy, path ceiling, and capability grants; when `chat.permission.mode=ask`, decide tool-call permissions via TUI `/perm once|similar|permanent|deny` (permanent writes ConfigDir trust; not whole-plan approval);
 - store secrets in environment variables or protected files;
 - keep local configuration, databases, logs, runtime endpoints, and artifacts out of source control;
 - rotate credentials immediately if accidental disclosure is suspected.

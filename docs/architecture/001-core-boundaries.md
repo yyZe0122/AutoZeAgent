@@ -2,11 +2,11 @@
 
 - 状态：Accepted
 - 日期：2026-07-13
-- 更新：2026-07-31
+- 更新：2026-08-03（chat-native Job runner，ADR-042）
 
 ## 决策
 
-AutoZeAgent 的生产核心是一个 `autozeagentd` 进程、一个 `autozeagent` CLI（含 TUI）和一个 `core.db`。Core 直接组合 Kernel、Chat Session（agent/plan 双轨）、Agent Runner、Policy、Approval/Grant 领域、Tool Broker、Scheduler（表与 list；runner 已停）、Event、Audit、Skill Catalog、Gateway 以及窄应用服务（`tasksubmission` / `chatsession` / `taskcontrol` / `corequery`）。双轨见 ADR-038。
+AutoZeAgent 的生产核心是一个 `autozeagentd` 进程、一个 `autozeagent` CLI（含 TUI）和一个 `core.db`。Core 直接组合 Kernel、Chat Session（agent/plan 双轨）、Agent Runner、Policy、Approval/Grant 领域、Tool Broker、Scheduler（in-process store + chat-native `scheduledtasks` runner）、Event、Audit、Skill Catalog、MCP（经 Broker）、Gateway 以及窄应用服务（`tasksubmission` / `chatsession` / `taskcontrol` / `corequery`）。双轨见 ADR-038；定时 Job 见 ADR-042。
 
 Task、Plan、Run 和 Job 是持久化领域对象，不是操作系统进程。需要并发时优先使用受 `context.Context` 控制的 goroutine；只有实际 Tool 执行需要时才启动外部进程。
 

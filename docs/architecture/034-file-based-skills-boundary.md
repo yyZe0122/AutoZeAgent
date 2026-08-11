@@ -36,7 +36,7 @@ Skill 是指令内容，不是授权来源。frontmatter 和正文不能创建 A
 
 ## 迁移
 
-真实调用入口迁移和回归已完成。2026-07-17 已删除 `cmd/autozeagent-skills`、`internal/skills`、`pkg/skillsapi`、`migrations/skills`、配置示例及构建/打包入口；架构测试阻止这些 legacy artifact 恢复。已有用户环境中的 `skills.db` 不自动迁移、不读取，也不作为当前文件型 Catalog 的事实源。
+独立 Skills 进程 / `skills.db` / 相关命令与迁移已删除；架构测试阻止恢复。已有用户环境中的 `skills.db` 不自动迁移、不读取。
 
 ## 后果
 

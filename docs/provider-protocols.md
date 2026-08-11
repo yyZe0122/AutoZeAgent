@@ -14,7 +14,21 @@ Configuration is loaded **only** from the OS config directory (`paths.Layout.Con
 
 On first start, if ConfigDir has no file, the daemon may **migrate** once from the process working directory or data dir (legacy project `autozeagent.local.json`), otherwise it writes a default template with `{env:…}` placeholders (no secrets). Project directories are **not** searched for ongoing loads.
 
-The top-level `model` must use `provider-id/model-id` format.
+The top-level `model` must use `provider-id/model-id` format. It is the **main** chat model.
+
+Optional top-level `models` maps roles to other catalog refs (ADR-045). Unset roles fall back to `model`:
+
+```json
+{
+  "model": "deepseek/deepseek-chat",
+  "models": {
+    "subagent": "deepseek/deepseek-chat",
+    "compact": "openai/gpt-cheap"
+  }
+}
+```
+
+Allowed keys: `subagent` (`task` child runs), `compact` (session head summarization). Do not set `models.main`. TUI `/model` only rewrites top-level `model`; changing `models.*` requires a daemon restart. Unknown keys or refs outside the catalog fail config load.
 
 ## Protocol families and aliases
 
