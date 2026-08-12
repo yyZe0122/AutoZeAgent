@@ -3,19 +3,19 @@ package tui
 import "github.com/charmbracelet/lipgloss"
 
 var (
-	colorAccent    lipgloss.Color
-	colorDim       lipgloss.Color
-	colorOK        lipgloss.Color
-	colorWarn      lipgloss.Color
-	colorErr       lipgloss.Color
-	colorMuted     lipgloss.Color
-	colorBorder    lipgloss.Color
-	colorHeart     lipgloss.Color
-	colorTitle     lipgloss.Color
-	colorInput     lipgloss.Color
-	colorSurface   lipgloss.Color
-	colorModeAgent lipgloss.Color
-	colorModePlan  lipgloss.Color
+	colorAccent          lipgloss.Color
+	colorDim             lipgloss.Color
+	colorOK              lipgloss.Color
+	colorWarn            lipgloss.Color
+	colorErr             lipgloss.Color
+	colorMuted           lipgloss.Color
+	colorBorder          lipgloss.Color
+	colorHeart           lipgloss.Color
+	colorTitle           lipgloss.Color
+	colorInput           lipgloss.Color
+	colorSurface         lipgloss.Color
+	colorModeAgent       lipgloss.Color
+	colorModePlan        lipgloss.Color
 	colorBubbleUser      lipgloss.Color
 	colorBubbleAssistant lipgloss.Color
 	colorBubbleThinking  lipgloss.Color

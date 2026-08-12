@@ -220,7 +220,7 @@ func run(args []string) error {
 	}
 	permService, err := toolpermission.New(toolpermission.Config{
 		Events: eventStore,
-		DB: database.SQL(), Store: permStore, Approvals: approvalRepository,
+		DB:     database.SQL(), Store: permStore, Approvals: approvalRepository,
 	})
 	if err != nil {
 		return err

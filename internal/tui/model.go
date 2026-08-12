@@ -38,7 +38,7 @@ const (
 	listPermissions // pending tool-call permissions (ADR-043)
 )
 
-	const (
+const (
 	runPollInterval   = 2 * time.Second
 	permPollInterval  = 2 * time.Second
 	animInterval      = 400 * time.Millisecond
@@ -51,10 +51,10 @@ const (
 	timelineBodyMaxLines = 12
 	timelineBodyMaxChars = 2400
 	// thinking: live shows tail only; finished collapses to one-line summary.
-	thinkingLiveMaxLines  = 5
-	thinkingLiveMaxChars  = 800
-	thinkingFoldMaxLines  = 3
-	thinkingFoldMaxChars  = 400
+	thinkingLiveMaxLines = 5
+	thinkingLiveMaxChars = 800
+	thinkingFoldMaxLines = 3
+	thinkingFoldMaxChars = 400
 	// tool results: default folded summary.
 	toolResultMaxLines = 6
 	toolResultMaxChars = 1200
@@ -96,7 +96,7 @@ type model struct {
 	jobs        []schedulerapi.Job
 	skills      []gatewayclient.Skill
 	commands    []gatewayclient.ChatCommand
-	permissions   []gatewayclient.Permission
+	permissions []gatewayclient.Permission
 	// selectedSkillIDs is draft selection for the next task submit (kept across turns).
 	selectedSkillIDs []string
 	sessionID        gatewayclient.SessionID
