@@ -110,12 +110,38 @@ func TestConfigModelPutSwitchesModel(t *testing.T) {
 }
 
 func TestConfigModelPutUnavailableWithoutSwitcher(t *testing.T) {
-	api := &API{modelConfig: ModelConfig{Model: "a/b", Models: []string{"a/b"}}}
+	api := &API{
+		modelConfig:      ModelConfig{Model: "a/b", Models: []string{"a/b"}},
+		modelConfigError: "model \"x\" is not in provider \"deepseek\" catalog",
+	}
 	request := httptest.NewRequest(http.MethodPut, "/v1/config/model", bytes.NewBufferString(`{"model":"a/c"}`))
 	response := httptest.NewRecorder()
 	api.ServeHTTP(response, request)
 	if response.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), "catalog") {
+		t.Fatalf("expected load error in body: %s", response.Body.String())
+	}
+}
+
+func TestConfigModelGetSurfacesLoadError(t *testing.T) {
+	api := &API{
+		modelConfig:      ModelConfig{Model: "a/b", Models: []string{"a/b"}},
+		modelConfigError: "environment variable DEEPSEEK_API_KEY is unavailable",
+	}
+	request := httptest.NewRequest(http.MethodGet, "/v1/config/model", nil)
+	response := httptest.NewRecorder()
+	api.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d", response.Code)
+	}
+	var body ModelConfig
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Ready || !strings.Contains(body.Error, "DEEPSEEK_API_KEY") {
+		t.Fatalf("body = %+v", body)
 	}
 }
 

@@ -17,22 +17,26 @@ const daemonControlTimeout = 30 * time.Second
 
 func runDaemon(args []string) error {
 	if len(args) < 1 {
-		return errors.New("use ymz daemon start|stop|status [--mode user|system]")
+		return errors.New("use ymz start|stop|restart|status (or ymz daemon start|stop|restart|status) [--mode user|system]")
 	}
-	action := args[0]
+	return runDaemonAction(args[0], args[1:])
+}
+
+// runDaemonAction runs start|stop|status|restart with optional --mode flags.
+func runDaemonAction(action string, args []string) error {
 	switch action {
-	case "start", "stop", "status":
+	case "start", "stop", "status", "restart":
 	default:
-		return errors.New("use ymz daemon start|stop|status [--mode user|system]")
+		return errors.New("use ymz start|stop|restart|status (or ymz daemon start|stop|restart|status) [--mode user|system]")
 	}
 	flags := flag.NewFlagSet("daemon "+action, flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	modeValue := flags.String("mode", string(paths.ModeUser), "runtime mode: user or system")
-	if err := flags.Parse(args[1:]); err != nil {
+	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
-		return fmt.Errorf("use ymz daemon %s [--mode user|system]", action)
+		return fmt.Errorf("use ymz %s [--mode user|system]", action)
 	}
 	mode, err := paths.ParseMode(*modeValue)
 	if err != nil {
@@ -64,8 +68,20 @@ func runDaemon(args []string) error {
 		}
 		fmt.Println(string(encoded))
 		return nil
+	case "restart":
+		if err := daemonctl.Stop(ctx, mode); err != nil {
+			return err
+		}
+		// Fresh context so stop wait does not consume the whole budget for start.
+		startCtx, startCancel := context.WithTimeout(context.Background(), daemonControlTimeout)
+		defer startCancel()
+		if err := daemonctl.Start(startCtx, mode); err != nil {
+			return err
+		}
+		fmt.Println("daemon restarted")
+		return nil
 	default:
-		return errors.New("use ymz daemon start|stop|status [--mode user|system]")
+		return errors.New("use ymz start|stop|restart|status [--mode user|system]")
 	}
 }
 

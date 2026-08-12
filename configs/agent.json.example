@@ -15,9 +15,42 @@
       "models": {
         "deepseek-chat": {
           "name": "DeepSeek Chat",
-          "temperature": 0.2,
           "maxTokens": 4096,
           "contextWindow": 65536
+        },
+        "deepseek-v4-flash": {
+          "name": "DeepSeek Flash",
+          "maxTokens": 8192,
+          "contextWindow": 128000
+        }
+      }
+    },
+    "provider-a": {
+      "type": "openai-compatible",
+      "options": {
+        "baseURL": "https://a.example.com/v1",
+        "apiKey": "{env:PROVIDER_A_API_KEY}"
+      },
+      "models": {
+        "shared-model": {
+          "name": "Same bare id via supplier A (select provider-a/shared-model)",
+          "maxTokens": 8192,
+          "contextWindow": 128000
+        }
+      }
+    },
+    "provider-b": {
+      "type": "openai-compatible",
+      "options": {
+        "baseURL": "https://b.example.com/v1",
+        "apiKey": "{env:PROVIDER_B_API_KEY}"
+      },
+      "models": {
+        "shared-model": {
+          "name": "Same bare id via supplier B"
+        },
+        "other-model": {
+          "name": "Only on B"
         }
       }
     },

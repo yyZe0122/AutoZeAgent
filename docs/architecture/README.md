@@ -35,6 +35,7 @@ Do **not** restore deleted pieces: Module Runtime/Supervisor, out-of-process Mem
 | 14 | [045](045-model-roles.md) | Optional model roles (main / subagent / compact) |
 | 15 | [046](046-session-workspace-and-permission-tiers.md) | Session workspace + permission tiers |
 | 16 | [047](047-structured-logging-and-debug-chain.md) | Structured logs + real-machine debug chain |
+| 17 | [048](048-provider-config-hot-reload.md) | Provider config watch + main-stack hot-reload |
 
 Also useful: [003](003-policy-invariants.md) policy, [011](011-approval-capability-binding.md) grants (domain), [013](013-provider-planner-boundary.md) provider boundary (**interactive Planner superseded**), [017](017-scheduler-module-boundary.md) in-process scheduler (+ [042](042-chat-native-jobs.md) product semantics), [034](034-file-based-skills-boundary.md) skills, [035](035-standard-protocol-tool-boundary.md) protocol tools.
 
@@ -83,6 +84,7 @@ Provider wire formats: [`docs/provider-protocols.md`](../provider-protocols.md).
 | 045 | Model roles | Optional `models.subagent` / `models.compact`; fallback to top-level `model` |
 | 046 | Session workspace + permission tiers | Client cwd session root; once/similar/permanent/deny |
 | 047 | Structured logging / debug chain | slog JSON stage boundaries; `ymz logs`; tests vs real-machine |
+| 048 | Provider config hot-reload | Main stack only; no late-bind chat |
 
 Missing numbers (002, 005, 014–015, 019–021, 025, …) are **historical gaps**, not missing files to recreate.
 

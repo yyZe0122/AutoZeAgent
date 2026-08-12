@@ -20,6 +20,10 @@ type ModelConfig struct {
 	Models []string `json:"models"`
 	// ContextWindow is the selected model's context length in tokens; 0 = unknown.
 	ContextWindow int64 `json:"context_window,omitempty"`
+	// Ready is true when chat/switch can use the main model stack (ADR-048).
+	Ready bool `json:"ready"`
+	// Error explains why Ready is false (no secrets).
+	Error string `json:"error,omitempty"`
 }
 
 // MCPStatus is the secret-free MCP snapshot from GET /v1/config/mcp.

@@ -48,21 +48,80 @@ DEEPSEEK_API_KEY=sk-...
 
 See also [`configs/agent.json.example`](../configs/agent.json.example) (includes env / file / literal illustrations).
 
-The top-level `model` must use `provider-id/model-id` format. It is the **main** chat model.
+## Multi-provider catalog (OpenCode-style nesting)
 
-Optional top-level `models` maps roles to other catalog refs (ADR-045). Unset roles fall back to `model`:
+Each entry under `provider` is one **supplier** (endpoint + wire protocol + credentials). Its **model catalog is nested** under that entry. Keys in `provider.<id>.models` are **bare model ids** only.
+
+| Concept | JSON path | Example |
+| --- | --- | --- |
+| Active selection | top-level `model` | `"provider-a/shared-model"` |
+| Supplier A | `provider.provider-a` | own `type`, `baseURL`, `apiKey` |
+| Catalog on A | `provider.provider-a.models` | `"shared-model": { "name": "…" }` |
+| Role overrides | top-level `models` | `subagent` / `compact` → `provider/model` (ADR-045) — **not** the catalog |
+
+Same bare model id on two suppliers is fine; selection disambiguates:
 
 ```json
 {
-  "model": "deepseek/deepseek-chat",
-  "models": {
-    "subagent": "deepseek/deepseek-chat",
-    "compact": "openai/gpt-cheap"
+  "model": "provider-a/shared-model",
+  "provider": {
+    "provider-a": {
+      "type": "openai-compatible",
+      "options": { "baseURL": "https://a.example.com/v1", "apiKey": "{env:PROVIDER_A_API_KEY}" },
+      "models": { "shared-model": { "name": "via A" } }
+    },
+    "provider-b": {
+      "type": "openai-compatible",
+      "options": { "baseURL": "https://b.example.com/v1", "apiKey": "{env:PROVIDER_B_API_KEY}" },
+      "models": {
+        "shared-model": { "name": "via B" },
+        "other-model": { "name": "only B" }
+      }
+    },
+    "provider-c": {
+      "type": "anthropic",
+      "options": { "baseURL": "https://api.anthropic.com", "apiKey": "{env:ANTHROPIC_API_KEY}" },
+      "models": { "claude-model-id": { "name": "Claude" } }
+    }
   }
 }
 ```
 
-Allowed keys: `subagent` (`task` child runs), `compact` (session head summarization). Do not set `models.main`. TUI `/model` only rewrites top-level `model`; changing `models.*` requires a daemon restart. Unknown keys or refs outside the catalog fail config load.
+- Catalog key **must not** be `provider-a/shared-model` (only bare `shared-model`). Mistyped keys with a `provider/` prefix are accepted as a convenience.
+- Empty `models` under a provider allows any model id (pass-through for all protocol types; API may still reject unknown ids).
+- TUI `/model` lists `providerId/modelId` refs and only changes top-level `model`.
+- **`ready`:** true only when config load succeeded **and** agent/chat was bound at daemon start. Otherwise `error` explains (fix config, or `ymz restart` if chat never started). Secrets never appear in `error`.
+
+### Hot-reload (ADR-048)
+
+While `ymzd` runs, edits to `agent.json` / `agent.local.json` / `env` rebuild the **main** provider client after ~500ms (`internal/providerruntime`). Fingerprint includes a hash of API key and headers (not plaintext in logs).
+
+| Change | Hot-reload? |
+| --- | --- |
+| `model`, baseURL, protocol, maxTokens, contextWindow | Yes |
+| Literal `apiKey` or `{file:…}` content | Yes |
+| `{env:VAR}` via `env` file when process VAR is empty | Yes |
+| Process env already set for `{env:VAR}` | **No** — change process env + restart |
+| `chat.*`, MCP, `models.subagent\|compact` | **No** — `ymz restart` |
+| Daemon started without agent (bad config) | Fix file then **`ymz restart`** (no late-bind) |
+
+In-flight runs keep the previous client until the next turn.
+
+### Role map (optional)
+
+Top-level `models` maps roles to other **selection** refs (ADR-045). Unset roles fall back to `model`:
+
+```json
+{
+  "model": "provider-a/shared-model",
+  "models": {
+    "subagent": "provider-b/other-model",
+    "compact": "provider-b/other-model"
+  }
+}
+```
+
+Allowed keys: `subagent` (`task` child runs), `compact` (session head summarization). Do not set `models.main`. Changing `models.*` requires a daemon restart.
 
 ## Protocol families and aliases
 

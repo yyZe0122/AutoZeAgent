@@ -2,45 +2,62 @@
 
 [![Go](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go)](https://go.dev/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-alpha-orange.svg)](#status--状态)
+[![Status](https://img.shields.io/badge/status-alpha-orange.svg)](#status)
 
-A local-first, policy-controlled automation agent in Go.
+Local-first automation agent in Go: durable tasks, dual-track chat (**agent** R/W · **plan** read-only), Tool Broker effects, single SQLite.
 
-本地优先、受策略约束的 Go 自动化智能体：持久任务、双轨会话（agent 可写 / plan 只读）、受控工具调用与可审计本地状态。
+本地优先的 Go 自动化智能体：持久任务、双轨会话、受控工具、单库 `core.db`。
 
-> **Alpha:** review config, policy, and permission boundaries before using important data or privileged credentials.  
-> **Alpha 阶段：** 在接触重要数据或高权限凭据前，请先检查配置与权限边界。
+> **Alpha** — review config, workspace roots, and permissions before privileged use.  
+> **Alpha** — 接触重要数据或高权限凭据前，请先核对配置与权限边界。
 
-## What you get / 生产形态
+## Quick start
 
-```text
-ymzd   long-running daemon
-ymz    local CLI + TUI (gatewayclient peers; TUI primary)
-core.db        single SQLite source of truth
+```bash
+# 1) Install (pick one)
+brew install --cask yyZe0122/tap/ymz          # macOS / Linux
+# scoop bucket add ymz https://github.com/yyZe0122/scoop-bucket && scoop install ymz   # Windows
+
+# 2) API key (recommended)
+#    edit ~/.yunmengze/env  →  DEEPSEEK_API_KEY=sk-...
+#    or: export DEEPSEEK_API_KEY=...
+
+# 3) Validate + open TUI (auto-starts daemon)
+ymz config validate --mode user
+ymz
 ```
 
-- **agent (build):** multi-turn chat, workspace read+write tools  
-- **plan:** same chat loop, **read-only** tools (no separate Planner approval UX)  
-- Effects only via **Tool Broker** (Policy → Approval → Grant → containment → limits → Audit)
+Leave the TUI with `/quit` — **daemon keeps running**. Stop it with `ymz stop`.
 
-Design KB: [`docs/architecture/`](docs/architecture/) · living backlog: [`docs/optimization/current.md`](docs/optimization/current.md)
+```text
+ymzd     long-running daemon
+ymz      CLI + TUI (TUI is primary)
+core.db  single SQLite source of truth
+```
 
 ![Architecture](docs/assets/architecture.svg)
 
-## Install / 安装
+## Features
 
-**Recommended:** install via a package manager (binaries on PATH).  
-**推荐：** 用包管理器安装（装到 PATH）。
+| | |
+| --- | --- |
+| **Dual-track chat** | **agent** = build with workspace tools · **plan** = same loop, read-only |
+| **Tool Broker** | Only effect path: Policy → Approval → Grant → path limits → Audit |
+| **Local daemon** | Unique per mode; TUI/`run` auto-ensure; `ymz start\|stop\|restart\|status` |
+| **Multi-provider** | Nested catalog per supplier; select `providerId/modelId` |
+| **Hot-reload** | Main provider stack (~0.5s) while daemon runs — [ADR-048](docs/architecture/048-provider-config-hot-reload.md) |
+| **Memory · cron · MCP** | In-process memory, chat-native jobs, MCP tools via Broker |
 
-Release notes: [`docs/changelog/`](docs/changelog/) · publication: [`docs/release.md`](docs/release.md).
+Design KB: [`docs/architecture/`](docs/architecture/) · backlog: [`docs/optimization/current.md`](docs/optimization/current.md) · releases: [`docs/changelog/`](docs/changelog/)
 
-### Package managers / 包管理器
+## Install
+
+### Package managers (recommended)
 
 **macOS / Linux** ([Homebrew](https://brew.sh)):
 
 ```bash
 brew install --cask yyZe0122/tap/ymz
-ymz
 ymz version && ymzd --check
 ```
 
@@ -49,17 +66,14 @@ ymz version && ymzd --check
 ```powershell
 scoop bucket add ymz https://github.com/yyZe0122/scoop-bucket
 scoop install ymz
-ymz
 ymz version
 ```
 
-Tap / bucket are updated automatically on each GitHub Release (`homebrew-tap`, `scoop-bucket`).
+Taps update on each GitHub Release.
 
-### Fallback: one-line installer / 兜底：一键脚本
+### Fallback installers
 
-Use when brew/scoop is unavailable. Pins Pre-release tags (or omit `YMZ_VERSION` when a non-prerelease `latest` exists).
-
-无 brew/scoop 时使用。Pre-release 请固定版本。
+Pin Pre-release tags (or omit `YMZ_VERSION` when a non-prerelease `latest` exists).
 
 **Windows** → `%LOCALAPPDATA%\Programs\YunmengZe\bin` + user PATH:
 
@@ -76,17 +90,14 @@ curl -fsSL "https://raw.githubusercontent.com/yyZe0122/YunmengZe-Agent/main/pack
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Optional: `YMZ_INSTALL_DIR`, `YMZ_REPOSITORY`.
+Optional: `YMZ_INSTALL_DIR`, `YMZ_REPOSITORY`. Manual zip/tar: put `ymz` / `ymzd` on PATH (`ymz_{version}_{os}_{arch}`).
 
-**Manual zip/tar:** extract `ymz` / `ymzd` onto PATH. Naming: `ymz_{version}_{os}_{arch}.…` (`amd64` = x64). Prefer package managers above.
-
-### From source / 源码
+### From source
 
 Go **1.26+**, pure Go SQLite (`CGO_ENABLED=0`).
 
 ```bash
-make all          # check + build + daemon --check → bin/
-make install      # ~/.local/bin
+make all && make install    # check + build + ~/.local/bin
 ```
 
 ```powershell
@@ -94,48 +105,39 @@ make install      # ~/.local/bin
 .\scripts\dev.ps1 -Action install
 ```
 
-Systemd / machine-wide install and **release publication**: [`docs/release.md`](docs/release.md), [`packaging/install/systemd.md`](packaging/install/systemd.md).
+Systemd / publish: [`docs/release.md`](docs/release.md), [`packaging/install/systemd.md`](packaging/install/systemd.md).
 
-## Configure / 配置
+## Configure
 
-Provider config lives under a **flat home root** (Claude/OpenCode-style), not project cwd. Installers seed templates when missing.
+Config lives under a **flat home root** (not project cwd). Installers seed templates when missing.
 
-| Mode | All platforms (user) | system (examples) |
-| --- | --- | --- |
-| **user** | **`~/.yunmengze/`** — Windows: `%USERPROFILE%\.yunmengze\` | — |
-| system | — | Linux `/etc/yunmengze` · Win `%ProgramData%\YunmengZe\config` |
-
-**User layout (config + data + logs + runtime):**
+| Mode | Path |
+| --- | --- |
+| **user** (all OS) | **`~/.yunmengze/`** — Windows: `%USERPROFILE%\.yunmengze\` |
+| system | Linux `/etc/yunmengze` · Win `%ProgramData%\YunmengZe\config` |
 
 ```text
 ~/.yunmengze/
-  agent.json          # main config (or agent.local.json)
-  env                 # optional KEY=value
-  core.db             # SQLite
-  logs/               # ymzd.jsonl
-  run/                # socket, pid
-  skills/             # optional
+  agent.json          # or agent.local.json (wins)
+  env                 # optional KEY=value (does not override process env)
+  core.db
+  logs/  run/  skills/
 ```
 
-Override whole root: `YMZ_HOME=/abs/path`. Lookup: `agent.local.json` then `agent.json`. Optional `env` does not override process env already set.
+Override root: `YMZ_HOME=/abs/path`.
 
-**API key — pick any (not forced):**
+### API key (any one)
 
 1. `{env:DEEPSEEK_API_KEY}` + system env or `~/.yunmengze/env` (**recommended**)  
-2. `{file:relative-or-abs-path}` (relative to ConfigDir)  
-3. Literal `"apiKey": "sk-..."` in JSON (local only; protect permissions)
+2. `{file:path}` relative to ConfigDir  
+3. Literal `"apiKey": "sk-..."` in JSON (local only; mode `600`)
 
 ```bash
-# after install:
-# edit ~/.yunmengze/env   OR   export DEEPSEEK_API_KEY=...
-# OR put a literal apiKey in ~/.yunmengze/agent.json
 ymz paths user
 ymz config validate --mode user
 ```
 
-Full multi-provider example: [`configs/agent.json.example`](configs/agent.json.example).
-
-Minimal shape:
+### Minimal provider config
 
 ```json
 {
@@ -155,93 +157,84 @@ Minimal shape:
         }
       }
     }
-  },
-  "models": {
-    "subagent": "deepseek/deepseek-chat",
-    "compact": "deepseek/deepseek-chat"
-  },
-  "chat": {
-    "workspace": { "default": "client_cwd", "allow": [], "allow_all": false },
-    "allow_write": true,
-    "compaction": { "enabled": true },
-    "max_iterations": 16,
-    "permission": { "mode": "preauth" }
   }
 }
 ```
 
-- `maxTokens` = output cap; `contextWindow` = packing/UI pressure ([ADR-041](docs/architecture/041-context-packing-and-pressure.md), [`docs/provider-protocols.md`](docs/provider-protocols.md))
-- Optional `models.subagent` / `models.compact` ([ADR-045](docs/architecture/045-model-roles.md))
-- Optional `chat`: workspace, `tools.git` / `tools.process`, `permission.mode` (`preauth` \| `ask`), memory ([ADR-038](docs/architecture/038-session-chat-boundary.md), [043](docs/architecture/043-tool-call-permission-interaction.md), [044](docs/architecture/044-in-process-memory-boundary.md), [046](docs/architecture/046-session-workspace-and-permission-tiers.md))
-- Full options: [`configs/agent.json.example`](configs/agent.json.example), [`configs/agent.schema.json`](configs/agent.schema.json)
+- Selection is always **`providerId/modelId`**; catalog keys are **bare** ids under each provider.  
+- Same bare id on two suppliers is fine (`a/m` vs `b/m`).  
+- `maxTokens` = output cap; `contextWindow` = packing / UI pressure ([ADR-041](docs/architecture/041-context-packing-and-pressure.md)).  
+- Optional role map `models.subagent` / `models.compact` ([ADR-045](docs/architecture/045-model-roles.md)).  
+- Optional `chat` (workspace, tools, permission, memory): full example [`configs/agent.json.example`](configs/agent.json.example) · wire formats [`docs/provider-protocols.md`](docs/provider-protocols.md).
 
-## Run / 运行
+### Hot-reload
 
-**TUI is the primary UX.** No-arg / `ymz` opens it and ensures a unique local daemon (stop only via `daemon stop`).
+While the daemon is up, edits to `agent.json` / `agent.local.json` / `env` rebuild the **main** provider client (~0.5s). In-flight turns keep the old client.
+
+| Reloads live | Needs `ymz restart` |
+| --- | --- |
+| model, baseURL, protocol, literal / `{file:}` key | `chat.*`, MCP, `models.subagent\|compact` |
+| `{env:VAR}` when process VAR is still empty | process env already set; or daemon started without agent |
+
+Details: [ADR-048](docs/architecture/048-provider-config-hot-reload.md).
+
+## Run
 
 ```bash
-ymz
-# or: ymz
-ymz daemon status
-ymz daemon stop
+ymz                 # TUI (auto-starts daemon)
+ymz start           # daemon only
+ymz status          # JSON
+ymz restart         # stop + start
+ymz stop            # shut down daemon
+# long form: ymz daemon start|stop|restart|status
 ```
 
-`health` / most subcommands need a **running** daemon; only TUI entry and `run` call ensure.
+`health` / most CLI subcommands need a **running** daemon; only TUI and `run` call ensure.
 
 ### TUI
 
 | Input | Behavior |
 | --- | --- |
-| **Tab** | Toggle **agent** (build · R/W) ↔ **plan** (read-only) |
-| Plain text | Submit on current mode / focused session |
-| `/help` | Full slash list |
-| `/new [msg]` | Fresh session |
-| `/sessions` · `/tasks` | List overlay |
-| `/skills` | Toggle skills for next submit |
-| `/model` | Model picker; `/model provider/model` switches |
-| `/compact [focus]` | Force head compaction |
-| `/perm` | Tool permissions (`ask`); `once\|similar\|permanent\|deny`; keys **1–4** |
-| `/memory` | List/search facts; `forget\|promote <id>` |
-| `/refresh-memory` | Rebuild frozen memory inject for next turn |
-| `/cron` | Jobs; `/cron 15m <objective>` on focused session |
-| `/status` | Health + model + task + context + pending perms |
-| `/retry` · `/stop` | Resubmit last user msg · cancel |
-| `/theme` | Day ↔ night |
-| `/quit` | Exit (Ctrl+C clears input only) |
+| **Tab** | **agent** (R/W) ↔ **plan** (read-only) |
+| Plain text | Submit on current mode / session |
+| `/help` | Slash list |
+| `/new` · `/sessions` · `/tasks` | Session / task UX |
+| `/model` | Pick or `/model provider/model` |
+| `/compact` · `/perm` · `/memory` | Context, tool permission, facts |
+| `/cron` | Jobs on focused session |
+| `/status` · `/retry` · `/stop` | Health · resubmit · cancel |
+| `/quit` | Exit TUI (daemon stays up) |
 
-### CLI (secondary)
+### CLI (scripts)
 
 ```bash
 ymz health --mode user
 ymz run --mode user "Report workspace status without changing files."
 ymz task status TASK_ID --mode user
-ymz logs --tail 200 --mode user
-ymz logs --run RUN_ID
-# YMZ_LOG_LEVEL=debug  →  ADR-047
+ymz logs --tail 200 --run RUN_ID
 ymz job list --mode user
-ymz help
 ```
 
-Prefer TUI `/cron` to create jobs; CLI `job create` is for scripts.
+Prefer TUI `/cron` to create jobs. Logs: `YMZ_LOG_LEVEL=debug` · [ADR-047](docs/architecture/047-structured-logging-and-debug-chain.md).
 
-## Architecture (short) / 架构要点
+## Architecture
 
 ```text
-User → CLI/TUI → local Gateway → ymzd
-         → chatsession (agent|plan) · agent · tool broker · skills · jobs
-         → providers / controlled effects · core.db
+User → CLI / TUI → local Gateway → ymzd
+         → chatsession · agent · tool broker · skills · jobs
+         → providers · core.db
 ```
 
 | Piece | Role |
 | --- | --- |
 | CLI · TUI | Gateway clients only — no tools, providers, or grants |
-| Gateway | HTTP/UDS adapter; does not execute tools or call models |
-| Tool Broker | Only model-requested effect path |
+| Gateway | HTTP/UDS adapter; no tool execution, no model calls |
+| Tool Broker | Sole model-requested effect path |
 | Jobs | Fixed-interval chat submits ([ADR-042](docs/architecture/042-chat-native-jobs.md)) |
 
-Start here: [`docs/architecture/README.md`](docs/architecture/README.md).
+Start: [`docs/architecture/README.md`](docs/architecture/README.md).
 
-## Development / 开发
+## Development
 
 ```bash
 make format && make check && make build
@@ -253,9 +246,9 @@ go test ./... -count=1
 .\scripts\dev.ps1 -Action check
 ```
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md), [`AGENTS.md`](AGENTS.md). Report vulns via [`SECURITY.md`](SECURITY.md).
+See [`CONTRIBUTING.md`](CONTRIBUTING.md), [`AGENTS.md`](AGENTS.md). Vulns: [`SECURITY.md`](SECURITY.md).
 
-## Security notes / 安全
+## Security
 
 - Do not commit secrets, `agent.local.json`, `*.db`, logs, sockets, or `bin/` / `dist/`.
 - Least privilege: workspace roots, `chat.tools`, service accounts.
@@ -265,12 +258,12 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md), [`AGENTS.md`](AGENTS.md). Report vulns
 
 Details: [`SECURITY.md`](SECURITY.md), [threat model ADR-008](docs/architecture/008-threat-model.md).
 
-## License / 协议
+## License
 
 [Apache License 2.0](LICENSE). Contributions under the same terms.
 
-## Status / 状态
+## Status
 
-Alpha. Production shape is the three-piece stack above; ordered UX backlog T1–T7 and structured logging L1 are landed — see [`docs/optimization/current.md`](docs/optimization/current.md) for optional tails only.
+Alpha. Production shape is the three-piece stack above. UX backlog T1–T7 and logging L1 are landed — optional tails in [`docs/optimization/current.md`](docs/optimization/current.md).
 
-Release / private-to-public checklist: [`docs/release.md`](docs/release.md).
+Release checklist: [`docs/release.md`](docs/release.md).

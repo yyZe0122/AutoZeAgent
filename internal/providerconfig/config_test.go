@@ -83,6 +83,110 @@ func TestLoadRejectsUnknownModel(t *testing.T) {
 	}
 }
 
+func TestLoadAcceptsMistypedCatalogKeyWithProviderPrefix(t *testing.T) {
+	root := t.TempDir()
+	// User put "deepseek/deepseek-v4-flash" as catalog key (OpenCode-style bare id expected).
+	config := `{
+  "model": "deepseek/deepseek-v4-flash",
+  "provider": {
+    "deepseek": {
+      "type": "openai-compatible",
+      "options": {
+        "baseURL": "https://llm.example.com",
+        "apiKey": "sk-test"
+      },
+      "models": {
+        "deepseek/deepseek-v4-flash": { "name": "Flash" }
+      }
+    }
+  }
+}`
+	if err := os.WriteFile(filepath.Join(root, LocalFilename), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.ProviderID != "deepseek" || resolved.ModelID != "deepseek-v4-flash" {
+		t.Fatalf("resolved = %+v", resolved)
+	}
+}
+
+func TestLoadEmptyCatalogPassThrough(t *testing.T) {
+	root := t.TempDir()
+	config := `{
+  "model": "provider-a/any-model-id",
+  "provider": {
+    "provider-a": {
+      "type": "openai-compatible",
+      "options": {
+        "baseURL": "https://a.example.com",
+        "apiKey": "sk-a"
+      }
+    }
+  }
+}`
+	if err := os.WriteFile(filepath.Join(root, LocalFilename), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.ProviderID != "provider-a" || resolved.ModelID != "any-model-id" {
+		t.Fatalf("resolved = %+v", resolved)
+	}
+}
+
+func TestLoadTwoProvidersSameModelID(t *testing.T) {
+	root := t.TempDir()
+	config := `{
+  "model": "provider-b/shared-model",
+  "provider": {
+    "provider-a": {
+      "type": "openai-compatible",
+      "options": { "baseURL": "https://a.example.com", "apiKey": "sk-a" },
+      "models": { "shared-model": { "name": "A" } }
+    },
+    "provider-b": {
+      "type": "openai-compatible",
+      "options": { "baseURL": "https://b.example.com", "apiKey": "sk-b" },
+      "models": { "shared-model": { "name": "B" } }
+    }
+  }
+}`
+	if err := os.WriteFile(filepath.Join(root, LocalFilename), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.ProviderID != "provider-b" || resolved.BaseURL != "https://b.example.com" {
+		t.Fatalf("resolved = %+v", resolved)
+	}
+	selected, refs, err := ListModelRefs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected != "provider-b/shared-model" {
+		t.Fatalf("selected = %q", selected)
+	}
+	var hasA, hasB bool
+	for _, r := range refs {
+		if r.ID == "provider-a/shared-model" {
+			hasA = true
+		}
+		if r.ID == "provider-b/shared-model" {
+			hasB = true
+		}
+	}
+	if !hasA || !hasB {
+		t.Fatalf("refs = %+v", refs)
+	}
+}
+
 func TestWriteSelectedModelUpdatesTopLevelOnly(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, LocalFilename)

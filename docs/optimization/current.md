@@ -1,12 +1,13 @@
 # YunmengZe → YunmengZe Agent 当前状态
 
-更新：2026-08-11
+更新：2026-08-12
 
 **本文件是唯一活着的优化/backlog 文档。** 只写未完成与暂缓项；已落地细节见 ADR（`docs/architecture/`）与 git。
 
 ## 现状
 
-生产形态稳定：`ymzd` + CLI·TUI + `core.db`。设计知识库：`docs/architecture/`。
+生产形态稳定：`ymzd` + CLI·TUI + `core.db`。设计知识库：`docs/architecture/`。  
+Provider 主栈热更：`internal/providerruntime` + ADR-048（不 late-bind chat；`chat`/MCP/roles 仍需 restart）。
 
 对照 Crush（`/tmp/opencode-compare/crush`）只读评估后：偷 **编排与 UX 契约**，不偷软权限、不把 agent/tools 拉进 TUI。
 

@@ -10,14 +10,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
+	"time"
 
 	"github.com/yyZe0122/yunmengze-agent/internal/agent"
 	"github.com/yyZe0122/yunmengze-agent/internal/app"
-	"github.com/yyZe0122/yunmengze-agent/internal/applicationerror"
 	"github.com/yyZe0122/yunmengze-agent/internal/approval"
 	"github.com/yyZe0122/yunmengze-agent/internal/artifacts"
 	"github.com/yyZe0122/yunmengze-agent/internal/chatsession"
+	"github.com/yyZe0122/yunmengze-agent/internal/configreload"
 	"github.com/yyZe0122/yunmengze-agent/internal/contextpack"
 	"github.com/yyZe0122/yunmengze-agent/internal/corequery"
 	"github.com/yyZe0122/yunmengze-agent/internal/daemonctl"
@@ -30,7 +30,7 @@ import (
 	platformsignals "github.com/yyZe0122/yunmengze-agent/internal/platform/signals"
 	"github.com/yyZe0122/yunmengze-agent/internal/policy"
 	"github.com/yyZe0122/yunmengze-agent/internal/providerconfig"
-	"github.com/yyZe0122/yunmengze-agent/internal/providers"
+	"github.com/yyZe0122/yunmengze-agent/internal/providerruntime"
 	"github.com/yyZe0122/yunmengze-agent/internal/scheduledtasks"
 	"github.com/yyZe0122/yunmengze-agent/internal/scheduler"
 	"github.com/yyZe0122/yunmengze-agent/internal/skillcatalog"
@@ -40,7 +40,6 @@ import (
 	"github.com/yyZe0122/yunmengze-agent/internal/toolpermission"
 	"github.com/yyZe0122/yunmengze-agent/internal/tools"
 	"github.com/yyZe0122/yunmengze-agent/internal/version"
-	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
 
 func main() {
@@ -180,7 +179,7 @@ func run(args []string) error {
 		slog.Info("mcp tools ready", "component", "daemon", "operation", "mcp_register", "result", "succeeded",
 			"tools", len(mcpToolNames))
 	}
-	providerRuntime, err := providerRuntimeFromConfig(layout.ConfigDir)
+	providerRuntime, err := providerruntime.FromConfigDir(layout.ConfigDir)
 	if err != nil {
 		return err
 	}
@@ -199,8 +198,8 @@ func run(args []string) error {
 	}
 	tokenCalibrator := contextpack.NewCalibrator()
 	var contextWindow int64
-	if providerRuntime != nil {
-		if resolved, resolveErr := providerconfig.ResolveModel(layout.ConfigDir, providerRuntime.selectedRef); resolveErr == nil && resolved != nil {
+	if providerRuntime != nil && providerRuntime.SelectedRef() != "" {
+		if resolved, resolveErr := providerconfig.ResolveModel(layout.ConfigDir, providerRuntime.SelectedRef()); resolveErr == nil && resolved != nil {
 			contextWindow = resolved.ContextWindow
 		}
 	}
@@ -247,14 +246,14 @@ func run(args []string) error {
 	}
 
 	var agentRunner *agent.Runner
-	if providerRuntime != nil {
-		roleEndpoints, roleErr := buildRoleEndpoints(layout.ConfigDir, providerRuntime.selectedRef)
+	if providerRuntime != nil && providerRuntime.Provider() != nil && strings.TrimSpace(providerRuntime.LoadError()) == "" {
+		roleEndpoints, roleErr := providerruntime.BuildRoleEndpoints(layout.ConfigDir, providerRuntime.SelectedRef())
 		if roleErr != nil {
 			return roleErr
 		}
 		agentRunner, err = agent.New(agent.Config{
-			Provider: providerRuntime.provider, Broker: toolBroker, Records: recordStore,
-			Model: providerRuntime.model, Stream: modelHub,
+			Provider: providerRuntime.Provider(), Broker: toolBroker, Records: recordStore,
+			Model: providerRuntime.Model(), Stream: modelHub,
 			MaxIterations: maxIterations,
 			ContextWindow: contextWindow, Roles: roleEndpoints,
 			Context: contextStore, Calibrator: tokenCalibrator,
@@ -359,15 +358,26 @@ func run(args []string) error {
 		return nil
 	}
 
-	modelConfig, err := gatewayModelConfig(layout.ConfigDir, providerRuntime)
-	if err != nil {
-		return err
-	}
 	var modelSwitcher gateway.ModelSwitcher
+	var modelConfig gateway.ModelConfig
+	var modelConfigError string
 	if providerRuntime != nil {
-		providerRuntime.agent = agentRunner
-		providerRuntime.chat = chatService
+		// Bind agent/chat first so Snapshot ready reflects ChatBound; attach gateway sink after NewAPI.
+		var mainEP providerruntime.MainEndpoint
+		if agentRunner != nil {
+			mainEP = agentRunner
+		}
+		var chatCW providerruntime.ContextWindow
+		if chatService != nil {
+			chatCW = chatService
+		}
+		providerRuntime.Bind(mainEP, chatCW, nil)
+		modelConfig, modelConfigError = providerRuntime.Snapshot()
+		// Always register switcher; SelectModel / ReloadFromDisk honor loadError and ChatBound.
 		modelSwitcher = providerRuntime
+	} else {
+		modelConfig = gateway.ModelConfig{Models: []string{}, Ready: false, Error: "provider runtime is not configured"}
+		modelConfigError = modelConfig.Error
 	}
 	var mcpStatus gateway.MCPStatusProvider
 	if mcpRegistry != nil {
@@ -393,7 +403,8 @@ func run(args []string) error {
 		Queries: queries, TaskSubmissions: taskSubmissionService,
 		TaskControls: taskControl, Jobs: schedulerStore,
 		Core: core, Events: eventStore, Skills: skillCatalog, ModelConfig: modelConfig, ModelSwitcher: modelSwitcher,
-		ModelStream: modelHub, MCP: mcpStatus, SessionCompact: sessionCompact,
+		ModelConfigError: modelConfigError,
+		ModelStream:      modelHub, MCP: mcpStatus, SessionCompact: sessionCompact,
 		ToolPermissions: gateway.ToolPermissionAdapter{
 			Service:   permService,
 			TrustPath: toolpermission.DefaultTrustPath(layout.ConfigDir),
@@ -402,6 +413,17 @@ func run(args []string) error {
 	})
 	if err != nil {
 		return err
+	}
+	if providerRuntime != nil {
+		var mainEP providerruntime.MainEndpoint
+		if agentRunner != nil {
+			mainEP = agentRunner
+		}
+		var chatCW providerruntime.ContextWindow
+		if chatService != nil {
+			chatCW = chatService
+		}
+		providerRuntime.Bind(mainEP, chatCW, gatewayAPI)
 	}
 	gatewayRunner, err := gateway.NewLocalRunner(gateway.LocalRunnerConfig{
 		RuntimeDir: layout.RuntimeDir,
@@ -430,6 +452,34 @@ func run(args []string) error {
 	slog.Info("daemon started", "component", "daemon", "operation", "start", "result", "succeeded", "version", status.Version, "mode", status.Runtime.Mode, "workspace_root", workingDirectory)
 	ctx, cancel := platformsignals.NotifyContext(context.Background())
 	defer cancel()
+
+	// Hot-reload provider config (agent.json / agent.local.json / env). See ADR-048.
+	if providerRuntime != nil {
+		providerRuntime.NoteFingerprint()
+		if w, werr := configreload.New(configreload.Options{
+			ConfigDir: layout.ConfigDir,
+			Debounce:  500 * time.Millisecond,
+			OnChange: func() {
+				// Debounced callback may run on watcher goroutine; reload takes its own lock.
+				// SelectModel suppresses a short window so its WriteSelectedModel does not double-apply.
+				if err := providerRuntime.ReloadFromDisk(); err != nil {
+					slog.Warn("provider config reload failed", "component", "configreload", "operation", "reload", "result", "warning", "error", err)
+				}
+			},
+			Logger: slog.Default(),
+		}); werr != nil {
+			slog.Warn("provider config watch not started", "component", "configreload", "operation", "watch", "result", "warning", "error", werr)
+		} else {
+			if err := w.Start(ctx); err != nil {
+				slog.Warn("provider config watch start failed", "component", "configreload", "operation", "watch", "result", "warning", "error", err)
+				_ = w.Close()
+			} else {
+				defer func() { _ = w.Close() }()
+				slog.Info("provider config watch started", "component", "configreload", "operation", "watch", "result", "succeeded", "config_dir", layout.ConfigDir)
+			}
+		}
+	}
+
 	if err := core.Run(ctx); err != nil {
 		return err
 	}
@@ -446,166 +496,6 @@ func discoverSkillCatalog(layout paths.Layout, workingDirectory string) (*skillc
 		{Path: filepath.Join(layout.ConfigDir, "skills"), Source: configSource},
 		{Path: filepath.Join(workingDirectory, ".yunmengze", "skills"), Source: skillcatalog.SourceProject},
 	})
-}
-
-type configuredProviderRuntime struct {
-	mu          sync.Mutex
-	configDir   string
-	provider    providerapi.Provider
-	model       string
-	selectedRef string
-	agent       *agent.Runner
-	chat        *chatsession.Service
-}
-
-func gatewayModelConfig(configDir string, runtime *configuredProviderRuntime) (gateway.ModelConfig, error) {
-	selected, refs, err := providerconfig.ListModelRefs(configDir)
-	if err != nil {
-		return gateway.ModelConfig{}, err
-	}
-	if runtime != nil && strings.TrimSpace(runtime.selectedRef) != "" {
-		selected = runtime.selectedRef
-	} else if configured, loadErr := providerconfig.Load(configDir); loadErr == nil && configured != nil {
-		selected = configured.ProviderID + "/" + configured.ModelID
-	} else if runtime != nil && strings.TrimSpace(runtime.model) != "" {
-		selected = runtime.model
-	}
-	models := make([]string, 0, len(refs)+1)
-	seen := map[string]struct{}{}
-	add := func(id string) {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			return
-		}
-		if _, ok := seen[id]; ok {
-			return
-		}
-		seen[id] = struct{}{}
-		models = append(models, id)
-	}
-	add(selected)
-	for _, ref := range refs {
-		add(ref.ID)
-	}
-	cfg := gateway.ModelConfig{Model: selected, Models: models}
-	if selected != "" {
-		if resolved, resolveErr := providerconfig.ResolveModel(configDir, selected); resolveErr == nil && resolved != nil {
-			cfg.ContextWindow = resolved.ContextWindow
-		}
-	}
-	return cfg, nil
-}
-
-func providerRuntimeFromConfig(configDir string) (*configuredProviderRuntime, error) {
-	configured, err := providerconfig.Load(configDir)
-	if err != nil {
-		// Incomplete template (e.g. missing {env:…}) must not block gateway; model switch stays unavailable.
-		slog.Warn("provider config not loaded", "component", "daemon", "operation", "load_config", "result", "warning",
-			"config_dir", configDir, "error", err)
-		return nil, nil
-	}
-	if configured == nil {
-		return nil, nil
-	}
-	provider, err := providers.NewConfigured(*configured)
-	if err != nil {
-		return nil, fmt.Errorf("configure provider: %w", err)
-	}
-	selected := configured.ProviderID + "/" + configured.ModelID
-	return &configuredProviderRuntime{
-		configDir: configDir,
-		provider:  provider, model: configured.ModelID, selectedRef: selected,
-	}, nil
-}
-
-// buildRoleEndpoints resolves optional models.subagent / models.compact (ADR-045).
-// Unset roles are omitted so agent falls back to main.
-func buildRoleEndpoints(configDir, mainRef string) (map[string]agent.RoleEndpoint, error) {
-	_, roles, err := providerconfig.LoadModelRoles(configDir)
-	if err != nil {
-		return nil, fmt.Errorf("load model roles: %w", err)
-	}
-	if len(roles) == 0 {
-		return nil, nil
-	}
-	// Cache adapters by full provider/model ref.
-	cache := map[string]agent.RoleEndpoint{}
-	out := make(map[string]agent.RoleEndpoint, len(roles))
-	for role, ref := range roles {
-		ref = strings.TrimSpace(ref)
-		if ref == "" || ref == mainRef {
-			// Same as main: no separate endpoint needed (fallback is main).
-			continue
-		}
-		if ep, ok := cache[ref]; ok {
-			out[role] = ep
-			continue
-		}
-		resolved, err := providerconfig.ResolveModel(configDir, ref)
-		if err != nil {
-			return nil, fmt.Errorf("resolve models.%s: %w", role, err)
-		}
-		provider, err := providers.NewConfigured(*resolved)
-		if err != nil {
-			return nil, fmt.Errorf("configure models.%s: %w", role, err)
-		}
-		ep := agent.RoleEndpoint{
-			Provider: provider, Model: resolved.ModelID, ContextWindow: resolved.ContextWindow,
-		}
-		cache[ref] = ep
-		out[role] = ep
-		slog.Info("model role configured", "component", "daemon", "operation", "model_roles", "result", "succeeded",
-			"role", role, "model", ref, "context_window", resolved.ContextWindow)
-	}
-	if len(out) == 0 {
-		return nil, nil
-	}
-	return out, nil
-}
-
-func (r *configuredProviderRuntime) SelectModel(_ context.Context, ref string) (gateway.ModelConfig, error) {
-	if r == nil {
-		return gateway.ModelConfig{}, applicationerror.Wrap(applicationerror.CodeUnavailable, false, errors.New("provider runtime is not configured"))
-	}
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return gateway.ModelConfig{}, errors.New("model is required")
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if ref == r.selectedRef {
-		return gatewayModelConfig(r.configDir, r)
-	}
-	resolved, err := providerconfig.ResolveModel(r.configDir, ref)
-	if err != nil {
-		return gateway.ModelConfig{}, err
-	}
-	provider, err := providers.NewConfigured(*resolved)
-	if err != nil {
-		return gateway.ModelConfig{}, err
-	}
-	writtenPath, err := providerconfig.WriteSelectedModel(r.configDir, ref)
-	if err != nil {
-		return gateway.ModelConfig{}, err
-	}
-	if r.agent != nil {
-		if err := r.agent.SetProvider(provider); err != nil {
-			return gateway.ModelConfig{}, err
-		}
-		if err := r.agent.SetModel(resolved.ModelID); err != nil {
-			return gateway.ModelConfig{}, err
-		}
-		r.agent.SetContextWindow(resolved.ContextWindow)
-	}
-	if r.chat != nil {
-		r.chat.SetContextWindow(resolved.ContextWindow)
-	}
-	r.provider = provider
-	r.model = resolved.ModelID
-	r.selectedRef = resolved.ProviderID + "/" + resolved.ModelID
-	slog.Info("model switched", "component", "daemon", "operation", "select_model", "result", "succeeded",
-		"model", r.selectedRef, "context_window", resolved.ContextWindow, "config_path", writtenPath)
-	return gatewayModelConfig(r.configDir, r)
 }
 
 // mcpStatusAdapter maps tools.MCPRegistry to gateway.MCPStatusProvider.

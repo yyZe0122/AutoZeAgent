@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -56,8 +57,8 @@ func validateModelsMap(config File) error {
 			return fmt.Errorf("models.%s provider %q is not configured", role, providerID)
 		}
 		if len(provider.Models) > 0 {
-			if _, modelConfigured := provider.Models[modelID]; !modelConfigured {
-				return fmt.Errorf("models.%s model %q is not configured for provider %q", role, modelID, providerID)
+			if _, ok := lookupModel(provider.Models, providerID, modelID); !ok {
+				return fmt.Errorf("models.%s: %w", role, errModelNotInCatalog(providerID, modelID, provider.Models))
 			}
 		}
 	}
@@ -85,11 +86,81 @@ func validateModelInFile(path, providerID, modelID string) error {
 		return fmt.Errorf("selected provider %q is not configured", providerID)
 	}
 	if len(provider.Models) > 0 {
-		if _, modelConfigured := provider.Models[modelID]; !modelConfigured {
-			return fmt.Errorf("model %q is not configured for provider %q", modelID, providerID)
+		if _, ok := lookupModel(provider.Models, providerID, modelID); !ok {
+			return errModelNotInCatalog(providerID, modelID, provider.Models)
 		}
 	}
 	return nil
+}
+
+// bareModelID strips an accidental "provider/" prefix from a catalog key or model id.
+// Catalog keys must be bare ids (OpenCode-style); selection is always providerID/modelID.
+func bareModelID(providerID, modelID string) string {
+	providerID = strings.TrimSpace(providerID)
+	modelID = strings.TrimSpace(modelID)
+	if providerID == "" || modelID == "" {
+		return modelID
+	}
+	prefix := providerID + "/"
+	if strings.HasPrefix(modelID, prefix) {
+		return strings.TrimSpace(strings.TrimPrefix(modelID, prefix))
+	}
+	return modelID
+}
+
+// lookupModel finds a model entry under provider.models.
+// Prefer bare modelID; also accept mistaken keys like "providerID/modelID".
+// Empty catalog: ok with zero Model (pass-through id).
+func lookupModel(catalog map[string]Model, providerID, modelID string) (Model, bool) {
+	if len(catalog) == 0 {
+		return Model{}, true
+	}
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		return Model{}, false
+	}
+	if m, ok := catalog[modelID]; ok {
+		return m, true
+	}
+	bare := bareModelID(providerID, modelID)
+	if bare != modelID {
+		if m, ok := catalog[bare]; ok {
+			return m, true
+		}
+	}
+	// Mistaken catalog key: "provider/model" while selection is bare model id.
+	full := strings.TrimSpace(providerID) + "/" + bare
+	if m, ok := catalog[full]; ok {
+		return m, true
+	}
+	for key, m := range catalog {
+		key = strings.TrimSpace(key)
+		if bareModelID(providerID, key) == bare {
+			return m, true
+		}
+	}
+	return Model{}, false
+}
+
+func errModelNotInCatalog(providerID, modelID string, catalog map[string]Model) error {
+	keys := make([]string, 0, len(catalog))
+	for k := range catalog {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	hint := ""
+	if strings.Contains(modelID, "/") {
+		hint = fmt.Sprintf(`; catalog keys are bare model ids under provider %q (not %q)`, providerID, modelID)
+	} else if len(keys) > 0 {
+		// Suggest if user put provider/model as the only key shape.
+		for _, k := range keys {
+			if bareModelID(providerID, k) == modelID || strings.HasSuffix(k, "/"+modelID) {
+				hint = fmt.Sprintf(`; catalog key %q looks like provider/model — use bare %q as the key`, k, modelID)
+				break
+			}
+		}
+	}
+	return fmt.Errorf("model %q is not in provider %q catalog (keys: %s)%s", modelID, providerID, strings.Join(keys, ", "), hint)
 }
 
 func decodeConfigFile(path string) (File, error) {
@@ -122,9 +193,11 @@ func resolveFromFile(path string, config File, providerID, modelID string) (Reso
 	if err != nil {
 		return Resolved{}, fmt.Errorf("provider %q: %w", providerID, err)
 	}
-	modelConfig, modelConfigured := provider.Models[modelID]
+	// Selection is always providerID/modelID; catalog keys are bare model ids (per-provider).
+	modelID = bareModelID(providerID, modelID)
+	modelConfig, modelConfigured := lookupModel(provider.Models, providerID, modelID)
 	if len(provider.Models) > 0 && !modelConfigured {
-		return Resolved{}, fmt.Errorf("model %q is not configured for provider %q", modelID, providerID)
+		return Resolved{}, errModelNotInCatalog(providerID, modelID, provider.Models)
 	}
 	baseURL := strings.TrimSpace(provider.Options.BaseURL)
 	if baseURL == "" {

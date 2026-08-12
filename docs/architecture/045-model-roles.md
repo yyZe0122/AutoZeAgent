@@ -43,7 +43,7 @@ Rules:
 - Empty string value → treat as unset (fallback main)
 - Values must be `provider/model` present in the catalog
 - Allowed keys only: `subagent`, `compact` (no `models.main`; unknown keys fail load)
-- Changing `models.*` requires **daemon restart** (no hot rewrite)
+- Changing `models.*` requires **daemon restart** (no hot rewrite). Main `model` / provider options may hot-reload (ADR-048); role endpoints are built only at start.
 
 ### Runtime
 

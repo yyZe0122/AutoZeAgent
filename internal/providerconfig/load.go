@@ -70,7 +70,9 @@ func listModelRefsFromFile(path string) (string, []ModelRef, error) {
 		}
 		sort.Strings(modelIDs)
 		for _, modelID := range modelIDs {
-			ref := providerID + "/" + modelID
+			// Catalog keys may be mistyped as provider/model; list bare id under this provider.
+			bare := bareModelID(providerID, modelID)
+			ref := providerID + "/" + bare
 			add(ref, provider.Models[modelID].Name)
 		}
 	}

@@ -65,6 +65,11 @@ type ModelConfig struct {
 	Models []string `json:"models"`
 	// ContextWindow is the selected model's context length in tokens; 0 = unknown.
 	ContextWindow int64 `json:"context_window,omitempty"`
+	// Ready is true when the main model stack is usable for chat and /model switch
+	// (config load OK and agent bound at daemon start; see ADR-048).
+	Ready bool `json:"ready"`
+	// Error is a secret-free explanation when Ready is false (load failure or restart required).
+	Error string `json:"error,omitempty"`
 }
 
 // ModelSwitcher applies a provider/model selection at runtime.
@@ -117,6 +122,9 @@ type APIConfig struct {
 	Skills          *skillcatalog.Catalog
 	ModelConfig     ModelConfig
 	ModelSwitcher   ModelSwitcher
+	// ModelConfigError is set when provider config failed to load at daemon start.
+	// Exposed on GET /v1/config/model as error + ready=false.
+	ModelConfigError string
 	// ModelStream is optional; when set, exposes GET /v1/model-stream.
 	ModelStream *modelstream.Hub
 	// MCP is optional; when set, exposes GET /v1/config/mcp.
@@ -163,21 +171,22 @@ type ToolPermissionView struct {
 }
 
 type API struct {
-	queries         QueryService
-	taskSubmissions TaskSubmitter
-	taskControls    TaskController
-	jobs            JobService
-	core            interface{ Status() app.Status }
-	events          *events.Store
-	skills          *skillcatalog.Catalog
-	modelMu         sync.RWMutex
-	modelConfig     ModelConfig
-	modelSwitcher   ModelSwitcher
-	modelStream     *modelstream.Hub
-	mcp             MCPStatusProvider
-	sessionCompact  SessionCompactor
-	toolPermissions ToolPermissionService
-	memoryControl   MemoryControlService
+	queries          QueryService
+	taskSubmissions  TaskSubmitter
+	taskControls     TaskController
+	jobs             JobService
+	core             interface{ Status() app.Status }
+	events           *events.Store
+	skills           *skillcatalog.Catalog
+	modelMu          sync.RWMutex
+	modelConfig      ModelConfig
+	modelSwitcher    ModelSwitcher
+	modelConfigError string
+	modelStream      *modelstream.Hub
+	mcp              MCPStatusProvider
+	sessionCompact   SessionCompactor
+	toolPermissions  ToolPermissionService
+	memoryControl    MemoryControlService
 }
 
 func NewAPI(config APIConfig) (*API, error) {
@@ -187,13 +196,48 @@ func NewAPI(config APIConfig) (*API, error) {
 	if config.ModelConfig.Models == nil {
 		config.ModelConfig.Models = []string{}
 	}
+	errMsg := strings.TrimSpace(config.ModelConfigError)
+	if errMsg == "" {
+		errMsg = strings.TrimSpace(config.ModelConfig.Error)
+	}
+	config.ModelConfig.Error = errMsg
+	// ready = switcher present and no error (load failure or chat not bound).
+	config.ModelConfig.Ready = config.ModelSwitcher != nil && errMsg == ""
 	return &API{
 		queries: config.Queries, taskSubmissions: config.TaskSubmissions,
 		taskControls: config.TaskControls, jobs: config.Jobs, core: config.Core, events: config.Events, skills: config.Skills,
-		modelConfig: config.ModelConfig, modelSwitcher: config.ModelSwitcher, modelStream: config.ModelStream,
-		mcp: config.MCP, sessionCompact: config.SessionCompact, toolPermissions: config.ToolPermissions,
+		modelConfig: config.ModelConfig, modelSwitcher: config.ModelSwitcher, modelConfigError: strings.TrimSpace(config.ModelConfigError),
+		modelStream: config.ModelStream,
+		mcp:         config.MCP, sessionCompact: config.SessionCompact, toolPermissions: config.ToolPermissions,
 		memoryControl: config.MemoryControl,
 	}, nil
+}
+
+// UpdateModelSnapshot replaces the GET /v1/config/model view after hot-reload or /model.
+// loadError non-empty marks ready=false (secrets never included). Empty loadError keeps
+// config.Ready/Error from the caller when Error is already set (e.g. chat not bound).
+func (a *API) UpdateModelSnapshot(config ModelConfig, loadError string) {
+	if a == nil {
+		return
+	}
+	if config.Models == nil {
+		config.Models = []string{}
+	}
+	loadError = strings.TrimSpace(loadError)
+	if loadError != "" {
+		config.Error = loadError
+		config.Ready = false
+	} else if strings.TrimSpace(config.Error) != "" {
+		config.Ready = false
+		loadError = strings.TrimSpace(config.Error)
+	} else {
+		config.Error = ""
+		config.Ready = a.modelSwitcher != nil
+	}
+	a.modelMu.Lock()
+	a.modelConfig = config
+	a.modelConfigError = loadError
+	a.modelMu.Unlock()
 }
 
 func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {

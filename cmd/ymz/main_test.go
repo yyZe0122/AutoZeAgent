@@ -23,6 +23,11 @@ func TestCommandFromArgs(t *testing.T) {
 		{name: "health", args: []string{"health", "--mode", "user"}, command: "health", rest: []string{"--mode", "user"}},
 		{name: "version", args: []string{"version"}, command: "version", rest: []string{}},
 		{name: "run", args: []string{"run", "do work"}, command: "run", rest: []string{"do work"}},
+		{name: "start", args: []string{"start", "--mode", "user"}, command: "start", rest: []string{"--mode", "user"}},
+		{name: "stop", args: []string{"stop"}, command: "stop", rest: []string{}},
+		{name: "restart", args: []string{"restart"}, command: "restart", rest: []string{}},
+		{name: "status", args: []string{"status"}, command: "status", rest: []string{}},
+		{name: "daemon long form", args: []string{"daemon", "stop"}, command: "daemon", rest: []string{"stop"}},
 		{name: "unknown kept", args: []string{"nope"}, command: "nope", rest: []string{}},
 	}
 	for _, tt := range tests {

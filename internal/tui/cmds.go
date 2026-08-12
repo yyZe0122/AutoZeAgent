@@ -575,19 +575,29 @@ func (m model) modelCommandCmd(arg string) tea.Cmd {
 			return commandDoneMsg{err: err}
 		}
 		arg = strings.TrimSpace(arg)
+		if !cfg.Ready && strings.TrimSpace(cfg.Error) != "" {
+			if arg == "" {
+				return commandDoneMsg{err: fmt.Errorf("model not ready: %s", cfg.Error)}
+			}
+			// Switching while not ready still goes to SetModelConfig for a concrete error.
+		}
 		if arg == "" {
+			status := "select a model (providerID/modelID; catalog keys are bare ids under each provider)"
+			if !cfg.Ready && cfg.Error != "" {
+				status = "model not ready: " + cfg.Error
+			}
 			return commandDoneMsg{
 				openList:      listModels,
 				modelName:     cfg.Model,
 				models:        cfg.Models,
 				contextWindow: cfg.ContextWindow,
-				status:        "select a model",
+				status:        status,
 			}
 		}
 		if !strings.Contains(arg, "/") {
 			return commandDoneMsg{err: fmt.Errorf("model must use provider/model format (or /model with no args to pick)")}
 		}
-		if arg == cfg.Model {
+		if arg == cfg.Model && cfg.Ready {
 			return commandDoneMsg{
 				status:        fmt.Sprintf("already using %s", cfg.Model),
 				modelName:     cfg.Model,

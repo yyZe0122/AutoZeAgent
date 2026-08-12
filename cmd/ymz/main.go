@@ -37,6 +37,8 @@ func run(args []string) error {
 		return runHealth(rest)
 	case "logs":
 		return runLogs(rest)
+	case "start", "stop", "restart", "status":
+		return runDaemonAction(command, rest)
 	case "daemon":
 		return runDaemon(rest)
 	case "run":
@@ -112,13 +114,14 @@ func printUsage() {
 	fmt.Println("YunmengZe Agent local client")
 	fmt.Println()
 	fmt.Println("With no arguments, starts the interactive TUI.")
-	fmt.Println("TUI and run auto-start the unique local daemon; use daemon stop to shut it down.")
+	fmt.Println("TUI and run auto-start the unique local daemon; stop only with ymz stop.")
 
 	fmt.Println()
 	fmt.Println("Usage:")
 	fmt.Println("  ymz")
+	fmt.Println("  ymz start|stop|restart|status [--mode user|system]")
+	fmt.Println("  ymz daemon start|stop|restart|status [--mode user|system]   # long form")
 	fmt.Println("  ymz tui [--mode user|system]")
-	fmt.Println("  ymz daemon start|stop|status [--mode user|system]")
 	fmt.Println("  ymz version")
 	fmt.Println("  ymz paths [user|system]")
 	fmt.Println("  ymz config validate [--mode user|system]")
