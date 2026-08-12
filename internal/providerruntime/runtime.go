@@ -81,7 +81,10 @@ func FromConfigDir(configDir string) (*Runtime, error) {
 	}
 	rt.provider = provider
 	rt.model = configured.ModelID
-	rt.selectedRef = configured.ProviderID + "/" + configured.ModelID
+	rt.selectedRef = configured.SelectionRef
+	if rt.selectedRef == "" {
+		rt.selectedRef = configured.ProviderID + "/" + configured.ModelID
+	}
 	rt.fingerprint = Fingerprint(configured)
 	return rt, nil
 }
@@ -108,7 +111,7 @@ func (r *Runtime) Provider() providerapi.Provider {
 	return r.provider
 }
 
-// Model returns the bare model id.
+// Model returns the wire/API model id sent to the provider.
 func (r *Runtime) Model() string {
 	if r == nil {
 		return ""
@@ -118,7 +121,7 @@ func (r *Runtime) Model() string {
 	return r.model
 }
 
-// SelectedRef returns provider/model.
+// SelectedRef returns the full selection ref (providerID/modelID…; modelID may contain '/').
 func (r *Runtime) SelectedRef() string {
 	if r == nil {
 		return ""
@@ -198,7 +201,10 @@ func (r *Runtime) ReloadFromDisk() error {
 		r.pushSnapshotLocked(r.loadError)
 		return err
 	}
-	selected := configured.ProviderID + "/" + configured.ModelID
+	selected := configured.SelectionRef
+	if selected == "" {
+		selected = configured.ProviderID + "/" + configured.ModelID
+	}
 	if err := r.applyMainLocked(provider, configured.ModelID, configured.ContextWindow); err != nil {
 		return err
 	}
@@ -208,7 +214,7 @@ func (r *Runtime) ReloadFromDisk() error {
 	r.loadError = ""
 	r.fingerprint = fp
 	slog.Info("provider config reloaded", "component", "configreload", "operation", "reload", "result", "succeeded",
-		"model", selected, "base_url", configured.BaseURL, "context_window", configured.ContextWindow)
+		"model", selected, "wire_model", configured.ModelID, "base_url", configured.BaseURL, "context_window", configured.ContextWindow)
 	r.pushSnapshotLocked("")
 	return nil
 }
@@ -258,11 +264,14 @@ func (r *Runtime) SelectModel(_ context.Context, ref string) (gateway.ModelConfi
 	}
 	r.provider = provider
 	r.model = resolved.ModelID
-	r.selectedRef = resolved.ProviderID + "/" + resolved.ModelID
+	r.selectedRef = resolved.SelectionRef
+	if r.selectedRef == "" {
+		r.selectedRef = resolved.ProviderID + "/" + resolved.ModelID
+	}
 	r.loadError = ""
 	r.fingerprint = Fingerprint(resolved)
 	slog.Info("model switched", "component", "daemon", "operation", "select_model", "result", "succeeded",
-		"model", r.selectedRef, "context_window", resolved.ContextWindow, "config_path", writtenPath)
+		"model", r.selectedRef, "wire_model", resolved.ModelID, "context_window", resolved.ContextWindow, "config_path", writtenPath)
 	cfg, err := r.modelConfigLocked()
 	if err != nil {
 		return gateway.ModelConfig{}, err
@@ -332,7 +341,10 @@ func (r *Runtime) modelConfigLocked() (gateway.ModelConfig, error) {
 	if strings.TrimSpace(r.selectedRef) != "" {
 		selected = r.selectedRef
 	} else if configured, loadErr := providerconfig.Load(r.configDir); loadErr == nil && configured != nil {
-		selected = configured.ProviderID + "/" + configured.ModelID
+		selected = configured.SelectionRef
+		if selected == "" {
+			selected = configured.ProviderID + "/" + configured.ModelID
+		}
 	} else if strings.TrimSpace(r.model) != "" {
 		selected = r.model
 	}

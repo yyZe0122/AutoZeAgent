@@ -1,20 +1,20 @@
 ﻿{
   "$schema": "./configs/agent.schema.json",
-  "model": "deepseek/deepseek-chat",
+  "model": "deepseek1/deepseek-chat",
   "models": {
-    "subagent": "deepseek/deepseek-chat",
-    "compact": "deepseek/deepseek-chat"
+    "subagent": "deepseek1/deepseek-chat",
+    "compact": "deepseek1/deepseek-chat"
   },
   "provider": {
-    "deepseek": {
+    "deepseek1": {
       "type": "openai-compatible",
       "options": {
-        "baseURL": "https://api.deepseek.com",
-        "apiKey": "{env:DEEPSEEK_API_KEY}"
+        "baseURL": "https://api.deepseek.com/v1",
+        "apiKey": "{env:DEEPSEEK1_API_KEY}"
       },
       "models": {
         "deepseek-chat": {
-          "name": "DeepSeek Chat",
+          "name": "DeepSeek Chat (official bare id)",
           "maxTokens": 4096,
           "contextWindow": 65536
         },
@@ -25,32 +25,23 @@
         }
       }
     },
-    "provider-a": {
+    "deepseek2": {
       "type": "openai-compatible",
       "options": {
-        "baseURL": "https://a.example.com/v1",
-        "apiKey": "{env:PROVIDER_A_API_KEY}"
+        "baseURL": "https://llm.example.com/v1",
+        "apiKey": "{env:DEEPSEEK2_API_KEY}"
       },
       "models": {
-        "shared-model": {
-          "name": "Same bare id via supplier A (select provider-a/shared-model)",
+        "deepseek/deepseek-v4-flash": {
+          "name": "Nested wire id (select deepseek2/deepseek/deepseek-v4-flash)",
           "maxTokens": 8192,
           "contextWindow": 128000
-        }
-      }
-    },
-    "provider-b": {
-      "type": "openai-compatible",
-      "options": {
-        "baseURL": "https://b.example.com/v1",
-        "apiKey": "{env:PROVIDER_B_API_KEY}"
-      },
-      "models": {
-        "shared-model": {
-          "name": "Same bare id via supplier B"
         },
-        "other-model": {
-          "name": "Only on B"
+        "flash": {
+          "name": "Short key + id override (select deepseek2/flash)",
+          "id": "deepseek/deepseek-v4-flash",
+          "maxTokens": 8192,
+          "contextWindow": 128000
         }
       }
     },

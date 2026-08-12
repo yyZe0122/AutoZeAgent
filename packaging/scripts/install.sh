@@ -40,16 +40,32 @@ if [ ! -f "$SYSCONFDIR/agent.json" ] && [ ! -f "$SYSCONFDIR/agent.local.json" ];
   else
     cat >"$SYSCONFDIR/agent.json" <<'EOF'
 {
-  "model": "deepseek/deepseek-chat",
+  "model": "deepseek1/deepseek-chat",
   "provider": {
-    "deepseek": {
+    "deepseek1": {
       "type": "openai-compatible",
       "options": {
-        "baseURL": "https://api.deepseek.com",
-        "apiKey": "{env:DEEPSEEK_API_KEY}"
+        "baseURL": "https://api.deepseek.com/v1",
+        "apiKey": "{env:DEEPSEEK1_API_KEY}"
       },
       "models": {
         "deepseek-chat": { "name": "DeepSeek Chat" }
+      }
+    },
+    "deepseek2": {
+      "type": "openai-compatible",
+      "options": {
+        "baseURL": "https://llm.example.com/v1",
+        "apiKey": "{env:DEEPSEEK2_API_KEY}"
+      },
+      "models": {
+        "deepseek/deepseek-v4-flash": {
+          "name": "Nested wire id (select deepseek2/deepseek/deepseek-v4-flash)"
+        },
+        "flash": {
+          "name": "Short key + id override (select deepseek2/flash)",
+          "id": "deepseek/deepseek-v4-flash"
+        }
       }
     }
   }
@@ -65,7 +81,8 @@ if [ ! -f "$SYSCONFDIR/env" ]; then
   cat >"$SYSCONFDIR/env" <<'EOF'
 # Optional KEY=value for system mode (daemon loads; does not override process env).
 # Or put a literal apiKey in agent.json / use {file:…}.
-DEEPSEEK_API_KEY=
+DEEPSEEK1_API_KEY=
+DEEPSEEK2_API_KEY=
 OPENAI_API_KEY=
 ANTHROPIC_API_KEY=
 GEMINI_API_KEY=

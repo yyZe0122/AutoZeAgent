@@ -103,10 +103,11 @@ func EnsureEnvFile(configDir string) (created bool, path string, err error) {
 // defaultEnvTemplate is optional; empty values are fine. Fill any keys you use with {env:NAME} in config.
 const defaultEnvTemplate = `# YunmengZe optional environment file (KEY=value).
 # Loaded when the daemon/CLI starts; does not override variables already set in the process.
-# Pair with config apiKey "{env:DEEPSEEK_API_KEY}" (recommended), or use a literal apiKey in JSON, or {file:…}.
+# Pair with config apiKey "{env:DEEPSEEK1_API_KEY}" / "{env:DEEPSEEK2_API_KEY}" (recommended), or literal / {file:…}.
 # Keep this file private (mode 600). Do not commit secrets.
 #
-DEEPSEEK_API_KEY=
+DEEPSEEK1_API_KEY=
+DEEPSEEK2_API_KEY=
 OPENAI_API_KEY=
 ANTHROPIC_API_KEY=
 GEMINI_API_KEY=

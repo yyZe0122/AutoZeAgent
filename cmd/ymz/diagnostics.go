@@ -192,7 +192,10 @@ func validateConfig(mode paths.Mode) (configCheck, error) {
 		return configCheck{}, errors.New("provider config not found under config directory")
 	}
 	check.ProviderOK = true
-	check.Model = resolved.ProviderID + "/" + resolved.ModelID
+	check.Model = resolved.SelectionRef
+	if check.Model == "" {
+		check.Model = resolved.ProviderID + "/" + resolved.ModelID
+	}
 	check.ProviderID = resolved.ProviderID
 	check.Source = resolved.Source
 	check.OK = true

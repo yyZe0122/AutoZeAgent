@@ -582,7 +582,7 @@ func (m model) modelCommandCmd(arg string) tea.Cmd {
 			// Switching while not ready still goes to SetModelConfig for a concrete error.
 		}
 		if arg == "" {
-			status := "select a model (providerID/modelID; catalog keys are bare ids under each provider)"
+			status := "select a model (providerID/modelID…; model segment may contain /; optional models.<key>.id for wire id)"
 			if !cfg.Ready && cfg.Error != "" {
 				status = "model not ready: " + cfg.Error
 			}

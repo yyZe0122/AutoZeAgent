@@ -137,17 +137,33 @@ func copyFile(src, dst string, mode os.FileMode) error {
 // defaultConfigTemplate is written when ConfigDir has no config and nothing to migrate.
 // Keys use {env:…}; no literal secrets.
 const defaultConfigTemplate = `{
-  "model": "deepseek/deepseek-chat",
+  "model": "deepseek1/deepseek-chat",
   "provider": {
-    "deepseek": {
+    "deepseek1": {
       "type": "openai-compatible",
       "options": {
-        "baseURL": "https://api.deepseek.com",
-        "apiKey": "{env:DEEPSEEK_API_KEY}"
+        "baseURL": "https://api.deepseek.com/v1",
+        "apiKey": "{env:DEEPSEEK1_API_KEY}"
       },
       "models": {
         "deepseek-chat": {
           "name": "DeepSeek Chat"
+        }
+      }
+    },
+    "deepseek2": {
+      "type": "openai-compatible",
+      "options": {
+        "baseURL": "https://llm.example.com/v1",
+        "apiKey": "{env:DEEPSEEK2_API_KEY}"
+      },
+      "models": {
+        "deepseek/deepseek-v4-flash": {
+          "name": "Nested wire id (select deepseek2/deepseek/deepseek-v4-flash)"
+        },
+        "flash": {
+          "name": "Short key + id override (select deepseek2/flash)",
+          "id": "deepseek/deepseek-v4-flash"
         }
       }
     }

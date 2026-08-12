@@ -19,8 +19,8 @@ brew install --cask yyZe0122/tap/ymz          # macOS / Linux
 # scoop bucket add ymz https://github.com/yyZe0122/scoop-bucket && scoop install ymz   # Windows
 
 # 2) API key (recommended)
-#    edit ~/.yunmengze/env  →  DEEPSEEK_API_KEY=sk-...
-#    or: export DEEPSEEK_API_KEY=...
+#    edit ~/.yunmengze/env  →  DEEPSEEK1_API_KEY=sk-...
+#    or: export DEEPSEEK1_API_KEY=...
 
 # 3) Validate + open TUI (auto-starts daemon)
 ymz config validate --mode user
@@ -44,7 +44,7 @@ core.db  single SQLite source of truth
 | **Dual-track chat** | **agent** = build with workspace tools · **plan** = same loop, read-only |
 | **Tool Broker** | Only effect path: Policy → Approval → Grant → path limits → Audit |
 | **Local daemon** | Unique per mode; TUI/`run` auto-ensure; `ymz start\|stop\|restart\|status` |
-| **Multi-provider** | Nested catalog per supplier; select `providerId/modelId` |
+| **Multi-provider** | Nested catalog per supplier; select `providerId/modelId…` (OpenCode-style) |
 | **Hot-reload** | Main provider stack (~0.5s) while daemon runs — [ADR-048](docs/architecture/048-provider-config-hot-reload.md) |
 | **Memory · cron · MCP** | In-process memory, chat-native jobs, MCP tools via Broker |
 
@@ -128,7 +128,7 @@ Override root: `YMZ_HOME=/abs/path`.
 
 ### API key (any one)
 
-1. `{env:DEEPSEEK_API_KEY}` + system env or `~/.yunmengze/env` (**recommended**)  
+1. `{env:DEEPSEEK1_API_KEY}` + system env or `~/.yunmengze/env` (**recommended**)  
 2. `{file:path}` relative to ConfigDir  
 3. Literal `"apiKey": "sk-..."` in JSON (local only; mode `600`)
 
@@ -139,15 +139,17 @@ ymz config validate --mode user
 
 ### Minimal provider config
 
+Templates use two sample suppliers: **`deepseek1`** (official bare model ids) and **`deepseek2`** (gateway / nested wire ids). Active selection below is `deepseek1`.
+
 ```json
 {
-  "model": "deepseek/deepseek-chat",
+  "model": "deepseek1/deepseek-chat",
   "provider": {
-    "deepseek": {
+    "deepseek1": {
       "type": "openai-compatible",
       "options": {
-        "baseURL": "https://api.deepseek.com",
-        "apiKey": "{env:DEEPSEEK_API_KEY}"
+        "baseURL": "https://api.deepseek.com/v1",
+        "apiKey": "{env:DEEPSEEK1_API_KEY}"
       },
       "models": {
         "deepseek-chat": {
@@ -156,13 +158,29 @@ ymz config validate --mode user
           "contextWindow": 65536
         }
       }
+    },
+    "deepseek2": {
+      "type": "openai-compatible",
+      "options": {
+        "baseURL": "https://llm.example.com/v1",
+        "apiKey": "{env:DEEPSEEK2_API_KEY}"
+      },
+      "models": {
+        "deepseek/deepseek-v4-flash": {
+          "name": "Nested wire id → select deepseek2/deepseek/deepseek-v4-flash"
+        },
+        "flash": {
+          "name": "Short key + id override → select deepseek2/flash",
+          "id": "deepseek/deepseek-v4-flash"
+        }
+      }
     }
   }
 }
 ```
 
-- Selection is always **`providerId/modelId`**; catalog keys are **bare** ids under each provider.  
-- Same bare id on two suppliers is fine (`a/m` vs `b/m`).  
+- Selection is **`providerId/modelId…`** (first `/` only; model segment may contain `/`). Catalog keys match that segment; optional `models.<key>.id` overrides the wire/API id (OpenCode-style).  
+- Example: `deepseek1/deepseek-chat` wires `deepseek-chat`; `deepseek2/deepseek/deepseek-v4-flash` wires `deepseek/deepseek-v4-flash`.  
 - `maxTokens` = output cap; `contextWindow` = packing / UI pressure ([ADR-041](docs/architecture/041-context-packing-and-pressure.md)).  
 - Optional role map `models.subagent` / `models.compact` ([ADR-045](docs/architecture/045-model-roles.md)).  
 - Optional `chat` (workspace, tools, permission, memory): full example [`configs/agent.json.example`](configs/agent.json.example) · wire formats [`docs/provider-protocols.md`](docs/provider-protocols.md).

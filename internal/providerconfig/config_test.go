@@ -19,6 +19,9 @@ func TestLoadUsesConfigDirLocalFirst(t *testing.T) {
 	if resolved == nil || resolved.ProviderID != "deepseek" || resolved.ModelID != "deepseek-v4-flash" {
 		t.Fatalf("resolved = %+v", resolved)
 	}
+	if resolved.SelectionRef != "deepseek/deepseek-v4-flash" {
+		t.Fatalf("selection = %q", resolved.SelectionRef)
+	}
 	if resolved.Source != filepath.Join(root, LocalFilename) {
 		t.Fatalf("source = %q", resolved.Source)
 	}
@@ -85,7 +88,7 @@ func TestLoadRejectsUnknownModel(t *testing.T) {
 
 func TestLoadAcceptsMistypedCatalogKeyWithProviderPrefix(t *testing.T) {
 	root := t.TempDir()
-	// User put "deepseek/deepseek-v4-flash" as catalog key (OpenCode-style bare id expected).
+	// Mistaken catalog key "provider/model" while selection model segment is bare.
 	config := `{
   "model": "deepseek/deepseek-v4-flash",
   "provider": {
@@ -108,8 +111,99 @@ func TestLoadAcceptsMistypedCatalogKeyWithProviderPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Wire id is the selection model segment (OpenCode api.id default), not the mistaken key.
 	if resolved.ProviderID != "deepseek" || resolved.ModelID != "deepseek-v4-flash" {
 		t.Fatalf("resolved = %+v", resolved)
+	}
+	if resolved.SelectionRef != "deepseek/deepseek-v4-flash" {
+		t.Fatalf("selection = %q", resolved.SelectionRef)
+	}
+}
+
+func TestLoadNestedModelIDWirePreserved(t *testing.T) {
+	root := t.TempDir()
+	// OpenCode/NewAPI: model segment may contain '/' (e.g. deepseek/deepseek-v4-flash).
+	config := `{
+  "model": "ziy/deepseek/deepseek-v4-flash",
+  "provider": {
+    "ziy": {
+      "type": "openai-compatible",
+      "options": {
+        "baseURL": "https://llm.example.com/v1",
+        "apiKey": "sk-test"
+      },
+      "models": {
+        "deepseek/deepseek-v4-flash": { "name": "Flash" }
+      }
+    }
+  }
+}`
+	if err := os.WriteFile(filepath.Join(root, LocalFilename), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.ProviderID != "ziy" {
+		t.Fatalf("provider = %q", resolved.ProviderID)
+	}
+	if resolved.SelectionRef != "ziy/deepseek/deepseek-v4-flash" {
+		t.Fatalf("selection = %q", resolved.SelectionRef)
+	}
+	if resolved.ModelID != "deepseek/deepseek-v4-flash" {
+		t.Fatalf("wire model = %q want deepseek/deepseek-v4-flash", resolved.ModelID)
+	}
+	selected, refs, err := ListModelRefs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected != "ziy/deepseek/deepseek-v4-flash" {
+		t.Fatalf("selected = %q", selected)
+	}
+	var found bool
+	for _, r := range refs {
+		if r.ID == "ziy/deepseek/deepseek-v4-flash" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("refs = %+v", refs)
+	}
+}
+
+func TestLoadModelIDOverride(t *testing.T) {
+	root := t.TempDir()
+	config := `{
+  "model": "ziy/flash",
+  "provider": {
+    "ziy": {
+      "type": "openai-compatible",
+      "options": {
+        "baseURL": "https://llm.example.com/v1",
+        "apiKey": "sk-test"
+      },
+      "models": {
+        "flash": {
+          "name": "Flash",
+          "id": "deepseek/deepseek-v4-flash"
+        }
+      }
+    }
+  }
+}`
+	if err := os.WriteFile(filepath.Join(root, LocalFilename), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.SelectionRef != "ziy/flash" {
+		t.Fatalf("selection = %q", resolved.SelectionRef)
+	}
+	if resolved.ModelID != "deepseek/deepseek-v4-flash" {
+		t.Fatalf("wire model = %q", resolved.ModelID)
 	}
 }
 
@@ -280,7 +374,7 @@ func TestEnsureConfigWritesDefaultWhenEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if selected != "deepseek/deepseek-chat" || len(models) == 0 {
+	if selected != "deepseek1/deepseek-chat" || len(models) == 0 {
 		t.Fatalf("selected=%q models=%v", selected, models)
 	}
 }

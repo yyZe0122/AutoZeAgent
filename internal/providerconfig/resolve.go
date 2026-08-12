@@ -93,24 +93,11 @@ func validateModelInFile(path, providerID, modelID string) error {
 	return nil
 }
 
-// bareModelID strips an accidental "provider/" prefix from a catalog key or model id.
-// Catalog keys must be bare ids (OpenCode-style); selection is always providerID/modelID.
-func bareModelID(providerID, modelID string) string {
-	providerID = strings.TrimSpace(providerID)
-	modelID = strings.TrimSpace(modelID)
-	if providerID == "" || modelID == "" {
-		return modelID
-	}
-	prefix := providerID + "/"
-	if strings.HasPrefix(modelID, prefix) {
-		return strings.TrimSpace(strings.TrimPrefix(modelID, prefix))
-	}
-	return modelID
-}
-
-// lookupModel finds a model entry under provider.models.
-// Prefer bare modelID; also accept mistaken keys like "providerID/modelID".
-// Empty catalog: ok with zero Model (pass-through id).
+// lookupModel finds a model entry under provider.models (OpenCode-style).
+// Selection modelID is everything after the first '/' in "provider/model…"; catalog
+// keys match that segment exactly and may themselves contain '/'.
+// Also accept a mistaken key "providerID/modelID" when selection modelID is bare.
+// Empty catalog: ok with zero Model (pass-through wire id = modelID).
 func lookupModel(catalog map[string]Model, providerID, modelID string) (Model, bool) {
 	if len(catalog) == 0 {
 		return Model{}, true
@@ -122,20 +109,10 @@ func lookupModel(catalog map[string]Model, providerID, modelID string) (Model, b
 	if m, ok := catalog[modelID]; ok {
 		return m, true
 	}
-	bare := bareModelID(providerID, modelID)
-	if bare != modelID {
-		if m, ok := catalog[bare]; ok {
-			return m, true
-		}
-	}
-	// Mistaken catalog key: "provider/model" while selection is bare model id.
-	full := strings.TrimSpace(providerID) + "/" + bare
-	if m, ok := catalog[full]; ok {
-		return m, true
-	}
-	for key, m := range catalog {
-		key = strings.TrimSpace(key)
-		if bareModelID(providerID, key) == bare {
+	// Mistaken catalog key: "provider/model" while selection model segment is bare.
+	providerID = strings.TrimSpace(providerID)
+	if providerID != "" {
+		if m, ok := catalog[providerID+"/"+modelID]; ok {
 			return m, true
 		}
 	}
@@ -148,14 +125,11 @@ func errModelNotInCatalog(providerID, modelID string, catalog map[string]Model) 
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	hint := ""
-	if strings.Contains(modelID, "/") {
-		hint = fmt.Sprintf(`; catalog keys are bare model ids under provider %q (not %q)`, providerID, modelID)
-	} else if len(keys) > 0 {
-		// Suggest if user put provider/model as the only key shape.
+	hint := `; catalog key must equal the model segment of selection (after first "/"; may contain "/") or set models.<key>.id for wire override`
+	if providerID != "" && modelID != "" {
 		for _, k := range keys {
-			if bareModelID(providerID, k) == modelID || strings.HasSuffix(k, "/"+modelID) {
-				hint = fmt.Sprintf(`; catalog key %q looks like provider/model — use bare %q as the key`, k, modelID)
+			if k == providerID+"/"+modelID {
+				hint = fmt.Sprintf(`; catalog key %q matches provider/model — use bare or nested model segment %q as the key`, k, modelID)
 				break
 			}
 		}
@@ -193,11 +167,17 @@ func resolveFromFile(path string, config File, providerID, modelID string) (Reso
 	if err != nil {
 		return Resolved{}, fmt.Errorf("provider %q: %w", providerID, err)
 	}
-	// Selection is always providerID/modelID; catalog keys are bare model ids (per-provider).
-	modelID = bareModelID(providerID, modelID)
+	// OpenCode: selection = providerID + "/" + modelID; modelID may contain '/'.
+	// Wire id = models.<key>.id if set, else modelID (never strip provider prefix).
+	providerID = strings.TrimSpace(providerID)
+	modelID = strings.TrimSpace(modelID)
 	modelConfig, modelConfigured := lookupModel(provider.Models, providerID, modelID)
 	if len(provider.Models) > 0 && !modelConfigured {
 		return Resolved{}, errModelNotInCatalog(providerID, modelID, provider.Models)
+	}
+	wireID := strings.TrimSpace(modelConfig.ID)
+	if wireID == "" {
+		wireID = modelID
 	}
 	baseURL := strings.TrimSpace(provider.Options.BaseURL)
 	if baseURL == "" {
@@ -232,7 +212,8 @@ func resolveFromFile(path string, config File, providerID, modelID string) (Reso
 		return Resolved{}, fmt.Errorf("resolve provider %q headers: %w", providerID, err)
 	}
 	return Resolved{
-		Source: path, ProviderID: providerID, Protocol: protocol, ModelID: modelID,
+		Source: path, SelectionRef: providerID + "/" + modelID,
+		ProviderID: providerID, Protocol: protocol, ModelID: wireID,
 		BaseURL: baseURL, APIKey: apiKey,
 		CompletionPath:  strings.TrimSpace(provider.Options.CompletionPath),
 		ModelsPath:      strings.TrimSpace(provider.Options.ModelsPath),

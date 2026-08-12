@@ -229,7 +229,10 @@ type ProviderOptions struct {
 }
 
 type Model struct {
-	Name           string   `json:"name,omitempty"`
+	Name string `json:"name,omitempty"`
+	// ID is the wire/API model id sent to the provider (OpenCode model.id).
+	// When empty, the catalog key / selection model segment is used as the wire id.
+	ID             string   `json:"id,omitempty"`
 	ResponseFormat string   `json:"responseFormat,omitempty"`
 	Temperature    *float64 `json:"temperature,omitempty"`
 	MaxTokens      int64    `json:"maxTokens,omitempty"`
@@ -240,9 +243,12 @@ type Model struct {
 }
 
 type Resolved struct {
-	Source           string
-	ProviderID       string
-	Protocol         string
+	Source string
+	// SelectionRef is the full selection string providerID/modelID (modelID may contain '/').
+	SelectionRef string
+	ProviderID   string
+	Protocol     string
+	// ModelID is the wire/API model id (OpenCode api.id): models.<key>.id or the model segment.
 	ModelID          string
 	BaseURL          string
 	APIKey           string

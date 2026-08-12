@@ -21,14 +21,14 @@ On first start, if ConfigDir has no file, the daemon may **migrate** once from t
 
 | Form | Example | Notes |
 | --- | --- | --- |
-| Environment placeholder | `"{env:DEEPSEEK_API_KEY}"` | **Recommended.** Value from process env and/or ConfigDir `env` file |
+| Environment placeholder | `"{env:DEEPSEEK1_API_KEY}"` | **Recommended.** Value from process env and/or ConfigDir `env` file |
 | File reference | `"{file:secrets/key.txt}"` | Path relative to ConfigDir, or absolute |
 | Literal string | `"sk-..."` | Allowed for local convenience; protect file permissions; never commit |
 
 Examples:
 
 ```json
-"apiKey": "{env:DEEPSEEK_API_KEY}"
+"apiKey": "{env:DEEPSEEK1_API_KEY}"
 ```
 
 ```json
@@ -43,53 +43,59 @@ Optional ConfigDir `env` file:
 
 ```bash
 # ~/.yunmengze/env  (chmod 600)
-DEEPSEEK_API_KEY=sk-...
+DEEPSEEK1_API_KEY=sk-...
+DEEPSEEK2_API_KEY=sk-...
 ```
 
 See also [`configs/agent.json.example`](../configs/agent.json.example) (includes env / file / literal illustrations).
 
 ## Multi-provider catalog (OpenCode-style nesting)
 
-Each entry under `provider` is one **supplier** (endpoint + wire protocol + credentials). Its **model catalog is nested** under that entry. Keys in `provider.<id>.models` are **bare model ids** only.
+Each entry under `provider` is one **supplier** (endpoint + wire protocol + credentials). Its **model catalog is nested** under that entry.
+
+Selection and wire ids follow **OpenCode** rules:
+
+1. Top-level `model` is `providerID/modelID…` — only the **first** `/` separates supplier from model segment.
+2. The model segment **may contain `/`** (OpenRouter / NewAPI style: `deepseek/deepseek-v4-flash`).
+3. Catalog keys under `provider.<id>.models` must equal that model segment (exact match; may contain `/`).
+4. The HTTP body `model` field is the **wire id**: `models.<key>.id` if set, otherwise the model segment (never the full selection string, never a stripped-down bare rewrite of a nested id).
 
 | Concept | JSON path | Example |
 | --- | --- | --- |
-| Active selection | top-level `model` | `"provider-a/shared-model"` |
-| Supplier A | `provider.provider-a` | own `type`, `baseURL`, `apiKey` |
-| Catalog on A | `provider.provider-a.models` | `"shared-model": { "name": "…" }` |
-| Role overrides | top-level `models` | `subagent` / `compact` → `provider/model` (ADR-045) — **not** the catalog |
+| Active selection | top-level `model` | `"deepseek1/deepseek-chat"` or `"deepseek2/deepseek/deepseek-v4-flash"` |
+| Supplier deepseek1 | `provider.deepseek1` | official bare model ids |
+| Supplier deepseek2 | `provider.deepseek2` | gateway nested wire ids / `id` override |
+| Catalog key | `provider.<id>.models` | `"deepseek-chat"` or `"deepseek/deepseek-v4-flash"` |
+| Wire override | `models.<key>.id` | `"flash": { "id": "deepseek/deepseek-v4-flash" }` |
+| Role overrides | top-level `models` | `subagent` / `compact` → selection ref (ADR-045) — **not** the catalog |
 
-Same bare model id on two suppliers is fine; selection disambiguates:
+Same model segment on two suppliers is fine; selection disambiguates. Templates use **`deepseek1`** / **`deepseek2`**:
 
 ```json
 {
-  "model": "provider-a/shared-model",
+  "model": "deepseek1/deepseek-chat",
   "provider": {
-    "provider-a": {
+    "deepseek1": {
       "type": "openai-compatible",
-      "options": { "baseURL": "https://a.example.com/v1", "apiKey": "{env:PROVIDER_A_API_KEY}" },
-      "models": { "shared-model": { "name": "via A" } }
+      "options": { "baseURL": "https://api.deepseek.com/v1", "apiKey": "{env:DEEPSEEK1_API_KEY}" },
+      "models": { "deepseek-chat": { "name": "DeepSeek Chat" } }
     },
-    "provider-b": {
+    "deepseek2": {
       "type": "openai-compatible",
-      "options": { "baseURL": "https://b.example.com/v1", "apiKey": "{env:PROVIDER_B_API_KEY}" },
+      "options": { "baseURL": "https://llm.example.com/v1", "apiKey": "{env:DEEPSEEK2_API_KEY}" },
       "models": {
-        "shared-model": { "name": "via B" },
-        "other-model": { "name": "only B" }
+        "deepseek/deepseek-v4-flash": { "name": "Nested wire id" },
+        "flash": { "name": "Flash alias", "id": "deepseek/deepseek-v4-flash" }
       }
-    },
-    "provider-c": {
-      "type": "anthropic",
-      "options": { "baseURL": "https://api.anthropic.com", "apiKey": "{env:ANTHROPIC_API_KEY}" },
-      "models": { "claude-model-id": { "name": "Claude" } }
     }
   }
 }
 ```
 
-- Catalog key **must not** be `provider-a/shared-model` (only bare `shared-model`). Mistyped keys with a `provider/` prefix are accepted as a convenience.
-- Empty `models` under a provider allows any model id (pass-through for all protocol types; API may still reject unknown ids).
-- TUI `/model` lists `providerId/modelId` refs and only changes top-level `model`.
+- Prefer catalog keys equal to the upstream model id (including `/` when the gateway requires it). Optional `id` overrides the wire name while keeping a short selection key.
+- Mistyped keys of the form `providerID/modelID` when the selection model segment is bare are still accepted as a convenience; wire id remains the bare segment (or `id`).
+- Empty `models` under a provider allows any model id (pass-through; API may still reject unknown ids).
+- TUI `/model` lists `providerId/modelId…` refs and only changes top-level `model`.
 - **`ready`:** true only when config load succeeded **and** agent/chat was bound at daemon start. Otherwise `error` explains (fix config, or `ymz restart` if chat never started). Secrets never appear in `error`.
 
 ### Hot-reload (ADR-048)
@@ -113,10 +119,10 @@ Top-level `models` maps roles to other **selection** refs (ADR-045). Unset roles
 
 ```json
 {
-  "model": "provider-a/shared-model",
+  "model": "deepseek1/deepseek-chat",
   "models": {
-    "subagent": "provider-b/other-model",
-    "compact": "provider-b/other-model"
+    "subagent": "deepseek2/flash",
+    "compact": "deepseek2/flash"
   }
 }
 ```

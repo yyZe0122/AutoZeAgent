@@ -79,6 +79,11 @@
       "additionalProperties": false,
       "properties": {
         "name": {"type": "string"},
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Wire/API model id (OpenCode model.id). When omitted, the catalog key / selection model segment is sent upstream."
+        },
         "responseFormat": {"enum": ["auto", "json_schema", "json_object"]},
         "temperature": {"type": "number", "minimum": 0, "maximum": 2},
         "maxTokens": {

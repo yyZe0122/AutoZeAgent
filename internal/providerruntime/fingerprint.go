@@ -23,6 +23,7 @@ func Fingerprint(resolved *providerconfig.Resolved) string {
 	}
 	return strings.Join([]string{
 		resolved.ProviderID,
+		resolved.SelectionRef,
 		resolved.ModelID,
 		resolved.Protocol,
 		resolved.BaseURL,

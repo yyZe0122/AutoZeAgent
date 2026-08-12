@@ -118,19 +118,35 @@ seed_config() {
     else
       cat >"${CONFIG_DIR}/agent.json" <<'EOF'
 {
-  "model": "deepseek/deepseek-chat",
+  "model": "deepseek1/deepseek-chat",
   "provider": {
-    "deepseek": {
+    "deepseek1": {
       "type": "openai-compatible",
       "options": {
-        "baseURL": "https://api.deepseek.com",
-        "apiKey": "{env:DEEPSEEK_API_KEY}"
+        "baseURL": "https://api.deepseek.com/v1",
+        "apiKey": "{env:DEEPSEEK1_API_KEY}"
       },
       "models": {
         "deepseek-chat": {
           "name": "DeepSeek Chat",
           "maxTokens": 4096,
           "contextWindow": 65536
+        }
+      }
+    },
+    "deepseek2": {
+      "type": "openai-compatible",
+      "options": {
+        "baseURL": "https://llm.example.com/v1",
+        "apiKey": "{env:DEEPSEEK2_API_KEY}"
+      },
+      "models": {
+        "deepseek/deepseek-v4-flash": {
+          "name": "Nested wire id (select deepseek2/deepseek/deepseek-v4-flash)"
+        },
+        "flash": {
+          "name": "Short key + id override (select deepseek2/flash)",
+          "id": "deepseek/deepseek-v4-flash"
         }
       }
     }
@@ -151,10 +167,11 @@ EOF
   if [ ! -f "${CONFIG_DIR}/env" ]; then
     cat >"${CONFIG_DIR}/env" <<'EOF'
 # Optional KEY=value (loaded by daemon/CLI; does not override existing process env).
-# Pair with apiKey "{env:DEEPSEEK_API_KEY}" in agent.json, or put a literal apiKey in JSON, or use {file:…}.
+# Pair with apiKey "{env:DEEPSEEK1_API_KEY}" / "{env:DEEPSEEK2_API_KEY}" in agent.json, or literal / {file:…}.
 # chmod 600 recommended. Do not commit secrets.
 #
-DEEPSEEK_API_KEY=
+DEEPSEEK1_API_KEY=
+DEEPSEEK2_API_KEY=
 OPENAI_API_KEY=
 ANTHROPIC_API_KEY=
 GEMINI_API_KEY=
@@ -236,8 +253,8 @@ echo "  ${INSTALL_DIR}/ymz"
 echo "  ${INSTALL_DIR}/ymzd"
 echo ""
 echo "API key (pick one; nothing is forced):"
-echo "  1) Edit ${CONFIG_DIR}/env  (e.g. DEEPSEEK_API_KEY=...) — loaded automatically"
-echo "  2) Export in the shell:  export DEEPSEEK_API_KEY=..."
+echo "  1) Edit ${CONFIG_DIR}/env  (e.g. DEEPSEEK1_API_KEY=...) — loaded automatically"
+echo "  2) Export in the shell:  export DEEPSEEK1_API_KEY=..."
 echo "  3) Put a literal apiKey string in ${CONFIG_DIR}/agent.json"
 echo "  4) Use {file:relative-or-abs-path} in apiKey"
 echo ""
