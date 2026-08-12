@@ -11,22 +11,7 @@ import (
 func resolve(mode Mode) (Layout, error) {
 	switch mode {
 	case ModeUser:
-		configBase, err := os.UserConfigDir()
-		if err != nil {
-			return Layout{}, fmt.Errorf("resolve user config directory: %w", err)
-		}
-		dataBase := os.Getenv("LOCALAPPDATA")
-		if dataBase == "" {
-			dataBase = configBase
-		}
-		root := filepath.Join(dataBase, "YunmengZe")
-		return Layout{
-			Mode:       mode,
-			ConfigDir:  filepath.Join(configBase, "YunmengZe"),
-			DataDir:    root,
-			RuntimeDir: filepath.Join(root, "run"),
-			LogDir:     filepath.Join(root, "logs"),
-		}, nil
+		return resolveUser()
 	case ModeSystem:
 		programData := os.Getenv("ProgramData")
 		if programData == "" {

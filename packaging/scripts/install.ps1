@@ -1,7 +1,7 @@
-# Installs YunmengZe user-wide on Windows (no admin).
-# - Copies only the two binaries into %LOCALAPPDATA%\Programs\YunmengZe\bin
+# Installs YunmengZe Agent user-wide on Windows (no admin).
+# - Copies ymz.exe + ymzd.exe into %LOCALAPPDATA%\Programs\YunmengZe\bin
 # - Adds that directory to the user PATH
-# - Seeds %APPDATA%\YunmengZe\agent.json + env when missing
+# - Seeds %USERPROFILE%\.yunmengze\agent.json + env when missing (flat home root)
 # apiKey may use {env:}, {file:}, or a literal string — none is forced.
 param(
     [string]$Repository = $env:YMZ_REPOSITORY,
@@ -28,10 +28,10 @@ if ([string]::IsNullOrWhiteSpace($InstallDir)) {
     }
 }
 if ([string]::IsNullOrWhiteSpace($ConfigDir)) {
-    if ([string]::IsNullOrWhiteSpace($env:APPDATA)) {
-        $ConfigDir = Join-Path $env:USERPROFILE 'YunmengZe'
+    if (-not [string]::IsNullOrWhiteSpace($env:YMZ_HOME)) {
+        $ConfigDir = $env:YMZ_HOME
     } else {
-        $ConfigDir = Join-Path $env:APPDATA 'YunmengZe'
+        $ConfigDir = Join-Path $env:USERPROFILE '.yunmengze'
     }
 }
 

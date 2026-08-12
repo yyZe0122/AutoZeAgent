@@ -8,10 +8,10 @@ Configuration is loaded **only** from the OS config directory (`paths.Layout.Con
 2. `<config-dir>/agent.json`
 3. Optional `<config-dir>/env` — `KEY=value` lines loaded into the process before resolving `{env:…}` (does **not** override variables already set in the environment)
 
-| Mode | Linux | Windows | macOS |
-| --- | --- | --- | --- |
-| user | `~/.config/yunmengze` (`XDG_CONFIG_HOME`) | `%APPDATA%\YunmengZe` | Application Support path from `paths` |
-| system | `/etc/yunmengze` | `ProgramData\YunmengZe\config` | system path from `paths` |
+| Mode | Path |
+| --- | --- |
+| user (all OS) | `~/.yunmengze` (`%USERPROFILE%\.yunmengze` on Windows); override with `YMZ_HOME` |
+| system | Linux `/etc/yunmengze` · Windows `ProgramData\YunmengZe\config` · macOS system path from `paths` |
 
 On first start, if ConfigDir has no file, the daemon may **migrate** once from the process working directory or data dir (legacy project `agent.local.json`), otherwise it writes a default template with `{env:…}` placeholders (no secrets) and may seed an empty `env` template. Installers do the same without overwriting existing files. Project directories are **not** searched for ongoing loads.
 
@@ -42,7 +42,7 @@ Examples:
 Optional ConfigDir `env` file:
 
 ```bash
-# ~/.config/yunmengze/env  (chmod 600)
+# ~/.yunmengze/env  (chmod 600)
 DEEPSEEK_API_KEY=sk-...
 ```
 

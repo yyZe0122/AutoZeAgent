@@ -98,25 +98,38 @@ Systemd / machine-wide install and **release publication**: [`docs/release.md`](
 
 ## Configure / 配置
 
-Provider config lives in the **OS config directory only** (not project cwd). One-line installers seed templates when missing.
+Provider config lives under a **flat home root** (Claude/OpenCode-style), not project cwd. Installers seed templates when missing.
 
-| Mode | Linux | Windows |
+| Mode | All platforms (user) | system (examples) |
 | --- | --- | --- |
-| user | `~/.config/yunmengze/` | `%APPDATA%\YunmengZe\` |
-| system | `/etc/yunmengze/` | `%ProgramData%\YunmengZe\config\` |
+| **user** | **`~/.yunmengze/`** — Windows: `%USERPROFILE%\.yunmengze\` | — |
+| system | — | Linux `/etc/yunmengze` · Win `%ProgramData%\YunmengZe\config` |
 
-Lookup: `agent.local.json` then `agent.json`. Optional `env` file (`KEY=value`) is loaded by daemon/CLI (does not override already-set process env).
+**User layout (config + data + logs + runtime):**
+
+```text
+~/.yunmengze/
+  agent.json          # main config (or agent.local.json)
+  env                 # optional KEY=value
+  core.db             # SQLite
+  logs/               # ymzd.jsonl
+  run/                # socket, pid
+  skills/             # optional
+```
+
+Override whole root: `YMZ_HOME=/abs/path`. Lookup: `agent.local.json` then `agent.json`. Optional `env` does not override process env already set.
 
 **API key — pick any (not forced):**
 
-1. `{env:DEEPSEEK_API_KEY}` + system env or ConfigDir `env` file (**recommended**)  
-2. `{file:relative-or-abs-path}`  
+1. `{env:DEEPSEEK_API_KEY}` + system env or `~/.yunmengze/env` (**recommended**)  
+2. `{file:relative-or-abs-path}` (relative to ConfigDir)  
 3. Literal `"apiKey": "sk-..."` in JSON (local only; protect permissions)
 
 ```bash
-# after install, or manually:
-# edit ~/.config/yunmengze/env   OR   export DEEPSEEK_API_KEY=...
-# OR put a literal apiKey in agent.json
+# after install:
+# edit ~/.yunmengze/env   OR   export DEEPSEEK_API_KEY=...
+# OR put a literal apiKey in ~/.yunmengze/agent.json
+ymz paths user
 ymz config validate --mode user
 ```
 

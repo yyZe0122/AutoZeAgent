@@ -3,7 +3,9 @@ package paths
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 )
 
 type Mode string
@@ -11,6 +13,11 @@ type Mode string
 const (
 	ModeUser   Mode = "user"
 	ModeSystem Mode = "system"
+
+	// DotDir is the user-mode home root (Claude/OpenCode-style), all platforms.
+	DotDir = ".yunmengze"
+	// HomeEnv overrides the entire user root when set to an absolute path.
+	HomeEnv = "YMZ_HOME"
 )
 
 type Layout struct {
@@ -30,6 +37,29 @@ func ParseMode(value string) (Mode, error) {
 	default:
 		return "", fmt.Errorf("invalid runtime mode %q: expected user or system", value)
 	}
+}
+
+// resolveUser is shared across OSes: ~/.yunmengze (or %USERPROFILE%\.yunmengze).
+// Config, data, logs, and runtime live under one flat root (ConfigDir == DataDir).
+func resolveUser() (Layout, error) {
+	root := strings.TrimSpace(os.Getenv(HomeEnv))
+	if root == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return Layout{}, fmt.Errorf("resolve user home: %w", err)
+		}
+		root = filepath.Join(home, DotDir)
+	} else if !filepath.IsAbs(root) {
+		return Layout{}, fmt.Errorf("%s must be an absolute path: %s", HomeEnv, root)
+	}
+	root = filepath.Clean(root)
+	return Layout{
+		Mode:       ModeUser,
+		ConfigDir:  root,
+		DataDir:    root,
+		RuntimeDir: filepath.Join(root, "run"),
+		LogDir:     filepath.Join(root, "logs"),
+	}, nil
 }
 
 func Resolve(mode Mode) (Layout, error) {

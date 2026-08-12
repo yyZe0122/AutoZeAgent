@@ -7,10 +7,11 @@ set -eu
 REPOSITORY=${YMZ_REPOSITORY:-yyZe0122/YunmengZe-Agent}
 VERSION=${YMZ_VERSION:-latest}
 INSTALL_DIR=${YMZ_INSTALL_DIR:-"${HOME}/.local/bin"}
-if [ -n "${XDG_CONFIG_HOME:-}" ]; then
-  CONFIG_DIR=${YMZ_CONFIG_DIR:-"${XDG_CONFIG_HOME}/yunmengze"}
+# Flat home root (same as paths.Layout user mode). YMZ_HOME overrides whole root.
+if [ -n "${YMZ_HOME:-}" ]; then
+  CONFIG_DIR=${YMZ_CONFIG_DIR:-"${YMZ_HOME}"}
 else
-  CONFIG_DIR=${YMZ_CONFIG_DIR:-"${HOME}/.config/yunmengze"}
+  CONFIG_DIR=${YMZ_CONFIG_DIR:-"${HOME}/.yunmengze"}
 fi
 
 case "$(uname -s)" in

@@ -26,7 +26,7 @@ YunmengZe 的正式目标平台是 Windows AMD64 与 Linux AMD64。Core、Gatewa
 
 ### 目录语义
 
-Windows 用户模式使用 `APPDATA\YunmengZe` 作为配置目录，使用 `LOCALAPPDATA\YunmengZe` 作为数据根目录；系统模式使用 `ProgramData\YunmengZe`。Linux 用户模式遵循 `XDG_CONFIG_HOME`、`XDG_DATA_HOME` 和 `XDG_RUNTIME_DIR`，缺失时回退到用户主目录下的 XDG 默认位置；系统模式使用 `/etc/yunmengze`、`/var/lib/yunmengze`、`/run/yunmengze` 和 `/var/log/yunmengze`。
+用户模式三端统一为 **`~/.yunmengze`**（Windows：`%USERPROFILE%\.yunmengze`）：ConfigDir 与 DataDir 同根，日志在 `logs/`，运行时在 `run/`；可用 `YMZ_HOME` 覆盖整根。系统模式：Windows `ProgramData\YunmengZe`；Linux `/etc/yunmengze`、`/var/lib/yunmengze`、`/run/yunmengze`、`/var/log/yunmengze`。
 
 YunmengZe 不新增无调用方的持久化 CacheDir。临时文件由具体写入者拥有，优先在目标目录创建，以保证替换不跨文件系统。
 
@@ -43,7 +43,7 @@ SQLite UNIQUE 与 PRIMARY KEY 冲突通过公共 `pkg/sqliteerror` 中基于驱�
 ## 验收
 
 - Windows AMD64：验证目录语义、真实 PowerShell 的工作目录/环境/退出码、Interrupt 关停、loopback Endpoint、文件替换和 Job Object 子进程树退出；
-- Linux AMD64：验证 XDG/系统目录、真实 `/bin/sh`、`SIGTERM`、Unix Socket 权限与符号链接边界、文件替换、进程组退出和 systemd 单元；
+- Linux AMD64：验证 `~/.yunmengze`/系统目录、真实 `/bin/sh`、`SIGTERM`、Unix Socket 权限与符号链接边界、文件替换、进程组退出和 systemd 单元；
 - 两个平台均运行全量测试、依赖校验和无 CGo 构建；关键安全边界在 Linux 运行 Race Detector。
 
 ## 后果

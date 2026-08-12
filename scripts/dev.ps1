@@ -145,23 +145,23 @@ function Invoke-RuntimeCheck {
         throw 'bin\ymzd.exe is missing; run the build action first.'
     }
 
-    # Keep bootstrap state inside the workspace instead of writing to the
-    # developer's real Windows profile during local checks.
+    # Keep bootstrap state inside the workspace (YMZ_HOME = flat user root).
     $checkRoot = Join-Path $CacheRoot 'dev-root'
     New-Item -ItemType Directory -Force -Path $checkRoot | Out-Null
-    $previousAppData = $env:APPDATA
-    $previousLocalAppData = $env:LOCALAPPDATA
+    $previousHome = $env:YMZ_HOME
     try {
-        $env:APPDATA = $checkRoot
-        $env:LOCALAPPDATA = $checkRoot
+        $env:YMZ_HOME = $checkRoot
         & $daemon --check
         if ($LASTEXITCODE -ne 0) {
             throw "ymzd --check failed with exit code $LASTEXITCODE"
         }
     }
     finally {
-        $env:APPDATA = $previousAppData
-        $env:LOCALAPPDATA = $previousLocalAppData
+        if ($null -eq $previousHome) {
+            Remove-Item Env:YMZ_HOME -ErrorAction SilentlyContinue
+        } else {
+            $env:YMZ_HOME = $previousHome
+        }
     }
 }
 

@@ -80,9 +80,7 @@
 | 展示名 | YunmengZe | **YunmengZe Agent** |
 | CLI 主命令 | `ymz` / `ymz` | **`ymz`**（可选同二进制第二名 **`yunmengze`**） |
 | Daemon | `ymzd` | **`ymzd`** |
-| 配置目录 Linux | `~/.config/yunmengze` | **`~/.config/yunmengze`** |
-| 配置目录 Windows | `%APPDATA%\YunmengZe` | **`%APPDATA%\YunmengZe`** |
-| 配置目录 macOS | `…/YunmengZe` | **`…/YunmengZe`** |
+| 配置/数据根（user） | XDG / AppData 分叉 | **`~/.yunmengze` 单根**（Win：`%USERPROFILE%\.yunmengze`；`YMZ_HOME` 可覆盖） |
 | 系统路径 Linux | `/etc/yunmengze` 等 | **`/etc/yunmengze`**、`/var/lib/yunmengze`、`/run/yunmengze`、`/var/log/yunmengze` |
 | 配置文件 | `agent.json` / `.local` | **`agent.json`** / **`agent.local.json`** |
 | 项目 skills | `.yunmengze/skills` | **`.yunmengze/skills`** |

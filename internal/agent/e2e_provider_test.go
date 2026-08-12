@@ -22,18 +22,21 @@ import (
 //
 //	YMZ_E2E_PROVIDER=1 go test -tags e2e ./internal/agent/ -run TestE2EProviderAgentRun -count=1
 //
-// Uses ConfigDir from YMZ_CONFIG_DIR or ~/.config/yunmengze (Linux user layout).
+// Uses ConfigDir from YMZ_HOME / YMZ_CONFIG_DIR or ~/.yunmengze (user layout).
 func TestE2EProviderAgentRun(t *testing.T) {
 	if os.Getenv("YMZ_E2E_PROVIDER") != "1" {
 		t.Skip("set YMZ_E2E_PROVIDER=1 to run live provider e2e")
 	}
-	configDir := strings.TrimSpace(os.Getenv("YMZ_CONFIG_DIR"))
+	configDir := strings.TrimSpace(os.Getenv("YMZ_HOME"))
+	if configDir == "" {
+		configDir = strings.TrimSpace(os.Getenv("YMZ_CONFIG_DIR"))
+	}
 	if configDir == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			t.Fatal(err)
 		}
-		configDir = filepath.Join(home, ".config", "yunmengze")
+		configDir = filepath.Join(home, ".yunmengze")
 	}
 	resolved, err := providerconfig.Load(configDir)
 	if err != nil {
