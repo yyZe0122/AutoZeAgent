@@ -2,6 +2,7 @@
 
 - 状态：Accepted（产品化进行中）
 - 日期：2026-08-06
+- 更新：2026-08-12（TUI `/journey` 只读时间线）
 
 ## 背景
 
@@ -50,6 +51,13 @@ chatsession ──► internal/memory.Manager (in-process)
 - **刷新**：TUI `/refresh-memory` 或内部 `Manager.InvalidateSnapshot(sessionID)` 后下一 turn 重建。
 - 中途 `memory_write` 立即落库，但 **不**自动改已冻结 system 块。
 
+### 注入扫描（H6-min）
+
+- 包：`internal/injectscan`（确定性规则；无 LLM）。
+- **写入**：`RememberKind` 在落库前 `Scan`；拒绝控制字符 / 不可见 Unicode·bidi / 常见注入标记 → `injectscan.ErrRejected`。
+- **注入**：`formatBlock` 跳过脏条目；skill 正文 `Read`/`skillSystemMessage` 拒绝脏内容（skill 路径 skip inject + 日志）。
+- 目标：fail-closed，不为远程/cron 文本开注入口；规则可后续收紧（见 optimization H6）。
+
 ### 生命周期钩子
 
 | 钩子 | 调用点 | 作用 |
@@ -57,8 +65,17 @@ chatsession ──► internal/memory.Manager (in-process)
 | `Initialize` / `Shutdown` | daemon | 打开/关闭标记；可选 purge 过期 |
 | `FrozenSystemBlock` | `executeChat` 首次/刷新后 | L0+L1 有界注入 |
 | `SyncTurn` | turn 成功后 | remember/prefer 类 → L1（或配置） |
+| `CurateTurn`（H1-lite） | turn 成功后 async | aux（`models.compact` 或 main）提案 → L1 `source=curator`；**不**改冻结块 |
 | `OnPreCompress` | pack 摘要前 | head 短事实 → 默认 L2 detail |
 | tools | Broker | search / write / promote / forget；session_search |
+
+### LLM Curator（H1-lite）
+
+- 主 run 完成后 `chatsession` 触发 `Manager.CurateTurn`（独立超时；失败仅日志）。
+- Aux：`agent.Runner.ProposeMemoryFacts`（role `compact`，否则 main；无 tools）。
+- 提案经 `injectscan` 后 `RememberKind`；默认 `kind=session`、`priority=5`。
+- **不** `InvalidateSnapshot`；注入仍冻结至 `/refresh-memory` 或新 session。
+- 配置：`chat.memory.curator`（`enabled` 默认 true；`max_facts` 默认 3；`timeout_ms` 默认 15000）。
 
 ### 存储（migration 019 + 020）
 
@@ -69,7 +86,7 @@ chatsession ──► internal/memory.Manager (in-process)
 | `entry_id` | PK |
 | `session_id` | 空 = user/global |
 | `content` | 正文 |
-| `source` | builtin / pre_compress / sync_turn / user / promote |
+| `source` | builtin / pre_compress / sync_turn / user / promote / curator |
 | `tags_json` | 标签 |
 | `kind` | `curated` \| `session` \| `detail`（默认 session；global 默认 curated） |
 | `priority` | int，越大越优先注入（默认 0） |
@@ -95,6 +112,7 @@ chatsession ──► internal/memory.Manager (in-process)
 - `corequery.ListMemory` / `SearchMemory`
 - `GET /v1/memory?session_id=&q=&kind=&limit=`
 - TUI `/memory`（list/search/forget 经只读 + 窄写服务或工具等价路径）
+- TUI `/journey`：只读 `ListMemory` 结果前缀到会话 timeline（journey 行；skill 变更轨未做）
 - **Gateway 不持业务写 `*sql.DB`**；forget/promote 写路径：工具或 daemon 内 `memory.Manager` 经专用 service（非 Gateway 内嵌 SQL 写）
 
 ### 配置 `chat.memory`
@@ -107,11 +125,17 @@ chatsession ──► internal/memory.Manager (in-process)
   "default_kind": "session",
   "promote_enabled": true,
   "default_ttl": "",
-  "session_search": true
+  "session_search": true,
+  "curator": {
+    "enabled": true,
+    "max_facts": 3,
+    "timeout_ms": 15000
+  }
 }
 ```
 
 - `inject_mode`: 仅 `session_start`（冻结）；刷新靠 `/refresh-memory`。
+- `curator.enabled=false` 可关 H1-lite 以省 token。
 - 省略整块 → 启用 + 上表默认。
 
 ### 边界（不变）

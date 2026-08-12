@@ -49,6 +49,8 @@ type ChatStartRequest struct {
 	Actor    string
 	TraceID  string
 	UserText string
+	// ModelRef is an optional job-pinned selection ref (H7). Empty → session prefer → main.
+	ModelRef string
 }
 
 type ChatStartResult struct {
@@ -83,6 +85,8 @@ type Request struct {
 	Objective     string
 	SkillIDs      []string
 	ExecutionMode kernel.ExecutionMode
+	// ModelRef is an optional job-pinned selection ref (H7). Empty → session prefer → main.
+	ModelRef string
 	// Workspace is the client launch directory (absolute); bound to session on create (ADR-046).
 	Workspace     string
 	EnsureSession bool
@@ -234,6 +238,7 @@ func (s *Service) startChat(ctx context.Context, task kernel.Task, request Reque
 	}, "actor", actor, "execution_mode", string(task.ExecutionMode))...)
 	chatResult, err := s.chat.StartChat(ctx, ChatStartRequest{
 		Task: task, Actor: actor, TraceID: traceID, UserText: request.Objective,
+		ModelRef: strings.TrimSpace(request.ModelRef),
 	})
 	if err != nil {
 		slog.Error("tasksubmission start chat failed", runlog.Attrs("tasksubmission", "start_chat", "failed", runlog.IDs{

@@ -121,6 +121,18 @@
     },
     "compaction": { "enabled": true },
     "max_iterations": 16,
-    "permission": { "mode": "preauth" }
+    "permission": { "mode": "preauth" },
+    "memory": {
+      "enabled": true,
+      "max_inject_runes": 2000,
+      "session_search": true,
+      "curator": { "enabled": true, "max_facts": 3, "timeout_ms": 15000 }
+    },
+    "commands": {
+      "review": {
+        "description": "Code review focus",
+        "template": "Review with security and API design in mind.\n\n$ARGUMENTS"
+      }
+    }
   }
 }

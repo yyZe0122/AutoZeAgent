@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/yyZe0122/yunmengze-agent/internal/gatewayclient"
@@ -28,9 +29,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		m.animFrame++
 		var cmds []tea.Cmd
-		if m.wantsAnim() || m.pendingPermCount > 0 || m.needsRunPoll() {
+		if m.wantsAnim() || m.pendingPermCount > 0 || m.needsRunPoll() || m.busy {
 			m.animOn = true
 			cmds = append(cmds, tickCmd())
+			// Keep spinner in sync while active.
+			cmds = append(cmds, m.spinner.Tick)
 		} else {
 			m.animOn = false
 		}
@@ -65,6 +68,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.mcpStatus = msg.mcp
 				m.mcpOK = true
 			}
+			if msg.skills != nil {
+				m.skills = msg.skills
+			}
+			if msg.commands != nil {
+				m.commands = msg.commands
+			}
 			if msg.health.Core.Runtime.DataDir != "" {
 				m.dataDir = msg.health.Core.Runtime.DataDir
 			}
@@ -95,9 +104,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case tea.MouseMsg:
+		// Click foldable bubble zones to toggle expand (bubblezone).
+		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+			for _, key := range collectExpandKeys(m.timeline) {
+				if zoneHit(msg, key) {
+					m.expand.toggle(key)
+					m.tlCache = timelineRenderCache{}
+					m.statusMsg = "expand toggled · e / E / c"
+					m.syncViewport(true)
+					return m, nil
+				}
+			}
+		}
 		var cmd tea.Cmd
 		m.viewport, cmd = m.viewport.Update(msg)
 		m.stickBottom = m.viewport.AtBottom()
+		return m, cmd
+
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
 	}
 
@@ -112,7 +138,30 @@ func (m *model) refreshCompleter() {
 	for _, p := range m.permissions {
 		permIDs = append(permIDs, p.ID)
 	}
-	m.completer.updateWith(m.input.Value(), m.models, permIDs)
+	m.completer.updateWith(m.input.Value(), m.models, permIDs, m.extraSlashItems())
+}
+
+// extraSlashItems: chat.commands then skills (builtins win via isBuiltinSlash filters).
+func (m model) extraSlashItems() []slashCommand {
+	cmds := commandSlashItems(m.commands)
+	skills := skillSlashItems(m.skills)
+	// Drop skills that collide with command ids (commands win).
+	if len(cmds) == 0 {
+		return skills
+	}
+	cmdNames := make(map[string]struct{}, len(cmds))
+	for _, c := range cmds {
+		cmdNames[strings.ToLower(c.Name)] = struct{}{}
+	}
+	out := make([]slashCommand, 0, len(cmds)+len(skills))
+	out = append(out, cmds...)
+	for _, s := range skills {
+		if _, ok := cmdNames[strings.ToLower(s.Name)]; ok {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
 }
 
 func (m model) applyRefresh(msg refreshDoneMsg) (tea.Model, tea.Cmd) {
@@ -178,14 +227,18 @@ func (m model) applyRefresh(msg refreshDoneMsg) (tea.Model, tea.Cmd) {
 		if msg.messages != nil {
 			m.liveContent = ""
 			m.liveThinking = ""
+			m.liveTools = nil
 			m.liveRunID = ""
 		}
 		m.timeline = buildChatTimeline(m.messages, m.task, m.plan, m.runs)
+		if len(m.journeyRows) > 0 {
+			m.timeline = append(append([]timelineItem(nil), m.journeyRows...), m.timeline...)
+		}
 		if m.pendingPermCount > 0 {
 			m.timeline = patchRunningStatus(m.timeline, runningStatusTitle(m.task, m.pendingPermCount))
 		}
-		if m.liveContent != "" || m.liveThinking != "" {
-			m.timeline = appendLiveDraft(m.timeline, m.liveThinking, m.liveContent)
+		if m.liveContent != "" || m.liveThinking != "" || len(m.liveTools) > 0 {
+			m.timeline = appendLiveDraft(m.timeline, m.liveThinking, m.liveContent, m.liveTools)
 		}
 		m.lastRunPoll = time.Now()
 		if n := m.listLen(); n > 0 && m.selectedIdx >= n {
@@ -262,6 +315,32 @@ func (m model) applyCommand(msg commandDoneMsg) (tea.Model, tea.Cmd) {
 	if msg.skillIDs != nil {
 		m.selectedSkillIDs = append([]string(nil), msg.skillIDs...)
 	}
+	if msg.expandMode != "" {
+		switch msg.expandMode {
+		case "all":
+			m.expand.setAll(true)
+		case "none":
+			m.expand.setAll(false)
+		case "last":
+			keys := collectExpandKeys(m.timeline)
+			if len(keys) > 0 {
+				m.expand.toggle(keys[len(keys)-1])
+			}
+		}
+		m.tlCache = timelineRenderCache{} // expand changes render output
+	}
+	if msg.setJourney {
+		m.journeyRows = msg.journeyRows
+		// Rebuild timeline so journey rows appear without waiting for refresh.
+		m.timeline = buildChatTimeline(m.messages, m.task, m.plan, m.runs)
+		if len(m.journeyRows) > 0 {
+			m.timeline = append(append([]timelineItem(nil), m.journeyRows...), m.timeline...)
+		}
+		if m.liveContent != "" || m.liveThinking != "" || len(m.liveTools) > 0 {
+			m.timeline = appendLiveDraft(m.timeline, m.liveThinking, m.liveContent, m.liveTools)
+		}
+	}
+	submitAfter := strings.TrimSpace(msg.submitAfter)
 	if msg.clearTask {
 		m.sessionID = ""
 		m.task = nil
@@ -270,6 +349,7 @@ func (m model) applyCommand(msg commandDoneMsg) (tea.Model, tea.Cmd) {
 		m.runs = nil
 		m.messages = nil
 		m.timeline = nil
+		m.journeyRows = nil
 		m.tlCache = timelineRenderCache{}
 		m.usage = gatewayclient.TaskUsage{}
 		m.usageOK = false
@@ -339,10 +419,20 @@ func (m model) applyCommand(msg commandDoneMsg) (tea.Model, tea.Cmd) {
 	}
 	m.layout()
 	m.syncViewport(false)
+	var cmds []tea.Cmd
 	if needRefresh {
-		return m, m.scheduleRefresh(refreshFull)
+		cmds = append(cmds, m.scheduleRefresh(refreshFull))
 	}
-	return m, nil
+	if submitAfter != "" && msg.err == nil {
+		cmds = append(cmds, m.newTaskCmd(submitAfter))
+	}
+	if len(cmds) == 0 {
+		return m, nil
+	}
+	if len(cmds) == 1 {
+		return m, cmds[0]
+	}
+	return m, tea.Batch(cmds...)
 }
 
 func (m model) applyModelStream(env modelstream.Envelope) (tea.Model, tea.Cmd) {
@@ -360,13 +450,20 @@ func (m model) applyModelStream(env modelstream.Envelope) (tea.Model, tea.Cmd) {
 		m.liveThinking += env.Event.ThinkingDelta
 	case providerapi.StreamToolCall:
 		if env.Event.ToolCall != nil {
-			m.liveContent += "\n" + formatToolCallLine(gatewayclient.TranscriptToolCall{
-				Name: env.Event.ToolCall.Name, Arguments: env.Event.ToolCall.Arguments,
+			preview := toolCallPreview(env.Event.ToolCall.Name, env.Event.ToolCall.Arguments)
+			m.liveTools = append(m.liveTools, contentBlock{
+				Kind:     blockToolCall,
+				Text:     preview,
+				ToolName: env.Event.ToolCall.Name,
+				ToolID:   env.Event.ToolCall.ID,
+				Key:      "live-tc:" + env.Event.ToolCall.ID,
+				Live:     true,
 			})
 		}
 	case providerapi.StreamComplete:
 		m.liveContent = ""
 		m.liveThinking = ""
+		m.liveTools = nil
 		m.liveRunID = ""
 		return m, m.scheduleRefresh(refreshFull)
 	default:
@@ -378,7 +475,7 @@ func (m model) applyModelStream(env modelstream.Envelope) (tea.Model, tea.Cmd) {
 		}
 	}
 	m.timeline = buildChatTimeline(m.messages, m.task, m.plan, m.runs)
-	m.timeline = appendLiveDraft(m.timeline, m.liveThinking, m.liveContent)
+	m.timeline = appendLiveDraft(m.timeline, m.liveThinking, m.liveContent, m.liveTools)
 	m.syncViewport(true)
 	return m, nil
 }
@@ -424,6 +521,11 @@ func (m model) applySSE(envelope eventapi.Envelope) (tea.Model, tea.Cmd) {
 		m.sseAfter = envelope.Sequence
 	}
 	typ := envelope.Type
+	// C1: permission.pending / permission.decided → refresh perm queue (still DecidePermission*).
+	if strings.HasPrefix(typ, "permission.") {
+		autoOpen := !m.autoOpenedPermList && m.list == listNone && !m.completer.visible
+		return m, m.pollPermissionsCmd(autoOpen)
+	}
 	var kind refreshKind
 	switch {
 	case strings.HasPrefix(typ, "run."):
@@ -528,6 +630,32 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.viewport.LineDown(5)
 		m.stickBottom = m.viewport.AtBottom()
 		return m, nil
+
+	case tea.KeyRunes:
+		// Expand hotkeys when input empty and no picker (e / E / c).
+		if m.list == listNone && !m.completer.visible && !m.helpOpen &&
+			strings.TrimSpace(m.input.Value()) == "" && len(msg.Runes) == 1 {
+			switch msg.Runes[0] {
+			case 'e':
+				keys := collectExpandKeys(m.timeline)
+				if len(keys) > 0 {
+					m.expand.toggle(keys[len(keys)-1])
+					m.statusMsg = "expand toggled · /expand all|none"
+					m.syncViewport(true)
+				}
+				return m, nil
+			case 'E':
+				m.expand.setAll(true)
+				m.statusMsg = "expanded all · c or /expand none to collapse"
+				m.syncViewport(true)
+				return m, nil
+			case 'c':
+				m.expand.setAll(false)
+				m.statusMsg = "collapsed"
+				m.syncViewport(true)
+				return m, nil
+			}
+		}
 
 	case tea.KeyUp:
 		if m.completer.visible {

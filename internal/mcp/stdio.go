@@ -1,4 +1,3 @@
-// Package mcp implements a minimal MCP stdio client for Tool Broker registration (ADR-040).
 package mcp
 
 import (
@@ -24,14 +23,7 @@ type ServerConfig struct {
 	Env     map[string]string
 }
 
-// ToolDesc is a tool advertised by tools/list.
-type ToolDesc struct {
-	Name        string
-	Description string
-	InputSchema json.RawMessage
-}
-
-// Client is one connected MCP server process.
+// Client is one connected MCP server process (stdio).
 type Client struct {
 	name   string
 	cmd    *exec.Cmd
@@ -85,6 +77,9 @@ func Start(ctx context.Context, config ServerConfig) (*Client, error) {
 // Name returns the configured server name.
 func (c *Client) Name() string { return c.name }
 
+// Transport returns "stdio".
+func (c *Client) Transport() string { return "stdio" }
+
 // Close terminates the process.
 func (c *Client) Close() error {
 	if !c.closed.CompareAndSwap(false, true) {
@@ -109,17 +104,7 @@ func (c *Client) ListTools(ctx context.Context) ([]ToolDesc, error) {
 	if err := c.call(ctx, "tools/list", map[string]any{}, &result); err != nil {
 		return nil, err
 	}
-	out := make([]ToolDesc, 0, len(result.Tools))
-	for _, tool := range result.Tools {
-		schema := tool.InputSchema
-		if len(schema) == 0 {
-			schema = json.RawMessage(`{"type":"object","properties":{}}`)
-		}
-		out = append(out, ToolDesc{
-			Name: tool.Name, Description: tool.Description, InputSchema: schema,
-		})
-	}
-	return out, nil
+	return parseToolList(result), nil
 }
 
 // CallTool invokes tools/call and returns a JSON-friendly result payload.
@@ -174,7 +159,6 @@ func (c *Client) call(ctx context.Context, method string, params any, result any
 		if err != nil {
 			return err
 		}
-		// Skip notifications / requests without matching id.
 		rawID, hasID := msg["id"]
 		if !hasID {
 			continue
@@ -252,20 +236,4 @@ func (c *Client) readMessage() (map[string]any, error) {
 		return nil, err
 	}
 	return msg, nil
-}
-
-func idEqual(raw any, want int64) bool {
-	switch v := raw.(type) {
-	case float64:
-		return int64(v) == want
-	case json.Number:
-		n, err := v.Int64()
-		return err == nil && n == want
-	case int64:
-		return v == want
-	case int:
-		return int64(v) == want
-	default:
-		return fmt.Sprint(raw) == strconv.FormatInt(want, 10)
-	}
 }

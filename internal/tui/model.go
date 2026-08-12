@@ -4,6 +4,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -37,7 +38,7 @@ const (
 	listPermissions // pending tool-call permissions (ADR-043)
 )
 
-const (
+	const (
 	runPollInterval   = 2 * time.Second
 	permPollInterval  = 2 * time.Second
 	animInterval      = 400 * time.Millisecond
@@ -49,6 +50,14 @@ const (
 	// timeline body defaults (fold large run results).
 	timelineBodyMaxLines = 12
 	timelineBodyMaxChars = 2400
+	// thinking: live shows tail only; finished collapses to one-line summary.
+	thinkingLiveMaxLines  = 5
+	thinkingLiveMaxChars  = 800
+	thinkingFoldMaxLines  = 3
+	thinkingFoldMaxChars  = 400
+	// tool results: default folded summary.
+	toolResultMaxLines = 6
+	toolResultMaxChars = 1200
 	// permOpenGrace is how long decision hotkeys are ignored after auto-open.
 	permOpenGrace = 400 * time.Millisecond
 )
@@ -65,6 +74,7 @@ type model struct {
 
 	input     textinput.Model
 	viewport  viewport.Model
+	spinner   spinner.Model
 	completer completer
 
 	statusMsg string
@@ -85,7 +95,8 @@ type model struct {
 	sessions    []gatewayclient.Session
 	jobs        []schedulerapi.Job
 	skills      []gatewayclient.Skill
-	permissions []gatewayclient.Permission
+	commands    []gatewayclient.ChatCommand
+	permissions   []gatewayclient.Permission
 	// selectedSkillIDs is draft selection for the next task submit (kept across turns).
 	selectedSkillIDs []string
 	sessionID        gatewayclient.SessionID
@@ -97,10 +108,14 @@ type model struct {
 	// live assistant draft from model-stream (typewriter); cleared on complete/refresh.
 	liveContent  string
 	liveThinking string
+	liveTools    []contentBlock // streamed tool_call lines as blocks
 	liveRunID    gatewayclient.RunID
 	timeline     []timelineItem
 	tlCache      timelineRenderCache
-	stickBottom  bool
+	expand       expandState
+	// journeyRows optional memory timeline rows (C4); cleared on session clear.
+	journeyRows []timelineItem
+	stickBottom bool
 
 	usage         gatewayclient.TaskUsage
 	usageOK       bool
@@ -168,11 +183,13 @@ type refreshDoneMsg struct {
 }
 
 type statusDoneMsg struct {
-	health gatewayclient.Health
-	model  gatewayclient.ModelConfig
-	mcp    gatewayclient.MCPStatus
-	mcpOK  bool
-	err    error
+	health   gatewayclient.Health
+	model    gatewayclient.ModelConfig
+	mcp      gatewayclient.MCPStatus
+	mcpOK    bool
+	skills   []gatewayclient.Skill
+	commands []gatewayclient.ChatCommand
+	err      error
 }
 
 type commandDoneMsg struct {
@@ -194,7 +211,13 @@ type commandDoneMsg struct {
 	sessions      []gatewayclient.Session
 	skills        []gatewayclient.Skill
 	skillIDs      []string // replace selectedSkillIDs when set (toggle apply)
+	submitAfter   string   // after applying skillIDs, submit this objective (skill-as-slash)
 	permissions   []gatewayclient.Permission
+	// expandMode: "", "all", "none", "last" — applied in applyCommand for /expand
+	expandMode string
+	// journeyRows replaces optional memory journey overlay on the timeline (C4).
+	journeyRows []timelineItem
+	setJourney  bool
 }
 
 // permPollDoneMsg is a background poll of pending tool permissions.
@@ -225,12 +248,14 @@ func newModel(mode paths.Mode, gateway Gateway) model {
 	ti.Width = 80
 	ti.Prompt = ""
 	vp := viewport.New(80, 20)
+	sp := spinner.New()
+	sp.Spinner = spinner.MiniDot
 	cwd, _ := os.Getwd()
 	theme := loadTheme(mode)
 	applyTheme(themeByName(theme))
 	m := model{
 		mode: mode, gateway: gateway, theme: theme, draftMode: modeAgent,
-		input: ti, viewport: vp, sseState: "connecting", dirty: true,
+		input: ti, viewport: vp, spinner: sp, sseState: "connecting", dirty: true,
 		stickBottom: true, historyIdx: -1, cwd: cwd,
 	}
 	m.applyPlaceholder()
@@ -238,7 +263,7 @@ func newModel(mode paths.Mode, gateway Gateway) model {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(textinput.Blink, m.loadStatusCmd(), m.scheduleRefresh(refreshFull))
+	return tea.Batch(textinput.Blink, m.spinner.Tick, m.loadStatusCmd(), m.scheduleRefresh(refreshFull))
 }
 
 func tickCmd() tea.Cmd {

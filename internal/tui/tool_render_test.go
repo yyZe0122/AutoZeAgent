@@ -57,12 +57,25 @@ func TestTranscriptToItemTypedTools(t *testing.T) {
 		{Role: "tool", ToolCallID: "c1", Content: "ok"},
 	}
 	names := toolNameByCallID(msgs)
-	item := transcriptToItem(msgs[0], names)
-	if !strings.Contains(item.Body, "fs_write") || !strings.Contains(item.Body, "README.md") {
-		t.Fatalf("assistant body = %q", item.Body)
+	item := transcriptToItem(msgs[0], names, 0)
+	var found bool
+	for _, bl := range item.Blocks {
+		if bl.Kind == blockToolCall && bl.ToolName == "fs_write" {
+			found = true
+			if !strings.Contains(bl.Text, "README.md") {
+				t.Fatalf("tool preview = %q", bl.Text)
+			}
+		}
 	}
-	tool := transcriptToItem(msgs[1], names)
-	if !strings.Contains(tool.Title, "fs_write") {
-		t.Fatalf("tool title = %q", tool.Title)
+	if !found {
+		t.Fatalf("assistant blocks = %#v", item.Blocks)
+	}
+	tool := transcriptToItem(msgs[1], names, 1)
+	if tool.Kind != tlTool || !strings.Contains(tool.Title, "fs_write") {
+		t.Fatalf("tool item = %#v", tool)
+	}
+	rendered := renderTimeline([]timelineItem{item, tool})
+	if !strings.Contains(rendered, "fs_write") {
+		t.Fatalf("render = %s", rendered)
 	}
 }

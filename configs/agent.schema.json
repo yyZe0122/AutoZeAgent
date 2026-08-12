@@ -183,6 +183,82 @@
               "description": "preauth = deny without grant (default); ask = interactive tool-call queue; auto reserved."
             }
           }
+        },
+        "memory": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "In-process layered memory (ADR-044). Omit = enabled defaults.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true,
+              "description": "Enable memory manager. Omit = true."
+            },
+            "max_inject_runes": {
+              "type": "integer",
+              "minimum": 200,
+              "maximum": 16000,
+              "default": 2000,
+              "description": "Cap frozen system memory inject block."
+            },
+            "inject_mode": {
+              "type": "string",
+              "enum": ["session_start"],
+              "default": "session_start",
+              "description": "Frozen snapshot at session start; refresh via /refresh-memory."
+            },
+            "session_search": {
+              "type": "boolean",
+              "default": true,
+              "description": "Enable transcript FTS session_search tool."
+            },
+            "curator": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "H1-lite post-turn LLM fact extraction (uses models.compact when set).",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "default": true,
+                  "description": "Enable curator when memory is on. Omit = true."
+                },
+                "max_facts": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8,
+                  "default": 3,
+                  "description": "Max facts written per successful turn."
+                },
+                "timeout_ms": {
+                  "type": "integer",
+                  "minimum": 1000,
+                  "maximum": 120000,
+                  "default": 15000,
+                  "description": "Aux completion timeout in milliseconds."
+                }
+              }
+            }
+          }
+        },
+        "commands": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["template"],
+            "properties": {
+              "description": {
+                "type": "string",
+                "description": "Short help for completer / list API"
+              },
+              "template": {
+                "type": "string",
+                "minLength": 1,
+                "description": "User-message body; optional $ARGUMENTS or $0 placeholder"
+              }
+            }
+          },
+          "description": "User slash templates (O3). Keys are slash names without /. Instruction only — no grants. Injectscan at load."
         }
       }
     }

@@ -14,7 +14,9 @@ import (
 
 	"github.com/yyZe0122/yunmengze-agent/internal/approval"
 	"github.com/yyZe0122/yunmengze-agent/internal/audit"
+	"github.com/yyZe0122/yunmengze-agent/internal/events"
 	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
+	"github.com/yyZe0122/yunmengze-agent/pkg/eventapi"
 )
 
 // Service decides pending tool permissions and issues scoped grants (ADR-043).
@@ -24,6 +26,7 @@ type Service struct {
 	approvals *approval.Repository
 	waiter    *Waiter
 	audit     *audit.Store
+	events    *events.Store // optional; C1 permission SSE
 	now       func() time.Time
 }
 
@@ -32,6 +35,7 @@ type Config struct {
 	Store     *Store
 	Approvals *approval.Repository
 	Waiter    *Waiter
+	Events    *events.Store // optional
 	Now       func() time.Time
 }
 
@@ -51,8 +55,55 @@ func New(config Config) (*Service, error) {
 	}
 	return &Service{
 		db: config.DB, store: config.Store, approvals: config.Approvals,
-		waiter: config.Waiter, audit: auditStore, now: config.Now,
+		waiter: config.Waiter, audit: auditStore, events: config.Events, now: config.Now,
 	}, nil
+}
+
+// EmitPending publishes permission.pending for Gateway SSE (best-effort).
+func (s *Service) EmitPending(ctx context.Context, req Request) {
+	if s == nil || s.events == nil {
+		return
+	}
+	s.emit(ctx, "permission.pending", req, "")
+}
+
+func (s *Service) emit(ctx context.Context, typ string, req Request, decision string) {
+	if s == nil || s.events == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	payload := map[string]any{
+		"permission_id": req.ID,
+		"session_id":    req.SessionID,
+		"task_id":       req.TaskID,
+		"run_id":        req.RunID,
+		"tool":          req.ToolName,
+		"state":         req.State,
+	}
+	if decision != "" {
+		payload["decision"] = decision
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	aggID := req.SessionID
+	if aggID == "" {
+		aggID = req.ID
+	}
+	_, _ = s.events.Append(ctx, eventapi.Envelope{
+		ID:               fmt.Sprintf("permission/%s/%s/%d", typ, req.ID, s.now().UnixNano()),
+		Type:             typ,
+		AggregateType:    "tool_permission",
+		AggregateID:      aggID,
+		AggregateVersion: 1,
+		OccurredAt:       s.now().UTC(),
+		Producer:         "toolpermission",
+		SchemaVersion:    1,
+		Payload:          raw,
+	})
 }
 
 func (s *Service) Waiter() *Waiter {
@@ -134,6 +185,7 @@ func (s *Service) DecideWithOptions(ctx context.Context, permissionID, decision,
 			Details: map[string]any{"tool": req.ToolName, "decision": decision},
 		})
 		out, _ := s.store.Get(ctx, permissionID)
+		s.emit(ctx, "permission.decided", out, decision)
 		return out, nil
 	}
 
@@ -206,7 +258,12 @@ func (s *Service) DecideWithOptions(ctx context.Context, permissionID, decision,
 		"permission_id", permissionID, "decision", decision, "tool", req.ToolName,
 		"session_id", req.SessionID, "task_id", req.TaskID, "run_id", req.RunID,
 		"tool_call_id", req.ToolCallID)
-	return s.store.Get(ctx, permissionID)
+	out, err := s.store.Get(ctx, permissionID)
+	if err != nil {
+		return out, err
+	}
+	s.emit(ctx, "permission.decided", out, decision)
+	return out, nil
 }
 
 // narrowScopeForSimilar keeps plan capability but prefers the request path's parent

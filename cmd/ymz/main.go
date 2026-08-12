@@ -29,10 +29,17 @@ func run(args []string) error {
 	case "paths":
 		return runPaths(rest)
 	case "config":
-		if len(rest) < 1 || rest[0] != "validate" {
-			return errors.New("use ymz config validate [--mode user|system]")
+		if len(rest) < 1 {
+			return errors.New("use ymz config validate|import-opencode ...")
 		}
-		return runConfigValidate(rest[1:])
+		switch rest[0] {
+		case "validate":
+			return runConfigValidate(rest[1:])
+		case "import-opencode":
+			return runConfigImportOpenCode(rest[1:])
+		default:
+			return errors.New("use ymz config validate|import-opencode ...")
+		}
 	case "health":
 		return runHealth(rest)
 	case "logs":
@@ -125,6 +132,7 @@ func printUsage() {
 	fmt.Println("  ymz version")
 	fmt.Println("  ymz paths [user|system]")
 	fmt.Println("  ymz config validate [--mode user|system]")
+	fmt.Println("  ymz config import-opencode [path] [--mode user|system] [--dry-run] [--output path]")
 	fmt.Println("  ymz health [--mode user|system]")
 	fmt.Println("  ymz logs [--mode user|system] [--tail 200] [--level error] [--component agent] [--run run-id]")
 	fmt.Println("  ymz run [--mode user|system] \"task objective\"")

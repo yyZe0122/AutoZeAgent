@@ -4,25 +4,91 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/yyZe0122/yunmengze-agent/internal/gatewayclient"
 )
 
 type timelineKind string
 
 const (
-	tlUser   timelineKind = "user"
-	tlSystem timelineKind = "system"
-	tlPlan   timelineKind = "plan"
-	tlRun    timelineKind = "run"
-	tlError  timelineKind = "error"
+	tlUser    timelineKind = "user"
+	tlSystem  timelineKind = "system"
+	tlPlan    timelineKind = "plan"
+	tlRun     timelineKind = "run"
+	tlError   timelineKind = "error"
+	tlTool    timelineKind = "tool"
+	tlDone    timelineKind = "done"
+	tlJourney timelineKind = "journey"
 )
 
+type blockKind string
+
+const (
+	blockThinking   blockKind = "thinking"
+	blockReply      blockKind = "reply"
+	blockToolCall   blockKind = "tool_call"
+	blockToolResult blockKind = "tool_result"
+	blockPlain      blockKind = "plain"
+)
+
+// contentBlock is a typed segment inside a timeline row (presentation only).
+type contentBlock struct {
+	Kind     blockKind
+	Text     string
+	ToolName string
+	ToolID   string
+	Key      string // expand key; empty = not foldable
+	Live     bool   // streaming: fold shows tail
+}
+
 type timelineItem struct {
-	Kind  timelineKind
-	At    string
-	Title string
-	Body  string
-	State string
+	Kind   timelineKind
+	At     string
+	Title  string
+	Body   string // plain body when Blocks empty (legacy / simple rows)
+	Blocks []contentBlock
+	State  string
+	Key    string // item-level expand key
+}
+
+// expandState controls which folded blocks are fully shown.
+type expandState struct {
+	all  bool
+	keys map[string]bool
+}
+
+func (e expandState) open(key string) bool {
+	if key == "" {
+		return false
+	}
+	if e.all {
+		return true
+	}
+	if e.keys == nil {
+		return false
+	}
+	return e.keys[key]
+}
+
+func (e *expandState) toggle(key string) {
+	if key == "" {
+		return
+	}
+	if e.keys == nil {
+		e.keys = make(map[string]bool)
+	}
+	e.keys[key] = !e.keys[key]
+	e.all = false
+}
+
+func (e *expandState) setAll(open bool) {
+	e.all = open
+	if open {
+		e.keys = nil
+	} else {
+		e.keys = make(map[string]bool)
+	}
 }
 
 func buildTimeline(task *gatewayclient.Task, plan *gatewayclient.Plan, runs []gatewayclient.Run) []timelineItem {
@@ -36,7 +102,7 @@ func buildTimeline(task *gatewayclient.Task, plan *gatewayclient.Plan, runs []ga
 		obj = task.Title
 	}
 	items = append(items, timelineItem{
-		Kind: tlUser, At: task.CreatedAt, Title: "objective", Body: obj,
+		Kind: tlUser, At: task.CreatedAt, Title: "you", Body: obj,
 	})
 
 	items = append(items, timelineItem{
@@ -59,7 +125,7 @@ func buildTimeline(task *gatewayclient.Task, plan *gatewayclient.Plan, runs []ga
 		})
 	case gatewayclient.TaskStateCompleted:
 		items = append(items, timelineItem{
-			Kind: tlSystem, At: task.UpdatedAt, Title: "completed", State: task.State,
+			Kind: tlDone, At: task.UpdatedAt, Title: "done", State: task.State,
 		})
 	case gatewayclient.TaskStateFailed:
 		items = append(items, timelineItem{
@@ -92,41 +158,80 @@ func buildTimeline(task *gatewayclient.Task, plan *gatewayclient.Plan, runs []ga
 		kind := tlRun
 		if run.Error != nil && strings.TrimSpace(*run.Error) != "" {
 			kind = tlError
-			body = foldBody(strings.TrimSpace(*run.Error))
+			body = strings.TrimSpace(*run.Error)
 		} else if run.Result != nil && strings.TrimSpace(*run.Result) != "" {
-			body = foldBody(strings.TrimSpace(*run.Result))
+			body = strings.TrimSpace(*run.Result)
 		}
 		at := run.StartedAt
 		if run.FinishedAt != nil {
 			at = *run.FinishedAt
 		}
-		items = append(items, timelineItem{
-			Kind: kind, At: at, Title: title, Body: body, State: run.State,
-		})
+		key := "run:" + string(run.ID)
+		item := timelineItem{
+			Kind: kind, At: at, Title: title, State: run.State, Key: key,
+		}
+		if body != "" {
+			item.Blocks = []contentBlock{{
+				Kind: blockReply, Text: body, Key: key,
+			}}
+		}
+		items = append(items, item)
 	}
 	return items
 }
 
-// foldBody truncates large run output so the viewport stays cheap to rebuild.
-// Expansion of folded bodies is not wired yet; /details toggles plan capabilities only.
+// foldBody truncates large run output (head-first). Used for simple strings.
 func foldBody(s string) string {
+	return foldHead(s, timelineBodyMaxLines, timelineBodyMaxChars)
+}
+
+// foldHead keeps the first maxLines / maxChars.
+func foldHead(s string, maxLines, maxChars int) string {
 	if s == "" {
 		return s
 	}
 	lines := strings.Split(s, "\n")
 	truncated := false
-	if len(lines) > timelineBodyMaxLines {
-		lines = lines[:timelineBodyMaxLines]
+	if maxLines > 0 && len(lines) > maxLines {
+		lines = lines[:maxLines]
 		truncated = true
 	}
 	out := strings.Join(lines, "\n")
 	runes := []rune(out)
-	if len(runes) > timelineBodyMaxChars {
-		out = string(runes[:timelineBodyMaxChars])
+	if maxChars > 0 && len(runes) > maxChars {
+		out = string(runes[:maxChars])
 		truncated = true
 	}
 	if truncated {
-		out = strings.TrimRight(out, "\n") + "\n… (truncated)"
+		out = strings.TrimRight(out, "\n") + "\n… (truncated · e expand)"
+	}
+	return out
+}
+
+// foldTail keeps the last maxLines (and last maxChars of that window).
+func foldTail(s string, maxLines, maxChars int) string {
+	if s == "" {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	// Drop trailing empty line from split of trailing newline.
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	total := len(lines)
+	truncated := false
+	if maxLines > 0 && total > maxLines {
+		lines = lines[total-maxLines:]
+		truncated = true
+	}
+	out := strings.Join(lines, "\n")
+	runes := []rune(out)
+	if maxChars > 0 && len(runes) > maxChars {
+		out = string(runes[len(runes)-maxChars:])
+		truncated = true
+	}
+	if truncated {
+		return "… (" + itoa(total) + " lines · e expand)\n" + out
 	}
 	return out
 }
@@ -138,46 +243,275 @@ func shortID(id string) string {
 	return id[:12] + "…"
 }
 
-func renderTimeline(items []timelineItem) string {
-	return renderTimelineUncached(items)
+func lineCount(s string) int {
+	if s == "" {
+		return 0
+	}
+	n := strings.Count(s, "\n") + 1
+	if strings.HasSuffix(s, "\n") {
+		n--
+	}
+	if n < 1 {
+		return 1
+	}
+	return n
 }
 
-func renderTimelineUncached(items []timelineItem) string {
+func renderTimeline(items []timelineItem) string {
+	return renderTimelineExpanded(items, expandState{})
+}
+
+func renderTimelineExpanded(items []timelineItem, exp expandState) string {
+	return renderTimelineUncached(items, exp, defaultRenderOpts())
+}
+
+func renderTimelineUncached(items []timelineItem, exp expandState, opts renderOpts) string {
 	if len(items) == 0 {
 		return styleDim.Render("No activity yet.")
 	}
+	if opts.Width <= 0 {
+		opts = defaultRenderOpts()
+	}
 	var b strings.Builder
 	for i, item := range items {
-		prefix := "·"
-		var titleStyle = styleTLSys
-		switch item.Kind {
-		case tlUser:
-			prefix = "▸"
-			titleStyle = styleTLUser
-		case tlPlan:
-			prefix = "◇"
-			titleStyle = styleTLPlan
-		case tlRun:
-			prefix = "●"
-			titleStyle = styleTLRun
-		case tlError:
-			prefix = "✖"
-			titleStyle = styleTLErr
-		}
-		line := titleStyle.Render(prefix + " " + item.Title)
-		if item.State != "" {
-			line += "  " + stateBadge(item.State)
-		}
-		b.WriteString(line)
-		b.WriteByte('\n')
-		if item.Body != "" {
-			for _, bl := range strings.Split(item.Body, "\n") {
-				b.WriteString(styleDim.Render("  "+bl) + "\n")
-			}
-		}
+		b.WriteString(renderTimelineItem(item, exp, opts))
 		if i < len(items)-1 {
-			b.WriteString(styleMuted.Render("  │") + "\n")
+			b.WriteString("\n")
 		}
 	}
 	return b.String()
+}
+
+func renderTimelineItem(item timelineItem, exp expandState, opts renderOpts) string {
+	w := opts.Width
+	if item.Kind == tlDone {
+		return renderDoneBanner(item.Title, item.State, w)
+	}
+
+	// System / plan / error / journey: compact rows (not full chat bubbles).
+	switch item.Kind {
+	case tlSystem, tlPlan, tlError, tlJourney:
+		prefix, titleStyle := itemChrome(item)
+		line := renderSystemLine(prefix, item.Title, item.State, titleStyle)
+		if item.Body == "" && len(item.Blocks) == 0 {
+			return line
+		}
+		var b strings.Builder
+		b.WriteString(line)
+		b.WriteByte('\n')
+		if len(item.Blocks) > 0 {
+			for _, bl := range item.Blocks {
+				b.WriteString(renderBlock(bl, exp, opts, item.Kind))
+				b.WriteByte('\n')
+			}
+			return strings.TrimRight(b.String(), "\n")
+		}
+		text := item.Body
+		if !exp.open(item.Key) {
+			text = foldHead(text, timelineBodyMaxLines, timelineBodyMaxChars)
+		}
+		for _, ln := range strings.Split(wrapBody(text, w-4), "\n") {
+			b.WriteString(styleDim.Render("  "+ln) + "\n")
+		}
+		return strings.TrimRight(b.String(), "\n")
+	}
+
+	// User / assistant / tool → bubble cards.
+	if len(item.Blocks) > 0 {
+		var parts []string
+		// Assistant title chip when streaming.
+		if item.Kind == tlRun && item.State == "streaming" {
+			parts = append(parts, styleTLRun.Render("◌ assistant · streaming"))
+		}
+		for _, bl := range item.Blocks {
+			parts = append(parts, renderBlock(bl, exp, opts, item.Kind))
+		}
+		return strings.Join(parts, "\n")
+	}
+
+	// Simple body rows as bubbles.
+	title := item.Title
+	border := colorBorder
+	titleStyle := styleTLSys
+	bodyStyle := styleTLBody
+	switch item.Kind {
+	case tlUser:
+		if title == "" {
+			title = "you"
+		}
+		title = "▸ " + title
+		border = colorBubbleUser
+		titleStyle = styleTLUser
+		bodyStyle = styleTLReply
+	case tlRun:
+		if title == "" {
+			title = "assistant"
+		}
+		title = "● " + title
+		border = colorBubbleAssistant
+		titleStyle = styleTLRun
+		bodyStyle = styleTLReply
+	case tlTool:
+		title = "⚙ " + title
+		border = colorBubbleTool
+		titleStyle = styleTLTool
+	}
+	text := item.Body
+	if item.Key != "" && !exp.open(item.Key) && needsFold(text, timelineBodyMaxLines, timelineBodyMaxChars) {
+		text = foldHead(text, timelineBodyMaxLines, timelineBodyMaxChars)
+	} else if item.Key == "" {
+		text = foldHead(text, timelineBodyMaxLines, timelineBodyMaxChars)
+	}
+	return renderBubbleCard(title, text, border, titleStyle, bodyStyle, w, item.Key)
+}
+
+func itemChrome(item timelineItem) (prefix string, titleStyle lipgloss.Style) {
+	switch item.Kind {
+	case tlUser:
+		return "▸", styleTLUser
+	case tlPlan:
+		return "◇", styleTLPlan
+	case tlRun:
+		if item.State == "streaming" {
+			return "◌", styleTLRun
+		}
+		return "●", styleTLRun
+	case tlError:
+		return "✖", styleTLErr
+	case tlTool:
+		return "⚙", styleTLTool
+	case tlJourney:
+		return "◆", styleTLJourney
+	default:
+		return "·", styleTLSys
+	}
+}
+
+func renderBlock(bl contentBlock, exp expandState, opts renderOpts, parent timelineKind) string {
+	w := opts.Width
+	open := exp.open(bl.Key)
+	switch bl.Kind {
+	case blockThinking:
+		text := bl.Text
+		lines := lineCount(text)
+		folded := false
+		if !open {
+			if bl.Live {
+				text = foldTail(text, thinkingLiveMaxLines, thinkingLiveMaxChars)
+			} else if needsFold(text, thinkingFoldMaxLines, thinkingFoldMaxChars) {
+				folded = true
+				text = ""
+			}
+		}
+		title := blockTitleThinking(lines, folded, bl.Live)
+		body := text
+		if folded {
+			body = styleDim.Render(fmt.Sprintf("%d lines collapsed · press e or click", lines))
+		}
+		return renderBubbleCard(title, body, colorBubbleThinking, styleTLThinking, styleDim, w, bl.Key)
+
+	case blockToolCall:
+		title := blockTitleTool(bl.ToolName, bl.Text)
+		return renderBubbleCard(title, "", colorBubbleTool, styleTLTool, styleDim, w, bl.Key)
+
+	case blockToolResult:
+		text := bl.Text
+		label := bl.ToolName
+		if label == "" {
+			label = "result"
+		}
+		if bl.ToolID != "" {
+			label = label + " " + shortID(bl.ToolID)
+		}
+		if !open && needsFold(text, toolResultMaxLines, toolResultMaxChars) {
+			n := lineCount(text)
+			preview := firstLine(text)
+			body := fmt.Sprintf("%d lines · e expand", n)
+			if preview != "" {
+				body += "\n" + truncate(preview, 80)
+			}
+			return renderBubbleCard("└ "+label, body, colorBubbleTool, styleTLTool, styleDim, w, bl.Key)
+		}
+		body := text
+		if !open {
+			body = foldHead(text, toolResultMaxLines, toolResultMaxChars)
+		}
+		return renderBubbleCard("└ "+label, body, colorBubbleTool, styleTLTool, styleDim, w, bl.Key)
+
+	case blockReply:
+		text := bl.Text
+		// Strip live cursor for fold metrics.
+		plain := strings.TrimSuffix(text, "▌")
+		if !open && needsFold(plain, timelineBodyMaxLines, timelineBodyMaxChars) {
+			text = foldHead(text, timelineBodyMaxLines, timelineBodyMaxChars)
+		} else if !bl.Live && plain != "" {
+			// Completed reply: glamour markdown.
+			innerW := w - 4
+			md := renderMarkdown(plain, innerW, opts.Theme)
+			title := "● assistant"
+			if parent == tlRun {
+				title = "● assistant"
+			}
+			return renderBubbleCard(title, md, colorBubbleAssistant, styleTLRun, styleTLReply, w, bl.Key)
+		}
+		title := "● assistant"
+		if bl.Live {
+			title = "◌ assistant"
+		}
+		return renderBubbleCard(title, text, colorBubbleAssistant, styleTLRun, styleTLReply, w, bl.Key)
+
+	default:
+		text := bl.Text
+		if !open {
+			text = foldHead(text, timelineBodyMaxLines, timelineBodyMaxChars)
+		}
+		return renderBubbleCard("·", text, colorBorder, styleTLSys, styleDim, w, bl.Key)
+	}
+}
+
+func needsFold(s string, maxLines, maxChars int) bool {
+	if s == "" {
+		return false
+	}
+	if maxLines > 0 && lineCount(s) > maxLines {
+		return true
+	}
+	if maxChars > 0 && len([]rune(s)) > maxChars {
+		return true
+	}
+	return false
+}
+
+func firstLine(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return strings.TrimSpace(s[:i])
+	}
+	return s
+}
+
+// collectExpandKeys returns foldable keys in display order (for e = last foldable).
+func collectExpandKeys(items []timelineItem) []string {
+	var keys []string
+	seen := make(map[string]struct{})
+	add := func(k string) {
+		if k == "" {
+			return
+		}
+		if _, ok := seen[k]; ok {
+			return
+		}
+		seen[k] = struct{}{}
+		keys = append(keys, k)
+	}
+	for _, it := range items {
+		add(it.Key)
+		for _, bl := range it.Blocks {
+			add(bl.Key)
+		}
+	}
+	return keys
 }

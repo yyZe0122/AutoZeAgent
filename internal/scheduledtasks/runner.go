@@ -127,6 +127,17 @@ func (r *Runner) accept(ctx context.Context, request schedulerapi.TaskRequest) e
 	}
 	slog.Info("scheduled task submit started", runlog.Attrs("scheduledtasks", "accept", "started", ids,
 		"job_id", request.JobID, "job_run_id", request.RunID, "execution_mode", string(mode))...)
+	modelRef := strings.TrimSpace(request.ModelRef)
+	if modelRef == "" {
+		// H7: pre-migration jobs without pin must not fire against drifting main.
+		slog.Error("scheduled task missing model pin; skip", runlog.Attrs("scheduledtasks", "accept", "failed", ids,
+			"job_id", request.JobID, "job_run_id", request.RunID)...)
+		ackErr := r.client.AcknowledgeScheduledTask(ctx, schedulerapi.AcknowledgeRequest{
+			RunID: request.RunID, LeaseID: request.LeaseID, Status: "failed",
+			Error: "job model_ref is empty; recreate job to pin a model (H7)",
+		})
+		return errors.Join(errors.New("scheduled job model_ref is empty"), ackErr)
+	}
 	result, err := r.submissions.Submit(ctx, tasksubmission.Request{
 		TaskID:        taskID,
 		SessionID:     kernel.SessionID(request.SessionID),
@@ -134,6 +145,7 @@ func (r *Runner) accept(ctx context.Context, request schedulerapi.TaskRequest) e
 		Objective:     request.Objective,
 		SkillIDs:      append([]string(nil), request.SkillIDs...),
 		ExecutionMode: mode,
+		ModelRef:      modelRef,
 		EnsureSession: false,
 		AllowExisting: true,
 	})

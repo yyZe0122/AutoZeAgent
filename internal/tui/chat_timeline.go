@@ -18,8 +18,8 @@ func buildChatTimeline(
 	if len(messages) > 0 {
 		toolNames := toolNameByCallID(messages)
 		items := make([]timelineItem, 0, len(messages)+4)
-		for _, msg := range messages {
-			items = append(items, transcriptToItem(msg, toolNames))
+		for i, msg := range messages {
+			items = append(items, transcriptToItem(msg, toolNames, i))
 		}
 		// Status footer when task is mid-flight.
 		if task != nil {
@@ -29,9 +29,20 @@ func buildChatTimeline(
 					Kind: tlSystem, At: task.UpdatedAt, Title: "legacy: " + task.State, State: task.State,
 				})
 			case gatewayclient.TaskStateRunning:
-				title := "running"
 				items = append(items, timelineItem{
-					Kind: tlSystem, At: task.UpdatedAt, Title: title, State: task.State,
+					Kind: tlSystem, At: task.UpdatedAt, Title: "running", State: task.State,
+				})
+			case gatewayclient.TaskStateCompleted:
+				items = append(items, timelineItem{
+					Kind: tlDone, At: task.UpdatedAt, Title: "done · idle", State: task.State,
+				})
+			case gatewayclient.TaskStateFailed:
+				items = append(items, timelineItem{
+					Kind: tlError, At: task.UpdatedAt, Title: "failed", State: task.State,
+				})
+			case gatewayclient.TaskStateCancelled:
+				items = append(items, timelineItem{
+					Kind: tlSystem, At: task.UpdatedAt, Title: "cancelled", State: task.State,
 				})
 			}
 		}
@@ -70,57 +81,83 @@ func patchRunningStatus(items []timelineItem, title string) []timelineItem {
 	return items
 }
 
-// appendLiveDraft adds an in-progress assistant bubble for typewriter UI.
-func appendLiveDraft(items []timelineItem, thinking, content string) []timelineItem {
-	if strings.TrimSpace(thinking) == "" && strings.TrimSpace(content) == "" {
+// appendLiveDraft adds in-progress assistant blocks for typewriter UI.
+func appendLiveDraft(items []timelineItem, thinking, content string, liveTools []contentBlock) []timelineItem {
+	think := strings.TrimSpace(thinking)
+	content = strings.TrimRight(content, "\n")
+	if think == "" && content == "" && len(liveTools) == 0 {
 		return items
 	}
-	var b strings.Builder
-	if think := strings.TrimSpace(thinking); think != "" {
-		b.WriteString("thinking: ")
-		b.WriteString(think)
-		b.WriteByte('\n')
+	blocks := make([]contentBlock, 0, 2+len(liveTools))
+	if think != "" {
+		blocks = append(blocks, contentBlock{
+			Kind: blockThinking, Text: think, Key: "live-thinking", Live: true,
+		})
 	}
-	b.WriteString(content)
+	blocks = append(blocks, liveTools...)
 	if content != "" {
-		b.WriteString("▌")
+		blocks = append(blocks, contentBlock{
+			Kind: blockReply, Text: content + "▌", Key: "live-reply", Live: true,
+		})
+	} else if think != "" || len(liveTools) > 0 {
+		// Still streaming with no text yet — show cursor on a thin reply line.
+		blocks = append(blocks, contentBlock{
+			Kind: blockReply, Text: "▌", Key: "live-reply", Live: true,
+		})
 	}
 	return append(items, timelineItem{
-		Kind: tlRun, Title: "assistant…", Body: b.String(), State: "streaming",
+		Kind: tlRun, Title: "assistant…", State: "streaming", Blocks: blocks, Key: "live",
 	})
 }
 
-func transcriptToItem(msg gatewayclient.TranscriptMessage, toolNames map[string]string) timelineItem {
+func transcriptToItem(msg gatewayclient.TranscriptMessage, toolNames map[string]string, index int) timelineItem {
 	switch strings.ToLower(msg.Role) {
 	case "user":
 		return timelineItem{
 			Kind: tlUser, At: msg.CreatedAt, Title: "you", Body: msg.Content,
+			Key: fmt.Sprintf("msg:%d:user", index),
 		}
 	case "assistant":
-		var b strings.Builder
+		blocks := make([]contentBlock, 0, 2+len(msg.ToolCalls))
+		baseKey := fmt.Sprintf("msg:%d", index)
 		if think := strings.TrimSpace(msg.Thinking); think != "" {
-			b.WriteString("thinking: ")
-			b.WriteString(foldBody(think))
-			b.WriteByte('\n')
+			blocks = append(blocks, contentBlock{
+				Kind: blockThinking, Text: think, Key: baseKey + ":thinking",
+			})
 		}
 		if msg.Content != "" {
-			b.WriteString(msg.Content)
+			blocks = append(blocks, contentBlock{
+				Kind: blockReply, Text: msg.Content, Key: baseKey + ":reply",
+			})
 		}
-		if len(msg.ToolCalls) > 0 {
-			if b.Len() > 0 {
-				b.WriteByte('\n')
+		for _, tc := range msg.ToolCalls {
+			preview := toolCallPreview(tc.Name, tc.Arguments)
+			if preview == "" {
+				raw := strings.TrimSpace(tc.Arguments)
+				if raw != "" && raw != "{}" {
+					preview = truncate(raw, 100)
+				}
 			}
-			for _, tc := range msg.ToolCalls {
-				b.WriteString(formatToolCallLine(tc))
-				b.WriteByte('\n')
-			}
+			blocks = append(blocks, contentBlock{
+				Kind:     blockToolCall,
+				Text:     preview,
+				ToolName: strings.TrimSpace(tc.Name),
+				ToolID:   tc.ID,
+				Key:      baseKey + ":tc:" + tc.ID,
+			})
 		}
-		body := strings.TrimRight(b.String(), "\n")
-		if body == "" {
-			body = "(empty assistant message)"
+		title := "assistant"
+		if len(msg.ToolCalls) > 0 && strings.TrimSpace(msg.Content) == "" && strings.TrimSpace(msg.Thinking) == "" {
+			title = "assistant · tools"
+		}
+		if len(blocks) == 0 {
+			return timelineItem{
+				Kind: tlRun, At: msg.CreatedAt, Title: title, Body: "(empty assistant message)",
+				Key: baseKey,
+			}
 		}
 		return timelineItem{
-			Kind: tlRun, At: msg.CreatedAt, Title: "assistant", Body: foldBody(body),
+			Kind: tlRun, At: msg.CreatedAt, Title: title, Blocks: blocks, Key: baseKey,
 		}
 	case "tool":
 		name := ""
@@ -128,12 +165,21 @@ func transcriptToItem(msg gatewayclient.TranscriptMessage, toolNames map[string]
 			name = toolNames[msg.ToolCallID]
 		}
 		title := formatToolResultTitle(msg.ToolCallID, name)
+		key := fmt.Sprintf("msg:%d:tool:%s", index, msg.ToolCallID)
 		return timelineItem{
-			Kind: tlSystem, At: msg.CreatedAt, Title: title, Body: foldBody(msg.Content),
+			Kind: tlTool, At: msg.CreatedAt, Title: title, Key: key,
+			Blocks: []contentBlock{{
+				Kind:     blockToolResult,
+				Text:     msg.Content,
+				ToolName: name,
+				ToolID:   msg.ToolCallID,
+				Key:      key,
+			}},
 		}
 	default:
 		return timelineItem{
-			Kind: tlSystem, At: msg.CreatedAt, Title: msg.Role, Body: foldBody(msg.Content),
+			Kind: tlSystem, At: msg.CreatedAt, Title: msg.Role, Body: msg.Content,
+			Key: fmt.Sprintf("msg:%d:sys", index),
 		}
 	}
 }

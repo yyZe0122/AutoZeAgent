@@ -11,6 +11,7 @@ import (
 )
 
 func TestStartListCallFakeServer(t *testing.T) {
+	// stdio path (Content-Length framing)
 	dir := t.TempDir()
 	script := filepath.Join(dir, "fake_mcp.py")
 	// Minimal MCP stdio server: initialize, tools/list, tools/call echo.

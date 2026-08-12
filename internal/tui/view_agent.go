@@ -3,6 +3,8 @@ package tui
 import (
 	"fmt"
 	"strings"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 // renderSessionView is the sole main-area body: chat transcript (or empty welcome).
@@ -31,15 +33,25 @@ func renderSessionView(m *model) string {
 		b.WriteString(styleDim.Render(truncate(m.task.Title, 80)) + "\n")
 	}
 	b.WriteString("\n")
-	b.WriteString(m.tlCache.render(m.timeline))
+	opts := renderOpts{Width: bubbleWidth(m.width), Theme: m.theme}
+	b.WriteString(m.tlCache.render(m.timeline, m.expand, opts))
 	return b.String()
 }
 
 func renderEmptySession(m *model) string {
 	var b strings.Builder
-	b.WriteString(styleTitle.Render("Session") + "\n")
-	b.WriteString(styleDim.Render("Type to chat. /new opens a fresh session.") + "\n")
-	b.WriteString(styleDim.Render("/sessions lists past chats · Tab toggles agent (build) | plan (read-only).") + "\n")
+	b.WriteString(styleTitle.Render("Ready") + "\n\n")
+	b.WriteString(styleDim.Render("Type a message to start · /new for a fresh session") + "\n\n")
+	chips := lipgloss.JoinHorizontal(lipgloss.Top,
+		renderChip("Tab · mode"),
+		"  ",
+		renderChip("/sessions"),
+		"  ",
+		renderChip("e expand"),
+		"  ",
+		renderChip("/help"),
+	)
+	b.WriteString(chips + "\n")
 	if len(m.sessions) > 0 {
 		b.WriteString("\n")
 		b.WriteString(styleMuted.Render("Recent sessions") + "\n")

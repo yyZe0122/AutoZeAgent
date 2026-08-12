@@ -39,7 +39,11 @@ func Run(config Config) error {
 	defer cancel()
 
 	m := newModel(config.Mode, gw)
-	program := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(ctx))
+	program := tea.NewProgram(m,
+		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(),
+		tea.WithContext(ctx),
+	)
 
 	go streamSSE(ctx, gw, program)
 	go streamModel(ctx, gw, program)

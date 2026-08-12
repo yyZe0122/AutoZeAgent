@@ -32,7 +32,8 @@ func TestCoreStoreClaimsAndAcknowledgesDueJob(t *testing.T) {
 	request := schedulerapi.CreateRequest{
 		Name: "heartbeat", SessionID: "session-jobs", TaskTitle: "Heartbeat",
 		TaskObjective: "Inspect progress", ExecutionMode: schedulerapi.ExecutionModeAgent,
-		SkillIDs: []string{"demo"}, IntervalSeconds: 60, NextRunAt: now.Add(-time.Second).Format(time.RFC3339Nano),
+		SkillIDs: []string{"demo"}, ModelRef: "openai/gpt-test",
+		IntervalSeconds: 60, NextRunAt: now.Add(-time.Second).Format(time.RFC3339Nano),
 		TimeoutSeconds: 300, MaxRetries: 2, BackoffSeconds: 1,
 		MisfirePolicy: schedulerapi.MisfireRunOnce, IdempotencyKey: "heartbeat/session-jobs",
 	}
@@ -42,6 +43,9 @@ func TestCoreStoreClaimsAndAcknowledgesDueJob(t *testing.T) {
 	}
 	if job.ExecutionMode != schedulerapi.ExecutionModeAgent {
 		t.Fatalf("execution_mode = %q", job.ExecutionMode)
+	}
+	if job.ModelRef != "openai/gpt-test" {
+		t.Fatalf("model_ref = %q", job.ModelRef)
 	}
 	if len(job.SkillIDs) != 1 || job.SkillIDs[0] != "demo" {
 		t.Fatalf("skill_ids = %v", job.SkillIDs)
@@ -65,6 +69,9 @@ func TestCoreStoreClaimsAndAcknowledgesDueJob(t *testing.T) {
 	}
 	if len(tasks[0].SkillIDs) != 1 || tasks[0].SkillIDs[0] != "demo" {
 		t.Fatalf("claimed skill_ids = %v", tasks[0].SkillIDs)
+	}
+	if tasks[0].ModelRef != "openai/gpt-test" {
+		t.Fatalf("claimed model_ref = %q", tasks[0].ModelRef)
 	}
 	again, err := store.ClaimDue(ctx, schedulerapi.ClaimDueRequest{
 		Owner: "test-daemon", Now: now.Format(time.RFC3339Nano), Limit: 10, LeaseSeconds: 30,
@@ -115,6 +122,31 @@ func TestCoreStoreDefaultsExecutionModeAgent(t *testing.T) {
 	}
 	if job.ExecutionMode != schedulerapi.ExecutionModeAgent {
 		t.Fatalf("execution_mode = %q", job.ExecutionMode)
+	}
+}
+
+func TestCoreStorePinsMainModelRefWhenEmpty(t *testing.T) {
+	ctx := context.Background()
+	database, err := coresqlite.Open(ctx, t.TempDir()+"/core.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	repository, _ := kernel.NewRepository(database.SQL())
+	_, _ = repository.CreateSession(ctx, "session-pin", time.Now().UTC())
+	store, err := NewStoreWithMainRef(database.SQL(), func() string { return "deepseek/deepseek-chat" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := store.Create(ctx, schedulerapi.CreateRequest{
+		Name: "pin", SessionID: "session-pin", TaskTitle: "T", TaskObjective: "O",
+		IntervalSeconds: 60, IdempotencyKey: "pin-main",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.ModelRef != "deepseek/deepseek-chat" {
+		t.Fatalf("model_ref = %q", job.ModelRef)
 	}
 }
 

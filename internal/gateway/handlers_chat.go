@@ -55,18 +55,58 @@ func (a *API) handleSessions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleSession(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodGet) {
-		return
-	}
 	id, ok := pathID(w, r.URL.Path, "/v1/sessions/")
 	if !ok {
 		return
 	}
-	item, err := a.queries.GetSession(r.Context(), kernel.SessionID(id))
-	if errors.Is(err, corequery.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "not_found", "session not found")
+	switch r.Method {
+	case http.MethodGet:
+		item, err := a.queries.GetSession(r.Context(), kernel.SessionID(id))
+		if errors.Is(err, corequery.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "session not found")
+			return
+		}
+		if err != nil {
+			writeInternal(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, item)
+	case http.MethodPatch:
+		a.handleSessionPatch(w, r, kernel.SessionID(id))
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "use GET or PATCH")
+	}
+}
+
+func (a *API) handleSessionPatch(w http.ResponseWriter, r *http.Request, id kernel.SessionID) {
+	if a.sessionPrefs == nil {
+		writeError(w, http.StatusNotImplemented, "not_implemented", "session preferences unavailable")
 		return
 	}
+	var body struct {
+		PreferredModel *string `json:"preferred_model"`
+	}
+	if err := decodeJSON(w, r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	if body.PreferredModel == nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "preferred_model is required (string; empty clears)")
+		return
+	}
+	if err := a.sessionPrefs.SetPreferredModel(r.Context(), id, *body.PreferredModel); err != nil {
+		if errors.Is(err, kernel.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "session not found")
+			return
+		}
+		if errors.Is(err, kernel.ErrInvalidAggregate) {
+			writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+		writeInternal(w, err)
+		return
+	}
+	item, err := a.queries.GetSession(r.Context(), id)
 	if err != nil {
 		writeInternal(w, err)
 		return

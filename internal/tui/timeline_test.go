@@ -41,7 +41,7 @@ func TestBuildTimelineOrder(t *testing.T) {
 		t.Fatalf("kinds = %s", joined)
 	}
 	text := renderTimeline(items)
-	if !strings.Contains(text, "objective") || !strings.Contains(text, "all good") {
+	if !strings.Contains(text, "you") || !strings.Contains(text, "all good") {
 		t.Fatalf("render = %s", text)
 	}
 }
@@ -73,18 +73,121 @@ func TestFoldBodyTruncates(t *testing.T) {
 	}
 }
 
+func TestFoldTailKeepsLatest(t *testing.T) {
+	var b strings.Builder
+	for i := 0; i < 20; i++ {
+		b.WriteString("L")
+		b.WriteString(itoa(i))
+		b.WriteByte('\n')
+	}
+	out := foldTail(b.String(), 3, 500)
+	if !strings.Contains(out, "L19") || !strings.Contains(out, "expand") {
+		t.Fatalf("tail fold = %q", out)
+	}
+	if strings.Contains(out, "L0\n") {
+		t.Fatalf("should drop early lines: %q", out)
+	}
+}
+
+func TestThinkingBlockCollapsed(t *testing.T) {
+	longThink := strings.Repeat("reason step\n", 20)
+	items := []timelineItem{{
+		Kind: tlRun, Title: "assistant",
+		Blocks: []contentBlock{{
+			Kind: blockThinking, Text: longThink, Key: "t1",
+		}, {
+			Kind: blockReply, Text: "final answer", Key: "r1",
+		}},
+	}}
+	out := renderTimelineExpanded(items, expandState{})
+	if !strings.Contains(out, "thinking") || !strings.Contains(out, "expand") {
+		t.Fatalf("expected collapsed thinking: %s", out)
+	}
+	if strings.Count(out, "reason step") > 2 {
+		t.Fatalf("thinking not collapsed: %s", out)
+	}
+	if !strings.Contains(out, "final answer") {
+		t.Fatalf("reply missing: %s", out)
+	}
+	// Expand.
+	out2 := renderTimelineExpanded(items, expandState{keys: map[string]bool{"t1": true}})
+	if strings.Count(out2, "reason step") < 10 {
+		t.Fatalf("expected expanded thinking: %s", out2)
+	}
+}
+
+func TestDoneBanner(t *testing.T) {
+	items := []timelineItem{{
+		Kind: tlDone, Title: "done · idle", State: gatewayclient.TaskStateCompleted,
+	}}
+	out := renderTimeline(items)
+	if !strings.Contains(out, "done") || !strings.Contains(out, "═") {
+		t.Fatalf("render = %s", out)
+	}
+}
+
+func TestBubbleCardsHaveBorder(t *testing.T) {
+	items := []timelineItem{
+		{Kind: tlUser, Title: "you", Body: "hello there"},
+		{Kind: tlRun, Title: "assistant", Blocks: []contentBlock{
+			{Kind: blockReply, Text: "hi back", Key: "r1"},
+		}},
+	}
+	out := renderTimeline(items)
+	// Rounded border uses ╭╮╰╯ or unicode box corners depending on lipgloss.
+	if !strings.Contains(out, "you") || !strings.Contains(out, "hello") {
+		t.Fatalf("user bubble missing: %s", out)
+	}
+	if !strings.Contains(out, "assistant") {
+		t.Fatalf("assistant bubble missing: %s", out)
+	}
+}
+
+func TestLiveThinkingTail(t *testing.T) {
+	items := appendLiveDraft(nil, strings.Repeat("think line\n", 30), "", nil)
+	out := renderTimeline(items)
+	if !strings.Contains(out, "thinking") {
+		t.Fatalf("missing thinking: %s", out)
+	}
+	// Live fold shows tail marker with line count.
+	if !strings.Contains(out, "lines") && !strings.Contains(out, "think line") {
+		t.Fatalf("live thinking render: %s", out)
+	}
+}
+
 func TestTimelineRenderCacheHit(t *testing.T) {
 	var cache timelineRenderCache
-	items := []timelineItem{{Kind: tlUser, Title: "objective", Body: "hi", At: "t0"}}
-	a := cache.render(items)
-	b := cache.render(items)
+	opts := defaultRenderOpts()
+	items := []timelineItem{{Kind: tlUser, Title: "you", Body: "hi", At: "t0"}}
+	a := cache.render(items, expandState{}, opts)
+	b := cache.render(items, expandState{}, opts)
 	if a != b || a == "" {
 		t.Fatalf("cache miss: %q vs %q", a, b)
 	}
 	items[0].Body = "changed"
-	c := cache.render(items)
+	c := cache.render(items, expandState{}, opts)
 	if c == a {
 		t.Fatal("expected invalidate on body change")
+	}
+}
+
+func TestExpandStateToggle(t *testing.T) {
+	var e expandState
+	e.toggle("k1")
+	if !e.open("k1") {
+		t.Fatal("expected open")
+	}
+	e.toggle("k1")
+	if e.open("k1") {
+		t.Fatal("expected closed")
+	}
+	e.setAll(true)
+	if !e.open("any") {
+		t.Fatal("all should open any key")
+	}
+	e.setAll(false)
+	if e.open("any") {
+		t.Fatal("none should close")
 	}
 }
 
@@ -105,3 +208,5 @@ func TestScheduleRefreshCoalesces(t *testing.T) {
 		t.Fatal("expected pending")
 	}
 }
+
+

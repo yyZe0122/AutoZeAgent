@@ -50,6 +50,66 @@ Any attempt to use tools is a critical violation. Respond with text ONLY.`
 const loopDetectedPrompt = `CRITICAL - TOOL LOOP DETECTED
 The same tool calls (name + arguments) repeated too many times in a short window. Tools are disabled for this turn. Summarize what you tried, what failed, and ask the user how to proceed. Respond with text only.`
 
+// ProposeMemoryFacts runs a short no-tool aux call for H1-lite memory curator.
+// Uses the compact model role when configured (ADR-045); otherwise main.
+func (r *Runner) ProposeMemoryFacts(ctx context.Context, userText, assistantText string, maxFacts int) (string, error) {
+	if ctx == nil {
+		return "", fmt.Errorf("%w: context is required", ErrInvalidRequest)
+	}
+	if r == nil {
+		return "", fmt.Errorf("%w: runner is required", ErrInvalidRequest)
+	}
+	if maxFacts <= 0 {
+		maxFacts = 3
+	}
+	provider, model, _ := r.snapshotForRole("compact")
+	if provider == nil || strings.TrimSpace(model) == "" {
+		return "", fmt.Errorf("%w: provider/model unavailable for curator", ErrInvalidRequest)
+	}
+	// Import cycle avoidance: prompt text is built by caller (memory package) via free functions
+	// is not available here — inline a minimal user body.
+	user := fmt.Sprintf("Max facts: %d\n\nUser:\n%s\n\nAssistant:\n%s\n",
+		maxFacts, truncateForCurator(userText, 1_200), truncateForCurator(assistantText, 1_200))
+	req := providerapi.CompletionRequest{
+		Model: model,
+		Messages: []providerapi.Message{
+			{Role: providerapi.RoleSystem, Content: memoryCuratorSystemPrompt},
+			{Role: providerapi.RoleUser, Content: user},
+		},
+		MaxOutputTokens: 512,
+	}
+	var content strings.Builder
+	err := provider.Stream(ctx, req, func(ev providerapi.StreamEvent) error {
+		if ev.Type == providerapi.StreamDelta {
+			content.WriteString(ev.ContentDelta)
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(content.String()), nil
+}
+
+const memoryCuratorSystemPrompt = `You extract durable user preferences and stable facts for a local coding agent memory.
+Return ONLY a JSON array of strings (0 to N items). No markdown fences, no commentary.
+Each string must be one short fact in the user's language (max ~120 chars).
+Include only preferences, constraints, environment facts, or decisions that should survive later turns.
+Omit task-specific progress, tool logs, code dumps, secrets, and one-off questions.
+If nothing durable, return [].`
+
+func truncateForCurator(s string, maxRunes int) string {
+	s = strings.TrimSpace(s)
+	if maxRunes <= 0 || s == "" {
+		return s
+	}
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return string(runes[:maxRunes]) + "…"
+}
+
 // CompactSummary asks the model for a structured head summary (no tools). Used by chat compaction.
 // Uses the compact model role when configured (ADR-045); otherwise main.
 func (r *Runner) CompactSummary(ctx context.Context, head []providerapi.Message) (string, error) {

@@ -52,7 +52,9 @@ Agent 可通过 `chat.tools.git` / `chat.tools.process`（默认 false）opt-in�
 - `allow_write`：仅 agent 写权限天花板；**plan 永远只读**；
 - `tools.git` / `tools.process`：仅 agent 预授权；
 - `permission.mode`：tool-call 交互见 ADR-043 / 四档 ADR-046（≠ 整单 Planner）；
-- 会话记忆：ADR-044。
+- 会话记忆：ADR-044；注入/skill 正文经 `injectscan`（H6-min）fail-closed；
+- 会话模型偏好（O4）：`metadata.model` / `preferred_model`；不改全局 main；chat run 解析 prefer→main（见 ADR-045）；
+- `chat.commands`（O3）：用户 slash 模板，仅 instruction；TUI 展开后作为 user 消息提交；不扩 grant。
 
 ### 任务控制
 
@@ -68,7 +70,7 @@ Agent 可通过 `chat.tools.git` / `chat.tools.process`（默认 false）opt-in�
 
 - Gateway 不执行 tool、不调 provider、不发 grant；
 - 新任务状态机：`created → running → (paused) → completed|failed|cancelled`；历史 DB 行中的 `planning`/`waiting_approval`/`approved` 仅只读展示；
-- Skill 仅指令文本，不扩大授权。
+- Skill 与 `chat.commands` 仅指令文本，不扩大授权；TUI 可 `/skills`、`/<skill-id>` 或 `/<command>` 显式使用。
 
 ## 结果
 

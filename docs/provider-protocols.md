@@ -15,6 +15,56 @@ Configuration is loaded **only** from the OS config directory (`paths.Layout.Con
 
 On first start, if ConfigDir has no file, the daemon may **migrate** once from the process working directory or data dir (legacy project `agent.local.json`), otherwise it writes a default template with `{env:…}` placeholders (no secrets) and may seed an empty `env` template. Installers do the same without overwriting existing files. Project directories are **not** searched for ongoing loads.
 
+### Import from OpenCode
+
+```bash
+ymz config import-opencode [path] [--mode user|system] [--dry-run] [--output path]
+```
+
+Maps OpenCode `opencode.json` / `opencode.jsonc` into `agent.local.json` under ConfigDir:
+
+| Mapped | Notes |
+| --- | --- |
+| `model`, `provider.*` | Nested catalog; `npm` → `type` heuristic; options `baseURL` / `apiKey` / `headers` kept |
+| Local stdio MCP | `command` string or argv array → `mcp.servers` (`type` stdio/local) |
+| Remote MCP | `type` remote/sse/http or `url` → `mcp.servers` with `url` (+ `headers`); oauth block not imported |
+| OC `command` map | → `chat.commands` (template / prompt / message + description) |
+| `compaction` | Top-level OC `compaction.auto` / `enabled` → `chat.compaction.enabled` |
+
+**Dropped with warnings:** plugins, LSP, theme/keybinds/tui, agent/mode maps, permission/tools maps, MCP oauth blocks, and other unknown top-level fields. Prefer re-running `ymz config validate` after import. Implementation: `internal/opencodeimport`.
+
+### MCP servers (`mcp.servers`)
+
+| Transport | Config | Notes |
+| --- | --- | --- |
+| stdio | `command` + optional `args` / `env` | Default when `command` set; `type: "stdio"` or `"local"` |
+| Streamable HTTP | `type: "http"`, `url`, optional `headers` | MCP 2025-03-26 streamable endpoint |
+| Legacy SSE | `type: "sse"`, `url` | HTTP+SSE (2024-11-05) |
+| Auto remote | `type: "remote"` or only `url` | Try streamable, fallback legacy SSE |
+
+Header/env values support `{env:VAR}` / `{file:…}`. Gateway MCP status never returns URL or headers. MCP is **not** hot-reloaded (restart daemon).
+
+### Chat slash templates (`chat.commands`, O3)
+
+```json
+"chat": {
+  "commands": {
+    "review": {
+      "description": "Code review focus",
+      "template": "Review with security and API design in mind.\n\n$ARGUMENTS"
+    }
+  }
+}
+```
+
+| Rule | Detail |
+| --- | --- |
+| Key | Slash name without `/`; `[a-zA-Z0-9_-]+`; must not clash with built-in TUI commands |
+| `template` | Required; optional `$ARGUMENTS` / `$0`; injectscan at load; max 8000 runes |
+| Effect | TUI expands → user message submit only — **no** grants / skills / policy |
+| API | `GET /v1/config/commands` → `{commands:[{id,description,template}]}` |
+| Reload | Not hot-reloaded (`chat.*`); `ymz restart` after edit |
+
 ## API keys (choose any; nothing is forced)
 
 `options.apiKey` supports three forms:
@@ -95,7 +145,8 @@ Same model segment on two suppliers is fine; selection disambiguates. Templates 
 - Prefer catalog keys equal to the upstream model id (including `/` when the gateway requires it). Optional `id` overrides the wire name while keeping a short selection key.
 - Mistyped keys of the form `providerID/modelID` when the selection model segment is bare are still accepted as a convenience; wire id remains the bare segment (or `id`).
 - Empty `models` under a provider allows any model id (pass-through; API may still reject unknown ids).
-- TUI `/model` lists `providerId/modelId…` refs and only changes top-level `model`.
+- TUI `/model` lists `providerId/modelId…` refs and only changes top-level **global** `model` (`PUT /v1/config/model`).
+- Session **preference** (optional): `PATCH /v1/sessions/{id}` with `preferred_model` stores `metadata.model` (O4). TUI `/model prefer [ref]` sets preference without switching global main. Chat runs resolve **prefer → main** via `internal/modelresolve` (invalid prefer falls back to main).
 - **`ready`:** true only when config load succeeded **and** agent/chat was bound at daemon start. Otherwise `error` explains (fix config, or `ymz restart` if chat never started). Secrets never appear in `error`.
 
 ### Hot-reload (ADR-048)

@@ -1,9 +1,14 @@
 package providerconfig
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
+	"unicode/utf8"
+
+	"github.com/yyZe0122/yunmengze-agent/internal/injectscan"
 )
 
 func (c ChatConfig) EffectiveRoots(fallback string) []string {
@@ -219,8 +224,146 @@ func (c ChatConfig) validate() error {
 		if mode != "" && mode != "session_start" {
 			return fmt.Errorf("chat.memory.inject_mode must be session_start (or omit)")
 		}
+		if c.Memory.Curator != nil {
+			if c.Memory.Curator.MaxFacts != 0 && (c.Memory.Curator.MaxFacts < 1 || c.Memory.Curator.MaxFacts > 8) {
+				return fmt.Errorf("chat.memory.curator.max_facts must be between 1 and 8 (or omit)")
+			}
+			if c.Memory.Curator.TimeoutMS != 0 && (c.Memory.Curator.TimeoutMS < 1_000 || c.Memory.Curator.TimeoutMS > 120_000) {
+				return fmt.Errorf("chat.memory.curator.timeout_ms must be between 1000 and 120000 (or omit)")
+			}
+		}
+	}
+	if err := validateChatCommands(c.Commands); err != nil {
+		return err
 	}
 	return nil
+}
+
+// MaxChatCommandTemplateRunes caps one command template at load time.
+const MaxChatCommandTemplateRunes = 8_000
+
+// reservedChatCommandNames are TUI builtin slash names (without /) that chat.commands may not claim.
+var reservedChatCommandNames = map[string]struct{}{
+	"new": {}, "sessions": {}, "tasks": {}, "back": {}, "clear": {},
+	"pause": {}, "resume": {}, "cancel": {}, "stop": {}, "retry": {},
+	"model": {}, "skills": {}, "theme": {}, "cron": {}, "compact": {},
+	"perm": {}, "memory": {}, "refresh-memory": {}, "status": {}, "help": {},
+	"quit": {}, "q": {}, "exit": {}, "resume-list": {},
+}
+
+func validateChatCommands(commands map[string]ChatCommandConfig) error {
+	if len(commands) == 0 {
+		return nil
+	}
+	for name, cmd := range commands {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return errors.New("chat.commands: empty command name")
+		}
+		if strings.HasPrefix(name, "/") {
+			return fmt.Errorf("chat.commands %q: name must not include leading slash", name)
+		}
+		if !ValidChatCommandName(name) {
+			return fmt.Errorf("chat.commands %q: name must match [a-zA-Z0-9_-]+", name)
+		}
+		if _, reserved := reservedChatCommandNames[strings.ToLower(name)]; reserved {
+			return fmt.Errorf("chat.commands %q: name conflicts with built-in slash command", name)
+		}
+		template := strings.TrimSpace(cmd.Template)
+		if template == "" {
+			return fmt.Errorf("chat.commands %q: template is required", name)
+		}
+		if utf8.RuneCountInString(template) > MaxChatCommandTemplateRunes {
+			return fmt.Errorf("chat.commands %q: template exceeds %d runes", name, MaxChatCommandTemplateRunes)
+		}
+		if err := injectscan.Scan(template); err != nil {
+			return fmt.Errorf("chat.commands %q: template rejected: %w", name, err)
+		}
+		if err := injectscan.Scan(cmd.Description); err != nil {
+			return fmt.Errorf("chat.commands %q: description rejected: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// ValidChatCommandName matches slash fragment for /name.
+func ValidChatCommandName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// ExpandChatCommandTemplate replaces $ARGUMENTS (and $0) with args; if no placeholder, appends args.
+func ExpandChatCommandTemplate(template, args string) string {
+	template = strings.TrimRight(template, " \t")
+	args = strings.TrimSpace(args)
+	if strings.Contains(template, "$ARGUMENTS") {
+		return strings.ReplaceAll(template, "$ARGUMENTS", args)
+	}
+	if strings.Contains(template, "$0") {
+		return strings.ReplaceAll(template, "$0", args)
+	}
+	if args == "" {
+		return strings.TrimSpace(template)
+	}
+	if template == "" {
+		return args
+	}
+	return strings.TrimSpace(template) + "\n\n" + args
+}
+
+// ChatCommandListItem is one command for Gateway/TUI (instruction template; not secrets).
+type ChatCommandListItem struct {
+	ID          string `json:"id"`
+	Description string `json:"description,omitempty"`
+	Template    string `json:"template"`
+}
+
+// CommandList returns sorted commands for Gateway.
+func (c ChatConfig) CommandList() []ChatCommandListItem {
+	if len(c.Commands) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(c.Commands))
+	for name := range c.Commands {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]ChatCommandListItem, 0, len(names))
+	for _, name := range names {
+		cmd := c.Commands[name]
+		out = append(out, ChatCommandListItem{
+			ID:          name,
+			Description: strings.TrimSpace(cmd.Description),
+			Template:    cmd.Template,
+		})
+	}
+	return out
+}
+
+// LookupCommand returns a command by id (case-sensitive key; falls back to case-insensitive).
+func (c ChatConfig) LookupCommand(id string) (ChatCommandConfig, bool) {
+	id = strings.TrimSpace(id)
+	if id == "" || len(c.Commands) == 0 {
+		return ChatCommandConfig{}, false
+	}
+	if cmd, ok := c.Commands[id]; ok {
+		return cmd, true
+	}
+	lower := strings.ToLower(id)
+	for name, cmd := range c.Commands {
+		if strings.ToLower(name) == lower {
+			return cmd, true
+		}
+	}
+	return ChatCommandConfig{}, false
 }
 
 // LoadModelRoles returns the main model ref and optional role overrides from config.

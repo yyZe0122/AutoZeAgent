@@ -20,6 +20,7 @@ Job payload 描述「何时、在哪个 session、以何种 mode 提交一条 ch
 | `execution_mode` | `agent`（默认）或 `plan` |
 | `task_title` / `task_objective` | 每次 fire 的 chat 标题与用户文本 |
 | `skill_ids` | 可选；显式 ID，经 tasksubmission 快照（指令文本 only） |
+| `model_ref` | **H7** 创建时钉死的 selection ref（`provider/model…`）；空则 daemon 写入当前 main |
 | interval / misfire / retry | 沿用 ADR-017；**不做** cron 表达式 |
 
 到点路径：
@@ -33,6 +34,13 @@ Scheduler **只**决定何时提交；不创建 Approval、Grant、Agent Run 或
 ### 默认 mode = agent
 
 与交互 chat 默认一致。无人值守 agent 与交互 agent **同权**（`chat.allow_write`、`chat.tools.*` 天花板）。需要只读周期任务时显式 `plan`。
+
+### Job model pin（H7）
+
+- Create：`model_ref` 可选；空时由 daemon `MainModelRef`（当前全局 main）写入。
+- Fire：`scheduledtasks` 要求非空 `model_ref`，否则 ACK `failed` + 告警（不静默用漂移后的 main）。
+- Chat resolve 顺序：**job pin > session prefer > daemon main**（`internal/modelresolve`；job pin 严格解析，失败不启动 run）。
+- 旧 job（migration 前 `model_ref=''`）须重建 cron 才能再跑。
 
 ### ACK 语义
 
@@ -48,11 +56,11 @@ Core 接受 task 并启动 chat handoff 后 ACK `task_created` + 稳定 `core_ta
 
 ### 客户端
 
-**TUI 为主**（`/cron` list + create）。CLI `job create` 为次要脚本入口，不挡产品完成。
+**TUI 为主**（`/cron` list + create；创建时钉当前 global model）。CLI `job create --model` 为次要脚本入口，不挡产品完成。
 
 ## 后果
 
-- migration 为 jobs 增加 `execution_mode`、`skill_ids`（012 不可变）
-- daemon 重新挂载 chat-native `scheduledtasks` runner
+- migration 为 jobs 增加 `execution_mode`、`skill_ids`（017）与 `model_ref`（021；012 不可变）
+- daemon 重新挂载 chat-native `scheduledtasks` runner + `NewStoreWithMainRef`
 - Gateway `POST /v1/jobs` 解封
-- 文档与 ADR-017/038 脚注对齐本 ADR
+- 文档与 ADR-017/038/045 脚注对齐本 ADR

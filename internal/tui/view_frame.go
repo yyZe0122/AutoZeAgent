@@ -47,19 +47,31 @@ func (m model) View() string {
 	parts := []string{header, main}
 	parts = append(parts, floatParts...)
 	parts = append(parts, strip, status, inputBox)
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	out := lipgloss.JoinVertical(lipgloss.Left, parts...)
+	return zoneScan(out)
 }
 
 func (m model) renderHeader() string {
-	left := styleTitle.Render("YunmengZe") + "  " +
-		styleDim.Render(string(m.mode)) + "  " +
-		sseDot(m.sseState) + styleDim.Render(" "+m.sseState)
-	themeHint := styleMuted.Render("  " + string(m.theme))
-	taskHint := ""
-	if m.task != nil {
-		taskHint = "\n" + styleDim.Render("  ") + shortID(string(m.task.ID)) + " " + stateBadge(m.task.State)
+	parts := []string{
+		styleTitle.Render("YunmengZe"),
+		styleDim.Render(string(m.mode)),
+		sseDot(m.sseState) + styleDim.Render(" "+m.sseState),
 	}
-	return left + themeHint + taskHint
+	if m.modelName != "" {
+		parts = append(parts, styleMuted.Render(truncate(m.modelName, 28)))
+	}
+	if m.sessionID != "" && m.sessionID != "…" {
+		parts = append(parts, styleDim.Render("s:"+shortID(string(m.sessionID))))
+	}
+	parts = append(parts, styleMuted.Render(string(m.theme)))
+	line := strings.Join(parts, "  ·  ")
+	if m.task != nil {
+		line += "\n" + styleDim.Render("  ") + shortID(string(m.task.ID)) + " " + stateBadge(m.task.State)
+		if m.task.ExecutionMode != "" {
+			line += "  " + styleDim.Render(m.task.ExecutionMode)
+		}
+	}
+	return line
 }
 
 func (m model) renderInputBox(width int) string {
@@ -74,8 +86,8 @@ func (m model) renderInputBox(width int) string {
 		hint = "Tab · plan (read-only · no edits)"
 	}
 	busy := ""
-	if m.busy {
-		busy = styleWarn.Render(" …")
+	if m.busy || m.runActivity() == activityActive {
+		busy = " " + styleWarn.Render(m.spinner.View())
 	}
 	innerW := max(20, width-4)
 	m.input.Width = max(10, innerW-4)
@@ -260,7 +272,7 @@ func (m model) renderStatusLine() string {
 		}
 		return styleStatus.Render(truncate(line, width))
 	}
-	return styleStatus.Render("Tab mode · /help · /skills · /perm · /compact · PgUp scroll")
+	return styleStatus.Render("Tab mode · e expand · /help · /skills · /perm · /journey · PgUp")
 }
 
 // syncViewport rebuilds the main conversation content.

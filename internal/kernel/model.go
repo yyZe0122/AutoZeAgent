@@ -52,6 +52,9 @@ type Session struct {
 	// Workspace is the absolute client launch directory for this session (ADR-046).
 	// Empty until set from task submit or left unset for legacy sessions.
 	Workspace string
+	// PreferredModel is an optional session model preference (provider/model).
+	// O4: chat runs resolve prefer→main via modelresolve; does not rewrite global config.
+	PreferredModel string
 }
 
 func NewSession(id SessionID, now time.Time) (Session, error) {

@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/yyZe0122/yunmengze-agent/internal/injectscan"
 	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
 
@@ -168,6 +169,9 @@ func (m *Manager) RememberKind(ctx context.Context, sessionID, content, source s
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return nil
+	}
+	if err := injectscan.Scan(content); err != nil {
+		return err
 	}
 	// Cap single entry size (detail can be longer).
 	maxRunes := 800
@@ -365,6 +369,9 @@ func formatBlock(entries []Entry, maxRunes int) string {
 	var b strings.Builder
 	b.WriteString("Relevant memory (local; instruction text only — does not grant tools):\n")
 	for _, e := range entries {
+		if err := injectscan.Scan(e.Content); err != nil {
+			continue
+		}
 		prefix := ""
 		if e.SessionID == "" || e.Kind == KindCurated {
 			prefix = "[user] "

@@ -30,6 +30,19 @@ func (a *API) handleConfigMCP(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, a.mcp.MCPStatus())
 }
 
+func (a *API) handleConfigCommands(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	items := []ChatCommandItem{}
+	if a.chatCommands != nil {
+		if listed := a.chatCommands.ChatCommands(); listed != nil {
+			items = listed
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"commands": items})
+}
+
 func (a *API) handleConfigModel(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:

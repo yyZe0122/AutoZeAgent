@@ -46,7 +46,10 @@ core.db  single SQLite source of truth
 | **Local daemon** | Unique per mode; TUI/`run` auto-ensure; `ymz start\|stop\|restart\|status` |
 | **Multi-provider** | Nested catalog per supplier; select `providerId/modelId…` (OpenCode-style) |
 | **Hot-reload** | Main provider stack (~0.5s) while daemon runs — [ADR-048](docs/architecture/048-provider-config-hot-reload.md) |
-| **Memory · cron · MCP** | In-process memory, chat-native jobs, MCP tools via Broker |
+| **OpenCode import** | `ymz config import-opencode` → `agent.local.json` (MCP local+remote, `chat.commands`, compaction; warn+drop plugins/LSP) |
+| **Memory · cron · MCP** | In-process memory (+ inject scan), chat-native jobs, stdio/remote MCP via Broker |
+| **Slash templates** | `chat.commands` → `/<cmd> [args]` expands `$ARGUMENTS` (instruction only; no grants) |
+| **Session model** | `/model prefer` stores preference; chat runs resolve **prefer → main** (global `/model` unchanged) |
 
 Design KB: [`docs/architecture/`](docs/architecture/) · backlog: [`docs/optimization/current.md`](docs/optimization/current.md) · releases: [`docs/changelog/`](docs/changelog/)
 
@@ -135,6 +138,9 @@ Override root: `YMZ_HOME=/abs/path`.
 ```bash
 ymz paths user
 ymz config validate --mode user
+# Optional: map OpenCode config → agent.local.json (warnings for plugins/LSP/oauth MCP)
+ymz config import-opencode              # default ~/.config/opencode/opencode.json
+ymz config import-opencode ./opencode.json --dry-run
 ```
 
 ### Minimal provider config
@@ -183,7 +189,8 @@ Templates use two sample suppliers: **`deepseek1`** (official bare model ids) an
 - Example: `deepseek1/deepseek-chat` wires `deepseek-chat`; `deepseek2/deepseek/deepseek-v4-flash` wires `deepseek/deepseek-v4-flash`.  
 - `maxTokens` = output cap; `contextWindow` = packing / UI pressure ([ADR-041](docs/architecture/041-context-packing-and-pressure.md)).  
 - Optional role map `models.subagent` / `models.compact` ([ADR-045](docs/architecture/045-model-roles.md)).  
-- Optional `chat` (workspace, tools, permission, memory): full example [`configs/agent.json.example`](configs/agent.json.example) · wire formats [`docs/provider-protocols.md`](docs/provider-protocols.md).
+- Optional `chat` (workspace, tools, permission, memory, **commands**): full example [`configs/agent.json.example`](configs/agent.json.example) · wire formats [`docs/provider-protocols.md`](docs/provider-protocols.md).  
+- Optional `mcp.servers`: stdio (`command`) or remote (`type`/`url`/`headers`) — [ADR-040](docs/architecture/040-mcp-tool-broker.md).
 
 ### Hot-reload
 
@@ -211,17 +218,23 @@ ymz stop            # shut down daemon
 
 ### TUI
 
+Chat transcript uses **rounded bubbles** (user / assistant / thinking / tool), not a log dump. Completed assistant replies with markdown markers render via **glamour** (streaming stays plain). Foldable blocks: `/expand` or keys **`e`** (last) · **`E`** (all) · **`c`** (collapse); click a folded card when mouse is supported.
+
 | Input | Behavior |
 | --- | --- |
 | **Tab** | **agent** (R/W) ↔ **plan** (read-only) |
 | Plain text | Submit on current mode / session |
-| `/help` | Slash list |
+| `/help` | Slash list + keys |
 | `/new` · `/sessions` · `/tasks` | Session / task UX |
-| `/model` | Pick or `/model provider/model` |
+| `/model` | Switch **global** main (`/model provider/model`); `/model prefer [ref]` session prefer (applied on next chat run) |
+| `/skills` · `/<skill-id>` | Multi-select skills, or skill-as-slash (instruction only) |
+| `/<cmd> [args]` | `chat.commands` template slash (`$ARGUMENTS`); priority: built-in → commands → skill |
 | `/compact` · `/perm` · `/memory` | Context, tool permission, facts |
+| `/expand` · `/journey` | Expand/collapse folded blocks; prepend session memory timeline (read-only) |
 | `/cron` | Jobs on focused session |
 | `/status` · `/retry` · `/stop` | Health · resubmit · cancel |
 | `/quit` | Exit TUI (daemon stays up) |
+| **e** / **E** / **c** | Expand last foldable · expand all · collapse (empty input) |
 
 ### CLI (scripts)
 

@@ -16,6 +16,10 @@ var (
 	colorSurface   lipgloss.Color
 	colorModeAgent lipgloss.Color
 	colorModePlan  lipgloss.Color
+	colorBubbleUser      lipgloss.Color
+	colorBubbleAssistant lipgloss.Color
+	colorBubbleThinking  lipgloss.Color
+	colorBubbleTool      lipgloss.Color
 
 	styleTitle        lipgloss.Style
 	styleDim          lipgloss.Style
@@ -42,6 +46,12 @@ var (
 	styleTLPlan       lipgloss.Style
 	styleTLRun        lipgloss.Style
 	styleTLErr        lipgloss.Style
+	styleTLTool       lipgloss.Style
+	styleTLThinking   lipgloss.Style
+	styleTLReply      lipgloss.Style
+	styleTLBody       lipgloss.Style
+	styleTLJourney    lipgloss.Style
+	styleDone         lipgloss.Style
 	styleHeart        lipgloss.Style
 	styleMetricsTitle lipgloss.Style
 	stylePanelLabel   lipgloss.Style

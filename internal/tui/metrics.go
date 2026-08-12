@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/yyZe0122/yunmengze-agent/internal/gatewayclient"
@@ -166,8 +167,20 @@ func (m model) runActivity() runActivity {
 }
 
 func (m model) activityLabel() string {
+	if m.pendingPermCount > 0 {
+		return "waiting permission"
+	}
 	switch m.runActivity() {
 	case activityActive:
+		if strings.TrimSpace(m.liveThinking) != "" && strings.TrimSpace(m.liveContent) == "" {
+			return "thinking"
+		}
+		if len(m.liveTools) > 0 && strings.TrimSpace(m.liveContent) == "" {
+			return "tool"
+		}
+		if strings.TrimSpace(m.liveContent) != "" || strings.TrimSpace(m.liveThinking) != "" {
+			return "writing"
+		}
 		return "running"
 	case activityWaiting:
 		if m.task != nil && m.task.State == gatewayclient.TaskStatePaused {
@@ -226,16 +239,22 @@ func formatDuration(d time.Duration) string {
 }
 
 // heartbeatWave returns a scrolling pink pulse when active, flat line otherwise.
+// Frame advance uses a light spring-like phase (harmonica-inspired easing).
 func heartbeatWave(active bool, frame int) string {
 	const width = 8
 	if !active {
 		return "────────"
 	}
-	// ECG-ish pulse pattern; rotate by frame.
+	// Phase with slight ease so the pulse feels less linear.
+	phase := frame
+	if frame > 0 {
+		// harmonica Spring is continuous; discrete ease: favor mid-pulse.
+		phase = frame + (frame%3)/2
+	}
 	pattern := []rune("▁▂▃▅▇▅▃▂")
 	out := make([]rune, width)
 	for i := 0; i < width; i++ {
-		out[i] = pattern[(i+frame)%len(pattern)]
+		out[i] = pattern[(i+phase)%len(pattern)]
 	}
 	return string(out)
 }

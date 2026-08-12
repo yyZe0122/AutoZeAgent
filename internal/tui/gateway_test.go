@@ -15,11 +15,14 @@ import (
 
 // fakeGateway is a minimal Gateway for unit tests.
 type fakeGateway struct {
-	tasks  []gatewayclient.Task
-	jobs   []schedulerapi.Job
-	skills []gatewayclient.Skill
-	health gatewayclient.Health
-	model  gatewayclient.ModelConfig
+	tasks            []gatewayclient.Task
+	jobs             []schedulerapi.Job
+	skills           []gatewayclient.Skill
+	commands         []gatewayclient.ChatCommand
+	health           gatewayclient.Health
+	model            gatewayclient.ModelConfig
+	sessionPreferred string
+	sessionExists    bool
 }
 
 func (f *fakeGateway) StreamEvents(context.Context, uint64, func(eventapi.Envelope) error) error {
@@ -32,6 +35,19 @@ func (f *fakeGateway) StreamModelEvents(context.Context, gatewayclient.SessionID
 
 func (f *fakeGateway) ListSessions(context.Context, int) ([]gatewayclient.Session, error) {
 	return nil, nil
+}
+
+func (f *fakeGateway) GetSession(_ context.Context, id gatewayclient.SessionID) (gatewayclient.Session, error) {
+	if !f.sessionExists && f.sessionPreferred == "" {
+		return gatewayclient.Session{ID: id}, nil
+	}
+	return gatewayclient.Session{ID: id, PreferredModel: f.sessionPreferred}, nil
+}
+
+func (f *fakeGateway) SetSessionPreferredModel(_ context.Context, id gatewayclient.SessionID, model string) (gatewayclient.Session, error) {
+	f.sessionPreferred = strings.TrimSpace(model)
+	f.sessionExists = true
+	return gatewayclient.Session{ID: id, PreferredModel: f.sessionPreferred}, nil
 }
 
 func (f *fakeGateway) SessionMessages(context.Context, gatewayclient.SessionID, int) ([]gatewayclient.TranscriptMessage, error) {
@@ -65,6 +81,10 @@ func (f *fakeGateway) MCPStatus(context.Context) (gatewayclient.MCPStatus, error
 
 func (f *fakeGateway) ListSkills(context.Context) ([]gatewayclient.Skill, error) {
 	return f.skills, nil
+}
+
+func (f *fakeGateway) ListChatCommands(context.Context) ([]gatewayclient.ChatCommand, error) {
+	return f.commands, nil
 }
 
 func (f *fakeGateway) ListTasks(context.Context, int) ([]gatewayclient.Task, error) {
@@ -306,6 +326,36 @@ func TestModelListAndCron(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Fatalf("skills list missing %q:\n%s", want, view)
 		}
+	}
+
+	// Skill-as-slash: /git toggles; /go msg selects and queues submit.
+	mm.selectedSkillIDs = nil
+	toggleMsg := mm.handleLineCmd("/git")()
+	toggleDone := toggleMsg.(commandDoneMsg)
+	if toggleDone.err != nil || len(toggleDone.skillIDs) != 1 || toggleDone.skillIDs[0] != "git" {
+		t.Fatalf("skill slash toggle = %#v", toggleDone)
+	}
+	updated, _ = mm.Update(toggleDone)
+	mm = updated.(model)
+	if len(mm.selectedSkillIDs) != 1 || mm.selectedSkillIDs[0] != "git" {
+		t.Fatalf("after /git = %#v", mm.selectedSkillIDs)
+	}
+	submitMsg := mm.handleLineCmd("/go do work")()
+	submitDone := submitMsg.(commandDoneMsg)
+	if submitDone.err != nil || submitDone.submitAfter != "do work" {
+		t.Fatalf("skill slash submit = %#v", submitDone)
+	}
+	if len(submitDone.skillIDs) < 1 {
+		t.Fatalf("expected skill ids on submit path: %#v", submitDone.skillIDs)
+	}
+	foundGo := false
+	for _, id := range submitDone.skillIDs {
+		if id == "go" {
+			foundGo = true
+		}
+	}
+	if !foundGo {
+		t.Fatalf("expected go in skillIDs: %#v", submitDone.skillIDs)
 	}
 
 	strip := mm.renderContextStrip()

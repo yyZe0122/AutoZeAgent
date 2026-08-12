@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/yyZe0122/yunmengze-agent/internal/injectscan"
 	"github.com/yyZe0122/yunmengze-agent/internal/platform/pathsecurity"
 )
 
@@ -211,6 +212,9 @@ func (c *Catalog) Read(id string) ([]byte, error) {
 	_, body, err := splitSkillFile(data)
 	if err != nil {
 		return nil, err
+	}
+	if err := injectscan.Scan(body); err != nil {
+		return nil, fmt.Errorf("%w: skill %q body: %v", ErrInvalidSkill, skill.ID, err)
 	}
 	return []byte(body), nil
 }

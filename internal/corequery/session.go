@@ -18,7 +18,7 @@ func (s *Store) ListSessions(ctx context.Context, options SessionListOptions) ([
 	direction := sqlSortDirection(options.Sort)
 	// One row per session with latest task summary.
 	query := `
-        SELECT s.session_id, s.state, s.version, s.created_at, s.updated_at,
+        SELECT s.session_id, s.state, s.version, s.created_at, s.updated_at, s.metadata,
                COALESCE(stats.task_count, 0) AS task_count,
                latest.task_id, latest.title, latest.state AS task_state
         FROM sessions s
@@ -48,9 +48,10 @@ func (s *Store) ListSessions(ctx context.Context, options SessionListOptions) ([
 	items := make([]Session, 0)
 	for rows.Next() {
 		var item Session
+		var metadata string
 		var taskID, title, taskState sql.NullString
 		if err := rows.Scan(
-			&item.ID, &item.State, &item.Version, &item.CreatedAt, &item.UpdatedAt,
+			&item.ID, &item.State, &item.Version, &item.CreatedAt, &item.UpdatedAt, &metadata,
 			&item.TaskCount, &taskID, &title, &taskState,
 		); err != nil {
 			return nil, err
@@ -58,6 +59,7 @@ func (s *Store) ListSessions(ctx context.Context, options SessionListOptions) ([
 		if err := normalizeTimeFields(&item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
+		applySessionMetadata(&item, metadata)
 		if taskID.Valid && strings.TrimSpace(taskID.String) != "" {
 			id := coreidentity.TaskID(taskID.String)
 			item.LatestTaskID = &id
@@ -74,15 +76,16 @@ func (s *Store) GetSession(ctx context.Context, id coreidentity.SessionID) (Sess
 		return Session{}, err
 	}
 	var item Session
+	var metadata string
 	var taskID, title, taskState sql.NullString
 	err := s.db.QueryRowContext(ctx, `
-        SELECT s.session_id, s.state, s.version, s.created_at, s.updated_at,
+        SELECT s.session_id, s.state, s.version, s.created_at, s.updated_at, s.metadata,
                COALESCE((SELECT COUNT(*) FROM tasks t WHERE t.session_id = s.session_id), 0),
                (SELECT t.task_id FROM tasks t WHERE t.session_id = s.session_id ORDER BY t.created_at DESC LIMIT 1),
                (SELECT t.title FROM tasks t WHERE t.session_id = s.session_id ORDER BY t.created_at DESC LIMIT 1),
                (SELECT t.state FROM tasks t WHERE t.session_id = s.session_id ORDER BY t.created_at DESC LIMIT 1)
         FROM sessions s WHERE s.session_id = ?`, id).Scan(
-		&item.ID, &item.State, &item.Version, &item.CreatedAt, &item.UpdatedAt,
+		&item.ID, &item.State, &item.Version, &item.CreatedAt, &item.UpdatedAt, &metadata,
 		&item.TaskCount, &taskID, &title, &taskState,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -94,6 +97,7 @@ func (s *Store) GetSession(ctx context.Context, id coreidentity.SessionID) (Sess
 	if err := normalizeTimeFields(&item.CreatedAt, &item.UpdatedAt); err != nil {
 		return Session{}, err
 	}
+	applySessionMetadata(&item, metadata)
 	if taskID.Valid && strings.TrimSpace(taskID.String) != "" {
 		tid := coreidentity.TaskID(taskID.String)
 		item.LatestTaskID = &tid
@@ -101,6 +105,23 @@ func (s *Store) GetSession(ctx context.Context, id coreidentity.SessionID) (Sess
 	item.Title = strings.TrimSpace(title.String)
 	item.LatestState = strings.TrimSpace(taskState.String)
 	return item, nil
+}
+
+func applySessionMetadata(item *Session, raw string) {
+	raw = strings.TrimSpace(raw)
+	if item == nil || raw == "" || raw == "{}" {
+		return
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(raw), &meta); err != nil {
+		return
+	}
+	if v, ok := meta["workspace"].(string); ok {
+		item.Workspace = strings.TrimSpace(v)
+	}
+	if v, ok := meta["model"].(string); ok {
+		item.PreferredModel = strings.TrimSpace(v)
+	}
 }
 
 // SessionTranscript returns chat messages for a session: task objectives as

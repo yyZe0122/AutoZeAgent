@@ -17,9 +17,10 @@ import (
 
 var nonNameChars = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)
 
-// MCPServerStatus is one configured MCP server (no secrets).
+// MCPServerStatus is one configured MCP server (no secrets / no URL / no headers).
 type MCPServerStatus struct {
 	Name      string `json:"name"`
+	Transport string `json:"transport,omitempty"`
 	Connected bool   `json:"connected"`
 	ToolCount int    `json:"tool_count"`
 	Error     string `json:"error,omitempty"`
@@ -35,12 +36,12 @@ type MCPStatusSnapshot struct {
 	Servers []MCPServerStatus `json:"servers,omitempty"`
 }
 
-// MCPRegistry holds live MCP clients for daemon shutdown and status.
+// MCPRegistry holds live MCP sessions for daemon shutdown and status.
 type MCPRegistry struct {
-	mu      sync.Mutex
-	clients []*mcp.Client
-	names   []string
-	servers []MCPServerStatus
+	mu       sync.Mutex
+	sessions []mcp.Session
+	names    []string
+	servers  []MCPServerStatus
 }
 
 // ToolNames returns registered mcp_* tool names.
@@ -78,20 +79,20 @@ func (r *MCPRegistry) Status() MCPStatusSnapshot {
 	}
 }
 
-// Close stops all MCP server processes.
+// Close stops all MCP sessions.
 func (r *MCPRegistry) Close() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for _, c := range r.clients {
-		if err := c.Close(); err != nil {
+	for _, s := range r.sessions {
+		if err := s.Close(); err != nil {
 			slog.Warn("mcp server close", "component", "mcp", "error", err)
 		}
 	}
-	r.clients = nil
+	r.sessions = nil
 }
 
 type mcpTool struct {
-	client      *mcp.Client
+	session     mcp.Session
 	serverName  string
 	remoteName  string
 	localName   string
@@ -124,7 +125,7 @@ func (t *mcpTool) Authorization(json.RawMessage) (Authorization, error) {
 }
 
 func (t *mcpTool) Execute(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
-	return t.client.CallTool(ctx, t.remoteName, raw)
+	return t.session.CallTool(ctx, t.remoteName, raw)
 }
 
 // RegisterMCP starts configured MCP servers, lists tools, and registers them on the broker.
@@ -141,28 +142,30 @@ func RegisterMCP(ctx context.Context, broker *Broker, config providerconfig.MCPC
 	var names []string
 	for serverName, server := range config.Servers {
 		serverName = strings.TrimSpace(serverName)
-		client, err := mcp.Start(ctx, mcp.ServerConfig{
-			Name: serverName, Command: server.Command, Args: server.Args, Env: server.Env,
-		})
+		session, transport, err := openMCPSession(ctx, serverName, server)
 		if err != nil {
-			slog.Error("mcp server start failed", "component", "mcp", "server", serverName, "error", err)
+			slog.Error("mcp server start failed", "component", "mcp", "server", serverName, "transport", transport, "error", err)
 			reg.mu.Lock()
-			reg.servers = append(reg.servers, MCPServerStatus{Name: serverName, Connected: false, Error: err.Error()})
+			reg.servers = append(reg.servers, MCPServerStatus{
+				Name: serverName, Transport: transport, Connected: false, Error: err.Error(),
+			})
 			reg.mu.Unlock()
 			continue
 		}
-		tools, err := client.ListTools(ctx)
+		tools, err := session.ListTools(ctx)
 		if err != nil {
-			slog.Error("mcp tools/list failed", "component", "mcp", "server", serverName, "error", err)
-			_ = client.Close()
+			slog.Error("mcp tools/list failed", "component", "mcp", "server", serverName, "transport", session.Transport(), "error", err)
+			_ = session.Close()
 			reg.mu.Lock()
-			reg.servers = append(reg.servers, MCPServerStatus{Name: serverName, Connected: false, Error: err.Error()})
+			reg.servers = append(reg.servers, MCPServerStatus{
+				Name: serverName, Transport: session.Transport(), Connected: false, Error: err.Error(),
+			})
 			reg.mu.Unlock()
 			continue
 		}
 		toolCount := 0
 		reg.mu.Lock()
-		reg.clients = append(reg.clients, client)
+		reg.sessions = append(reg.sessions, session)
 		reg.mu.Unlock()
 		for _, desc := range tools {
 			local := mcpLocalName(serverName, desc.Name)
@@ -171,7 +174,7 @@ func RegisterMCP(ctx context.Context, broker *Broker, config providerconfig.MCPC
 				continue
 			}
 			tool := &mcpTool{
-				client: client, serverName: serverName, remoteName: desc.Name,
+				session: session, serverName: serverName, remoteName: desc.Name,
 				localName: local, description: desc.Description, schema: desc.InputSchema,
 			}
 			if err := broker.Register(tool); err != nil {
@@ -183,15 +186,46 @@ func RegisterMCP(ctx context.Context, broker *Broker, config providerconfig.MCPC
 			reg.mu.Lock()
 			reg.names = append(reg.names, local)
 			reg.mu.Unlock()
-			slog.Info("mcp tool registered", "component", "mcp", "server", serverName, "tool", local)
+			slog.Info("mcp tool registered", "component", "mcp", "server", serverName, "transport", session.Transport(), "tool", local)
 		}
 		reg.mu.Lock()
 		reg.servers = append(reg.servers, MCPServerStatus{
-			Name: serverName, Connected: true, ToolCount: toolCount,
+			Name: serverName, Transport: session.Transport(), Connected: true, ToolCount: toolCount,
 		})
 		reg.mu.Unlock()
 	}
 	return reg, names, nil
+}
+
+func openMCPSession(ctx context.Context, serverName string, server providerconfig.MCPServer) (mcp.Session, string, error) {
+	typ, err := server.ResolvedType()
+	if err != nil {
+		return nil, "", err
+	}
+	switch typ {
+	case providerconfig.MCPTypeStdio:
+		client, err := mcp.Start(ctx, mcp.ServerConfig{
+			Name: serverName, Command: server.Command, Args: server.Args, Env: server.Env,
+		})
+		if err != nil {
+			return nil, "stdio", err
+		}
+		return client, "stdio", nil
+	case providerconfig.MCPTypeHTTP, providerconfig.MCPTypeSSE, providerconfig.MCPTypeRemote:
+		mode := typ
+		if typ == providerconfig.MCPTypeRemote {
+			mode = "remote"
+		}
+		client, err := mcp.Dial(ctx, mcp.RemoteConfig{
+			Name: serverName, URL: server.URL, Headers: server.Headers, Mode: mode,
+		})
+		if err != nil {
+			return nil, typ, err
+		}
+		return client, client.Transport(), nil
+	default:
+		return nil, typ, fmt.Errorf("unsupported mcp type %q", typ)
+	}
 }
 
 func mcpLocalName(server, remote string) string {

@@ -113,7 +113,7 @@ func (r *Repository) EnsureSessionWorkspace(ctx context.Context, id SessionID, w
 	_, err = r.db.ExecContext(ctx, `
 		UPDATE sessions SET metadata = ?, updated_at = ?
 		WHERE session_id = ?`,
-		sessionMetadataJSON(workspace), formatTime(time.Now().UTC()), id,
+		sessionMetadataEncode(workspace, session.PreferredModel), formatTime(time.Now().UTC()), id,
 	)
 	if err != nil {
 		return fmt.Errorf("set session workspace: %w", err)
@@ -594,15 +594,28 @@ func scanSession(row scanner) (Session, error) {
 	session.CreatedAt = created
 	session.UpdatedAt = updated
 	session.Workspace = workspaceFromMetadata(metadata)
+	session.PreferredModel = preferredModelFromMetadata(metadata)
 	return session, nil
 }
 
 func sessionMetadataJSON(workspace string) string {
+	return sessionMetadataEncode(workspace, "")
+}
+
+func sessionMetadataEncode(workspace, preferredModel string) string {
 	workspace = strings.TrimSpace(workspace)
-	if workspace == "" {
+	preferredModel = strings.TrimSpace(preferredModel)
+	meta := map[string]string{}
+	if workspace != "" {
+		meta["workspace"] = workspace
+	}
+	if preferredModel != "" {
+		meta["model"] = preferredModel
+	}
+	if len(meta) == 0 {
 		return "{}"
 	}
-	raw, err := json.Marshal(map[string]string{"workspace": workspace})
+	raw, err := json.Marshal(meta)
 	if err != nil {
 		return "{}"
 	}
@@ -610,6 +623,14 @@ func sessionMetadataJSON(workspace string) string {
 }
 
 func workspaceFromMetadata(raw string) string {
+	return metaStringField(raw, "workspace")
+}
+
+func preferredModelFromMetadata(raw string) string {
+	return metaStringField(raw, "model")
+}
+
+func metaStringField(raw, key string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || raw == "{}" {
 		return ""
@@ -618,10 +639,39 @@ func workspaceFromMetadata(raw string) string {
 	if err := json.Unmarshal([]byte(raw), &meta); err != nil {
 		return ""
 	}
-	if v, ok := meta["workspace"].(string); ok {
+	if v, ok := meta[key].(string); ok {
 		return strings.TrimSpace(v)
 	}
 	return ""
+}
+
+// SetSessionPreferredModel merges preferred model into session metadata (preserves workspace).
+func (r *Repository) SetSessionPreferredModel(ctx context.Context, id SessionID, model string) error {
+	if ctx == nil {
+		return errors.New("set session preferred model context is required")
+	}
+	model = strings.TrimSpace(model)
+	if model != "" {
+		providerID, modelID, ok := strings.Cut(model, "/")
+		providerID, modelID = strings.TrimSpace(providerID), strings.TrimSpace(modelID)
+		if !ok || providerID == "" || modelID == "" {
+			return fmt.Errorf("%w: preferred model must use provider/model format", ErrInvalidAggregate)
+		}
+		model = providerID + "/" + modelID
+	}
+	session, err := r.GetSession(ctx, id)
+	if err != nil {
+		return err
+	}
+	_, err = r.db.ExecContext(ctx, `
+		UPDATE sessions SET metadata = ?, updated_at = ?
+		WHERE session_id = ?`,
+		sessionMetadataEncode(session.Workspace, model), formatTime(time.Now().UTC()), id,
+	)
+	if err != nil {
+		return fmt.Errorf("set session preferred model: %w", err)
+	}
+	return nil
 }
 
 func scanTask(row scanner) (Task, error) {

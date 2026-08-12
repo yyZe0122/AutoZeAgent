@@ -15,17 +15,28 @@ import (
 	"github.com/yyZe0122/yunmengze-agent/pkg/sqliteerror"
 )
 
-const jobSelectColumns = `job_id,name,session_id,task_title,task_objective,execution_mode,skill_ids,interval_seconds,next_run_at,timeout_seconds,max_retries,backoff_seconds,misfire_policy,idempotency_key,status,created_at,updated_at`
+const jobSelectColumns = `job_id,name,session_id,task_title,task_objective,execution_mode,skill_ids,model_ref,interval_seconds,next_run_at,timeout_seconds,max_retries,backoff_seconds,misfire_policy,idempotency_key,status,created_at,updated_at`
 
-type Store struct{ db *sql.DB }
+// MainModelRefFunc returns the daemon main selection ref (provider/model…) for H7 default pin.
+type MainModelRefFunc func() string
+
+type Store struct {
+	db           *sql.DB
+	mainModelRef MainModelRefFunc
+}
 
 // NewStore binds the scheduler directly to Core's SQLite database. The Core
 // migration runner owns the schema; no second database or process is needed.
 func NewStore(db *sql.DB) (*Store, error) {
+	return NewStoreWithMainRef(db, nil)
+}
+
+// NewStoreWithMainRef is like NewStore but pins empty CreateRequest.ModelRef via mainRef.
+func NewStoreWithMainRef(db *sql.DB, mainRef MainModelRefFunc) (*Store, error) {
 	if db == nil {
 		return nil, errors.New("scheduler database is required")
 	}
-	return &Store{db: db}, nil
+	return &Store{db: db, mainModelRef: mainRef}, nil
 }
 
 func (s *Store) ClaimScheduledTasks(ctx context.Context, request schedulerapi.ClaimDueRequest) ([]schedulerapi.TaskRequest, error) {
@@ -48,6 +59,10 @@ func (s *Store) Create(ctx context.Context, request schedulerapi.CreateRequest) 
 	request.MisfirePolicy = strings.ToLower(strings.TrimSpace(request.MisfirePolicy))
 	request.ExecutionMode = normalizeExecutionMode(request.ExecutionMode)
 	request.SkillIDs = normalizeSkillIDs(request.SkillIDs)
+	request.ModelRef = strings.TrimSpace(request.ModelRef)
+	if request.ModelRef == "" && s.mainModelRef != nil {
+		request.ModelRef = strings.TrimSpace(s.mainModelRef())
+	}
 	if request.MisfirePolicy == "" {
 		request.MisfirePolicy = schedulerapi.MisfireRunOnce
 	}
@@ -89,8 +104,8 @@ func (s *Store) Create(ctx context.Context, request schedulerapi.CreateRequest) 
 		return schedulerapi.Job{}, err
 	}
 	when := nowString()
-	_, err = s.db.ExecContext(ctx, `INSERT INTO jobs(job_id,name,session_id,task_title,task_objective,execution_mode,skill_ids,interval_seconds,next_run_at,timeout_seconds,max_retries,backoff_seconds,misfire_policy,idempotency_key,status,retry_attempt,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		jobID, request.Name, request.SessionID, request.TaskTitle, request.TaskObjective, request.ExecutionMode, skillJSON,
+	_, err = s.db.ExecContext(ctx, `INSERT INTO jobs(job_id,name,session_id,task_title,task_objective,execution_mode,skill_ids,model_ref,interval_seconds,next_run_at,timeout_seconds,max_retries,backoff_seconds,misfire_policy,idempotency_key,status,retry_attempt,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		jobID, request.Name, request.SessionID, request.TaskTitle, request.TaskObjective, request.ExecutionMode, skillJSON, request.ModelRef,
 		request.IntervalSeconds, formatTime(nextRun), request.TimeoutSeconds, request.MaxRetries, request.BackoffSeconds,
 		request.MisfirePolicy, request.IdempotencyKey, schedulerapi.StatusActive, 0, when, when)
 	if err != nil {
@@ -220,7 +235,7 @@ func (s *Store) ClaimDue(ctx context.Context, request schedulerapi.ClaimDueReque
 	if _, err := tx.ExecContext(ctx, `DELETE FROM job_leases WHERE expires_at<=?`, formatTime(now)); err != nil {
 		return nil, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT job_id,name,session_id,task_title,task_objective,execution_mode,skill_ids,interval_seconds,next_run_at,timeout_seconds,max_retries,backoff_seconds,misfire_policy,idempotency_key,status,retry_attempt,retry_at,retry_origin_at,created_at,updated_at FROM jobs WHERE status='active' AND (CASE WHEN retry_at<>'' THEN retry_at ELSE next_run_at END)<=? AND job_id NOT IN (SELECT job_id FROM job_leases) ORDER BY (CASE WHEN retry_at<>'' THEN retry_at ELSE next_run_at END),job_id LIMIT ?`, formatTime(now), request.Limit)
+	rows, err := tx.QueryContext(ctx, `SELECT job_id,name,session_id,task_title,task_objective,execution_mode,skill_ids,model_ref,interval_seconds,next_run_at,timeout_seconds,max_retries,backoff_seconds,misfire_policy,idempotency_key,status,retry_attempt,retry_at,retry_origin_at,created_at,updated_at FROM jobs WHERE status='active' AND (CASE WHEN retry_at<>'' THEN retry_at ELSE next_run_at END)<=? AND job_id NOT IN (SELECT job_id FROM job_leases) ORDER BY (CASE WHEN retry_at<>'' THEN retry_at ELSE next_run_at END),job_id LIMIT ?`, formatTime(now), request.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -278,6 +293,7 @@ func (s *Store) ClaimDue(ctx context.Context, request schedulerapi.ClaimDueReque
 			JobID: item.job.ID, RunID: runID, LeaseID: leaseID, SessionID: item.job.SessionID,
 			Title: item.job.TaskTitle, Objective: item.job.TaskObjective,
 			ExecutionMode: item.job.ExecutionMode, SkillIDs: append([]string(nil), item.job.SkillIDs...),
+			ModelRef:    item.job.ModelRef,
 			ScheduledAt: formatTime(scheduledAt), TimeoutSeconds: item.job.TimeoutSeconds, IdempotencyKey: coreTaskKey,
 		})
 	}
@@ -376,13 +392,14 @@ type scanner interface{ Scan(...any) error }
 func scanJob(row scanner) (schedulerapi.Job, error) {
 	var job schedulerapi.Job
 	var skillJSON string
-	err := row.Scan(&job.ID, &job.Name, &job.SessionID, &job.TaskTitle, &job.TaskObjective, &job.ExecutionMode, &skillJSON,
+	err := row.Scan(&job.ID, &job.Name, &job.SessionID, &job.TaskTitle, &job.TaskObjective, &job.ExecutionMode, &skillJSON, &job.ModelRef,
 		&job.IntervalSeconds, &job.NextRunAt, &job.TimeoutSeconds, &job.MaxRetries, &job.BackoffSeconds, &job.MisfirePolicy,
 		&job.IdempotencyKey, &job.Status, &job.CreatedAt, &job.UpdatedAt)
 	if err != nil {
 		return schedulerapi.Job{}, err
 	}
 	job.ExecutionMode = normalizeExecutionMode(job.ExecutionMode)
+	job.ModelRef = strings.TrimSpace(job.ModelRef)
 	job.SkillIDs, err = decodeSkillIDs(skillJSON)
 	if err != nil {
 		return schedulerapi.Job{}, err
@@ -392,12 +409,13 @@ func scanJob(row scanner) (schedulerapi.Job, error) {
 
 func scanDueJob(row scanner, job *schedulerapi.Job, retry *int, retryAt, retryOrigin *string) error {
 	var skillJSON string
-	if err := row.Scan(&job.ID, &job.Name, &job.SessionID, &job.TaskTitle, &job.TaskObjective, &job.ExecutionMode, &skillJSON,
+	if err := row.Scan(&job.ID, &job.Name, &job.SessionID, &job.TaskTitle, &job.TaskObjective, &job.ExecutionMode, &skillJSON, &job.ModelRef,
 		&job.IntervalSeconds, &job.NextRunAt, &job.TimeoutSeconds, &job.MaxRetries, &job.BackoffSeconds, &job.MisfirePolicy,
 		&job.IdempotencyKey, &job.Status, retry, retryAt, retryOrigin, &job.CreatedAt, &job.UpdatedAt); err != nil {
 		return err
 	}
 	job.ExecutionMode = normalizeExecutionMode(job.ExecutionMode)
+	job.ModelRef = strings.TrimSpace(job.ModelRef)
 	ids, err := decodeSkillIDs(skillJSON)
 	if err != nil {
 		return err

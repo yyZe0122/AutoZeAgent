@@ -25,6 +25,7 @@ import (
 	"github.com/yyZe0122/yunmengze-agent/internal/gateway"
 	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
 	"github.com/yyZe0122/yunmengze-agent/internal/memory"
+	"github.com/yyZe0122/yunmengze-agent/internal/modelresolve"
 	"github.com/yyZe0122/yunmengze-agent/internal/modelstream"
 	"github.com/yyZe0122/yunmengze-agent/internal/platform/paths"
 	platformsignals "github.com/yyZe0122/yunmengze-agent/internal/platform/signals"
@@ -218,6 +219,7 @@ func run(args []string) error {
 		return err
 	}
 	permService, err := toolpermission.New(toolpermission.Config{
+		Events: eventStore,
 		DB: database.SQL(), Store: permStore, Approvals: approvalRepository,
 	})
 	if err != nil {
@@ -274,6 +276,7 @@ func run(args []string) error {
 		allowGit := chatCfg.AgentGitEnabled()
 		allowProcess := chatCfg.AgentProcessEnabled()
 		chatCfgCopy := chatCfg
+		modelResolver := modelresolve.New(layout.ConfigDir)
 		chatService, err = chatsession.New(chatsession.Config{
 			DB: database.SQL(), Repository: kernelRepository, Approvals: approvalRepository,
 			Agent: agentRunner, Transcript: queries, WorkspaceRoots: chatRoots,
@@ -281,8 +284,9 @@ func run(args []string) error {
 			AllowWriteCeiling: &writeCeiling, AllowGit: allowGit, AllowProcess: allowProcess,
 			PermissionMode: permissionMode, ExtraTools: mcpToolNames,
 			ContextWindow: contextWindow, Context: contextStore, Compactor: agentRunner,
-			CompactionEnabled: &compactionEnabled, Calibrator: tokenCalibrator,
+			MemoryCurator: agentRunner, CompactionEnabled: &compactionEnabled, Calibrator: tokenCalibrator,
 			Memory: memoryManager, Stream: modelHub, ToolCalls: toolBroker,
+			ModelResolver: modelResolver.AsChatResolver(),
 			OnError: func(err error) {
 				slog.Error("chat session failure", "component", "chatsession", "operation", "execute", "result", "failed", "error", err)
 			},
@@ -316,7 +320,11 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	schedulerStore, err := scheduler.NewStore(database.SQL())
+	var mainModelRef scheduler.MainModelRefFunc
+	if providerRuntime != nil {
+		mainModelRef = providerRuntime.SelectedRef
+	}
+	schedulerStore, err := scheduler.NewStoreWithMainRef(database.SQL(), mainModelRef)
 	if err != nil {
 		return err
 	}
@@ -383,6 +391,7 @@ func run(args []string) error {
 	if mcpRegistry != nil {
 		mcpStatus = mcpStatusAdapter{registry: mcpRegistry}
 	}
+	chatCommandsProvider := chatCommandsAdapter{cfg: chatCfg}
 	var sessionCompact gateway.SessionCompactor
 	if chatService != nil {
 		sessionCompact = gateway.SessionCompactFunc(func(ctx context.Context, sessionID kernel.SessionID, focus string) (gateway.SessionCompactResult, error) {
@@ -404,12 +413,13 @@ func run(args []string) error {
 		TaskControls: taskControl, Jobs: schedulerStore,
 		Core: core, Events: eventStore, Skills: skillCatalog, ModelConfig: modelConfig, ModelSwitcher: modelSwitcher,
 		ModelConfigError: modelConfigError,
-		ModelStream:      modelHub, MCP: mcpStatus, SessionCompact: sessionCompact,
+		ModelStream:      modelHub, MCP: mcpStatus, ChatCommands: chatCommandsProvider, SessionCompact: sessionCompact,
 		ToolPermissions: gateway.ToolPermissionAdapter{
 			Service:   permService,
 			TrustPath: toolpermission.DefaultTrustPath(layout.ConfigDir),
 		},
 		MemoryControl: memoryControl,
+		SessionPrefs:  sessionPrefsAdapter{repo: kernelRepository},
 	})
 	if err != nil {
 		return err
@@ -514,6 +524,25 @@ func (a mcpStatusAdapter) MCPStatus() gateway.MCPStatus {
 	}
 }
 
+// chatCommandsAdapter exposes chat.commands for GET /v1/config/commands (O3).
+type chatCommandsAdapter struct {
+	cfg providerconfig.ChatConfig
+}
+
+func (a chatCommandsAdapter) ChatCommands() []gateway.ChatCommandItem {
+	list := a.cfg.CommandList()
+	if len(list) == 0 {
+		return nil
+	}
+	out := make([]gateway.ChatCommandItem, 0, len(list))
+	for _, item := range list {
+		out = append(out, gateway.ChatCommandItem{
+			ID: item.ID, Description: item.Description, Template: item.Template,
+		})
+	}
+	return out
+}
+
 // memoryControlAdapter maps chatsession memory ops to gateway.MemoryControlService.
 type memoryControlAdapter struct {
 	chat *chatsession.Service
@@ -546,4 +575,15 @@ func (a memoryControlAdapter) PromoteMemory(ctx context.Context, entryID string)
 		Tags: e.Tags, Kind: e.Kind, Priority: e.Priority, ExpiresAt: e.ExpiresAt,
 		CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt,
 	}, nil
+}
+
+type sessionPrefsAdapter struct {
+	repo *kernel.Repository
+}
+
+func (a sessionPrefsAdapter) SetPreferredModel(ctx context.Context, sessionID kernel.SessionID, model string) error {
+	if a.repo == nil {
+		return errors.New("session repository unavailable")
+	}
+	return a.repo.SetSessionPreferredModel(ctx, sessionID, model)
 }

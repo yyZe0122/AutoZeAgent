@@ -17,11 +17,11 @@ type completer struct {
 }
 
 func (c *completer) update(input string) {
-	c.updateWith(input, nil, nil)
+	c.updateWith(input, nil, nil, nil)
 }
 
-// updateWith allows argument completion using model/permission lists.
-func (c *completer) updateWith(input string, models []string, permIDs []string) {
+// updateWith allows argument completion using model/permission lists and skill slashes.
+func (c *completer) updateWith(input string, models []string, permIDs []string, extraSlashes []slashCommand) {
 	input = strings.TrimRight(input, "\t")
 	if !strings.HasPrefix(input, "/") {
 		c.active = false
@@ -37,7 +37,7 @@ func (c *completer) updateWith(input string, models []string, permIDs []string) 
 		c.argMode = false
 		c.active = true
 		c.query = strings.ToLower(input)
-		c.items = filterCommands(c.query)
+		c.items = filterCommands(c.query, extraSlashes)
 		if c.cursor >= len(c.items) {
 			c.cursor = 0
 		}
@@ -110,14 +110,22 @@ func filterArgCompletions(cmd, arg string, models, permIDs []string) []slashComm
 	}
 }
 
-func filterCommands(query string) []slashCommand {
+func filterCommands(query string, extraSlashes []slashCommand) []slashCommand {
+	builtin := slashCommands
 	if query == "" || query == "/" {
-		out := make([]slashCommand, len(slashCommands))
-		copy(out, slashCommands)
+		out := make([]slashCommand, 0, len(builtin)+len(extraSlashes))
+		out = append(out, builtin...)
+		out = append(out, extraSlashes...)
 		return out
 	}
 	var out []slashCommand
-	for _, cmd := range slashCommands {
+	for _, cmd := range builtin {
+		name := strings.ToLower(cmd.Name)
+		if strings.HasPrefix(name, query) {
+			out = append(out, cmd)
+		}
+	}
+	for _, cmd := range extraSlashes {
 		name := strings.ToLower(cmd.Name)
 		if strings.HasPrefix(name, query) {
 			out = append(out, cmd)
@@ -125,7 +133,7 @@ func filterCommands(query string) []slashCommand {
 	}
 	// Also match aliases listed in Help when name doesn't prefix-match.
 	if len(out) == 0 {
-		for _, cmd := range slashCommands {
+		for _, cmd := range builtin {
 			if strings.Contains(strings.ToLower(cmd.Help), query[1:]) {
 				out = append(out, cmd)
 			}

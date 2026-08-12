@@ -202,11 +202,16 @@ func formatJobLine(job schedulerapi.Job) string {
 	if mode == "" {
 		mode = "agent"
 	}
-	return fmt.Sprintf("%s  %s  %s  %s  next %s",
+	pin := job.ModelRef
+	if pin == "" {
+		pin = "—"
+	}
+	return fmt.Sprintf("%s  %s  %s  %s  %s  next %s",
 		shortID(job.ID),
 		stateBadge(job.Status),
 		mode,
-		truncate(name, 24),
+		truncate(pin, 18),
+		truncate(name, 20),
 		styleDim.Render(truncate(next, 24)),
 	)
 }

@@ -91,6 +91,19 @@ type MCPStatusProvider interface {
 	MCPStatus() MCPStatus
 }
 
+// ChatCommandItem is one configured slash template (instruction text only; not a secret).
+type ChatCommandItem struct {
+	ID          string `json:"id"`
+	Description string `json:"description,omitempty"`
+	// Template is the user-message body; may contain $ARGUMENTS.
+	Template string `json:"template"`
+}
+
+// ChatCommandsProvider lists chat.commands metadata (O3).
+type ChatCommandsProvider interface {
+	ChatCommands() []ChatCommandItem
+}
+
 // SessionCompactor forces durable session head summarization (manual /compact).
 // Optional until chat is configured.
 type SessionCompactor interface {
@@ -129,12 +142,21 @@ type APIConfig struct {
 	ModelStream *modelstream.Hub
 	// MCP is optional; when set, exposes GET /v1/config/mcp.
 	MCP MCPStatusProvider
+	// ChatCommands is optional; when set, exposes GET /v1/config/commands (O3; metadata only).
+	ChatCommands ChatCommandsProvider
 	// SessionCompact is optional; when set, exposes POST /v1/sessions/{id}/compact.
 	SessionCompact SessionCompactor
 	// ToolPermissions is optional; when set, exposes GET/POST /v1/permissions (ADR-043).
 	ToolPermissions ToolPermissionService
 	// MemoryControl is optional; when set, exposes POST /v1/memory/actions (refresh/forget/promote).
 	MemoryControl MemoryControlService
+	// SessionPrefs is optional; PATCH session preferred_model (O4).
+	SessionPrefs SessionPreferenceService
+}
+
+// SessionPreferenceService updates session metadata preferences (not global model).
+type SessionPreferenceService interface {
+	SetPreferredModel(ctx context.Context, sessionID kernel.SessionID, model string) error
 }
 
 // MemoryControlService is the narrow write surface for memory productization (not raw SQL).
@@ -184,9 +206,11 @@ type API struct {
 	modelConfigError string
 	modelStream      *modelstream.Hub
 	mcp              MCPStatusProvider
+	chatCommands     ChatCommandsProvider
 	sessionCompact   SessionCompactor
 	toolPermissions  ToolPermissionService
 	memoryControl    MemoryControlService
+	sessionPrefs     SessionPreferenceService
 }
 
 func NewAPI(config APIConfig) (*API, error) {
@@ -208,8 +232,9 @@ func NewAPI(config APIConfig) (*API, error) {
 		taskControls: config.TaskControls, jobs: config.Jobs, core: config.Core, events: config.Events, skills: config.Skills,
 		modelConfig: config.ModelConfig, modelSwitcher: config.ModelSwitcher, modelConfigError: strings.TrimSpace(config.ModelConfigError),
 		modelStream: config.ModelStream,
-		mcp:         config.MCP, sessionCompact: config.SessionCompact, toolPermissions: config.ToolPermissions,
-		memoryControl: config.MemoryControl,
+		mcp:         config.MCP, chatCommands: config.ChatCommands,
+		sessionCompact: config.SessionCompact, toolPermissions: config.ToolPermissions,
+		memoryControl: config.MemoryControl, sessionPrefs: config.SessionPrefs,
 	}, nil
 }
 
@@ -253,6 +278,8 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.handleConfigModel(w, r)
 	case r.URL.Path == "/v1/config/mcp":
 		a.handleConfigMCP(w, r)
+	case r.URL.Path == "/v1/config/commands":
+		a.handleConfigCommands(w, r)
 	case r.URL.Path == "/v1/skills":
 		a.handleSkills(w, r)
 	case r.URL.Path == "/v1/memory":

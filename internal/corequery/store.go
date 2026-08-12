@@ -174,6 +174,10 @@ type Session struct {
 	LatestTaskID *coreidentity.TaskID   `json:"latest_task_id,omitempty"`
 	LatestState  string                 `json:"latest_task_state,omitempty"`
 	TaskCount    int                    `json:"task_count"`
+	// PreferredModel is optional session model preference (O4; chat run prefer→main).
+	PreferredModel string `json:"preferred_model,omitempty"`
+	// Workspace is session-bound client cwd when set (ADR-046).
+	Workspace string `json:"workspace,omitempty"`
 }
 
 // TranscriptMessage is a chat-facing projection of agent_run_records

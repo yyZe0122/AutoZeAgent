@@ -2,6 +2,7 @@
 
 - 状态：Accepted（已实现）
 - 日期：2026-08-06
+- 更新：2026-08-12（permission 事件进 Event Store / SSE；TUI 仍 DecidePermission*）
 
 ## 背景
 
@@ -56,12 +57,26 @@ agent loop → Broker.Execute
 ### 持久化与 API（已实现）
 
 - migration **018** `tool_permission_requests`
-- `internal/toolpermission`：Store、Waiter、Service.Decide、Gate（Broker）
+- `internal/toolpermission`：Store、Waiter、Service.Decide、Gate（Broker）；可选 `Events *events.Store`
 - Gateway：
   - `GET /v1/permissions?session_id=&limit=`
   - `POST /v1/permissions/{id}/decide` body：`{ "decision": "allow_once"|"allow_similar"|"allow_permanent"|"deny", "actor": "…", "confirm": false }`
-- TUI：`/perm` 列表；`/perm once|similar|permanent|deny <id-prefix>`（`allow_session` 仍接受为 similar 别名）
+- TUI：`/perm` 列表；`/perm once|similar|permanent|deny <id-prefix>`（`allow_session` 仍接受为 similar 别名）；热键 1–4
 - ask 模式：chat plan **嵌入** process/git 的 once + session CapabilityScope，**不**预发这些 grant（`issueChatGrants` 跳过）
+
+### 事件 / SSE（C1）
+
+CreatePending / Decide 成功后 **best-effort** 追加 Event Store 事件（不改变 decide 语义）：
+
+| `event_type` | 时机 | 用途 |
+| --- | --- | --- |
+| `permission.pending` | Gate 写入 pending 行后 | TUI SSE → 触发 permission poll / 自动打开队列 |
+| `permission.decided` | Decide allow/deny 后 | TUI SSE → 刷新 pending 列表 |
+
+- `aggregate_type=tool_permission`；payload 含 `permission_id` / `session_id` / `tool` 等（无密钥）。
+- **Decide 仍只经** `POST /v1/permissions/{id}/decide`（或 client `DecidePermission*`）；SSE **不**携带决策、不替代 HTTP。
+- 无 Events 配置时静默跳过 Append（单测 / 精简接线）。
+- 轮询 list 仍保留作兜底（断线 / 旧客户端）。
 
 ### Grant 范围
 
@@ -75,14 +90,15 @@ agent loop → Broker.Execute
 
 - 副作用仍只经 Tool Broker；decide 只发 grant。
 - Gateway 不调 provider、不跑 executor。
-- 无专用 permission SSE（可轮询 list）。
+- Permission 推送复用通用 events SSE，不另开专用 permission 流。
 
 ## 后果
 
 - 默认 `preauth` 与历史行为一致。
 - `ask` 提供 Crush 级交互，且不恢复 Planner。
 - Job 路径 fail-closed。
+- TUI 可更及时弹出 pending 队列，而不依赖固定 2s poll  alone。
 
 ## 相关
 
-- ADR-011 grants；ADR-012 Broker；ADR-038 session chat；ADR-018 Gateway；**ADR-046** session workspace + permission tiers（`allow_similar` / `allow_permanent`）。
+- ADR-009 event schema；ADR-011 grants；ADR-012 Broker；ADR-038 session chat；ADR-018 Gateway；**ADR-046** session workspace + permission tiers（`allow_similar` / `allow_permanent`）。

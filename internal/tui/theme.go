@@ -38,6 +38,11 @@ type Theme struct {
 	Heart     lipgloss.Color
 	ModeAgent lipgloss.Color // input border / chip for agent (build) mode
 	ModePlan  lipgloss.Color // input border / chip for plan mode
+	Thinking  lipgloss.Color // thinking block chrome
+	Tool      lipgloss.Color // tool call / result chrome
+	Reply     lipgloss.Color // final assistant reply body
+	Journey   lipgloss.Color // memory/skill journey rows
+	Done      lipgloss.Color // turn-complete banner
 }
 
 // Day: gold + marble.
@@ -56,6 +61,11 @@ var dayTheme = Theme{
 	Heart:     lipgloss.Color("#E85A8C"),
 	ModeAgent: lipgloss.Color("#2F6B4F"),
 	ModePlan:  lipgloss.Color("#C9A227"),
+	Thinking:  lipgloss.Color("#8B7B6B"),
+	Tool:      lipgloss.Color("#3D6B8A"),
+	Reply:     lipgloss.Color("#2C2416"),
+	Journey:   lipgloss.Color("#6B5B8A"),
+	Done:      lipgloss.Color("#2F6B4F"),
 }
 
 // Night: near-white accent + dark separators.
@@ -74,6 +84,11 @@ var nightTheme = Theme{
 	Heart:     lipgloss.Color("#FF6B9D"),
 	ModeAgent: lipgloss.Color("#3DDC97"),
 	ModePlan:  lipgloss.Color("#E0B040"),
+	Thinking:  lipgloss.Color("#7A7A9A"),
+	Tool:      lipgloss.Color("#6AB0E0"),
+	Reply:     lipgloss.Color("#E8E8E8"),
+	Journey:   lipgloss.Color("#B08AE0"),
+	Done:      lipgloss.Color("#5ECF8A"),
 }
 
 type tuiPrefs struct {
@@ -112,6 +127,10 @@ func applyTheme(t Theme) {
 	colorSurface = t.Surface
 	colorModeAgent = t.ModeAgent
 	colorModePlan = t.ModePlan
+	colorBubbleUser = t.Accent
+	colorBubbleAssistant = t.OK
+	colorBubbleThinking = t.Thinking
+	colorBubbleTool = t.Tool
 
 	styleTitle = lipgloss.NewStyle().Bold(true).Foreground(colorTitle)
 	styleDim = lipgloss.NewStyle().Foreground(colorDim)
@@ -138,6 +157,12 @@ func applyTheme(t Theme) {
 	styleTLPlan = lipgloss.NewStyle().Foreground(colorWarn)
 	styleTLRun = lipgloss.NewStyle().Foreground(colorOK)
 	styleTLErr = lipgloss.NewStyle().Foreground(colorErr)
+	styleTLTool = lipgloss.NewStyle().Foreground(t.Tool)
+	styleTLThinking = lipgloss.NewStyle().Foreground(t.Thinking)
+	styleTLReply = lipgloss.NewStyle().Foreground(t.Reply)
+	styleTLBody = lipgloss.NewStyle().Foreground(colorDim)
+	styleTLJourney = lipgloss.NewStyle().Foreground(t.Journey)
+	styleDone = lipgloss.NewStyle().Foreground(t.Done).Bold(true)
 	styleHeart = lipgloss.NewStyle().Foreground(colorHeart)
 	styleMetricsTitle = lipgloss.NewStyle().Bold(true).Foreground(colorAccent)
 	stylePanelLabel = lipgloss.NewStyle().Foreground(colorMuted)

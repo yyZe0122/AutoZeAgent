@@ -37,7 +37,7 @@ func TestCanonicalAliases(t *testing.T) {
 
 func TestHelpTextListsCommands(t *testing.T) {
 	text := helpText()
-	for _, want := range []string{"/new", "/tasks", "/cron", "/compact", "/perm", "/memory", "/refresh-memory", "/model", "/skills", "/theme", "Tab", "every"} {
+	for _, want := range []string{"/new", "/tasks", "/cron", "/compact", "/perm", "/expand", "/journey", "/memory", "/refresh-memory", "/model", "/skills", "/theme", "Tab", "every", "skill-id", "e / E / c"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("help missing %q", want)
 		}
@@ -47,5 +47,14 @@ func TestHelpTextListsCommands(t *testing.T) {
 	}
 	if strings.Contains(text, "a / r") || strings.Contains(text, "approve → run") {
 		t.Fatal("help should not advertise removed approval keys/workflow")
+	}
+}
+
+func TestIsBuiltinSlash(t *testing.T) {
+	if !isBuiltinSlash("/model") || !isBuiltinSlash("/MODEL") {
+		t.Fatal("expected /model builtin")
+	}
+	if isBuiltinSlash("/git") {
+		t.Fatal("/git should not be builtin")
 	}
 }

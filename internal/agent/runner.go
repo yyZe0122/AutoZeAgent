@@ -109,6 +109,12 @@ type RunRequest struct {
 	Depth int
 	// Role selects model endpoint (ADR-045): empty/main → main; subagent/compact when configured.
 	Role string
+	// ModelOverride is optional per-run main endpoint (O4). When set with OverrideProvider,
+	// used instead of Role/main for this run only (does not mutate global main).
+	// Ignored when Role is a non-main configured role (subagent/compact still win).
+	ModelOverride         string
+	OverrideProvider      StreamingProvider
+	OverrideContextWindow int64
 }
 
 type Result struct {
@@ -243,4 +249,25 @@ func (r *Runner) snapshotForRole(role string) (StreamingProvider, string, int64)
 		}
 	}
 	return r.provider, r.model, r.contextWindow
+}
+
+// isConfiguredRole reports whether role has a dedicated endpoint (not main fallback).
+func (r *Runner) isConfiguredRole(role string) bool {
+	role = strings.TrimSpace(role)
+	if role == "" || role == "main" {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	ep, ok := r.roles[role]
+	return ok && ep.Provider != nil && strings.TrimSpace(ep.Model) != ""
+}
+
+// useModelOverride reports whether RunRequest carries a usable main-path override (O4).
+// Configured subagent/compact roles win over session prefer.
+func (r *Runner) useModelOverride(request RunRequest) bool {
+	if request.OverrideProvider == nil || strings.TrimSpace(request.ModelOverride) == "" {
+		return false
+	}
+	return !r.isConfiguredRole(request.Role)
 }

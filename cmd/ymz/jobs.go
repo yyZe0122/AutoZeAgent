@@ -20,6 +20,7 @@ type jobCreateValues struct {
 	title          string
 	executionMode  string
 	skills         multiString
+	modelRef       string
 	every          time.Duration
 	start          string
 	timeout        time.Duration
@@ -66,9 +67,15 @@ func runJobCreate(args []string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
+	modelRef := strings.TrimSpace(values.modelRef)
+	if modelRef == "" {
+		if cfg, cfgErr := client.ModelConfig(ctx); cfgErr == nil {
+			modelRef = strings.TrimSpace(cfg.Model)
+		}
+	}
 	job, err := client.CreateJob(ctx, schedulerapi.CreateRequest{
 		Name: values.name, SessionID: values.sessionID, TaskTitle: values.title, TaskObjective: values.objective,
-		ExecutionMode: values.executionMode, SkillIDs: []string(values.skills),
+		ExecutionMode: values.executionMode, SkillIDs: []string(values.skills), ModelRef: modelRef,
 		IntervalSeconds: int64(values.every / time.Second), NextRunAt: values.start,
 		TimeoutSeconds: int64(values.timeout / time.Second), MaxRetries: values.maxRetries,
 		BackoffSeconds: int64(values.backoff / time.Second), MisfirePolicy: values.misfirePolicy,
@@ -90,6 +97,7 @@ func parseJobCreateArgs(args []string) (jobCreateValues, error) {
 	flags.StringVar(&values.title, "title", "", "task title")
 	flags.StringVar(&values.executionMode, "execution-mode", schedulerapi.ExecutionModeAgent, "chat mode: agent (default) or plan")
 	flags.Var(&values.skills, "skill", "skill id (repeatable); instruction snapshot only")
+	flags.StringVar(&values.modelRef, "model", "", "pin provider/model ref (H7); default = current main")
 	flags.DurationVar(&values.every, "every", 0, "heartbeat interval, for example 15m or 1h")
 	flags.StringVar(&values.start, "start", "", "first run time in RFC3339; default is now")
 	flags.DurationVar(&values.timeout, "timeout", 30*time.Minute, "scheduled task timeout")

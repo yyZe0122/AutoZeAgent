@@ -32,17 +32,19 @@ func (g *Gate) CreatePending(ctx context.Context, req tools.PermissionPending) (
 		now = g.service.now().UTC()
 	}
 	expires := now.Add(WaitTimeout).Format(time.RFC3339Nano)
-	err := g.service.store.Insert(ctx, Request{
+	row := Request{
 		ID: id, SessionID: req.SessionID, TaskID: req.TaskID, RunID: req.RunID,
 		PlanID: req.PlanID, PlanHash: req.PlanHash, StepID: req.StepID,
 		ToolCallID: req.ToolCallID, ToolName: req.ToolName, Arguments: req.Arguments,
 		Capability: req.Capability, Path: req.Path, Command: req.Command,
 		CommandArgs: req.CommandArgs, NetworkDomain: req.NetworkDomain, Risk: req.Risk,
 		State: StatePending, CreatedAt: now.Format(time.RFC3339Nano), ExpiresAt: expires,
-	})
+	}
+	err := g.service.store.Insert(ctx, row)
 	if err != nil {
 		return "", err
 	}
+	g.service.EmitPending(ctx, row)
 	return id, nil
 }
 

@@ -44,6 +44,17 @@ func (c *Client) GetSession(ctx context.Context, id SessionID) (Session, error) 
 	return session, nil
 }
 
+// SetSessionPreferredModel stores a session model preference (O4; chat run prefer→main; no global switch).
+// Empty model clears the preference.
+func (c *Client) SetSessionPreferredModel(ctx context.Context, id SessionID, model string) (Session, error) {
+	var session Session
+	body := map[string]string{"preferred_model": strings.TrimSpace(model)}
+	if err := c.inner.DoJSON(ctx, http.MethodPatch, "/v1/sessions/"+url.PathEscape(string(id)), body, &session); err != nil {
+		return Session{}, fmt.Errorf("set session preferred model: %w", err)
+	}
+	return session, nil
+}
+
 func (c *Client) SessionMessages(ctx context.Context, id SessionID, limit int) ([]TranscriptMessage, error) {
 	path := "/v1/sessions/" + url.PathEscape(string(id)) + "/messages"
 	if limit > 0 {

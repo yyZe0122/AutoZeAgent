@@ -36,9 +36,22 @@ func TestCompleterHidesWithArgs(t *testing.T) {
 }
 
 func TestCompleterAllOnSlash(t *testing.T) {
-	items := filterCommands("/")
+	items := filterCommands("/", nil)
 	if len(items) != len(slashCommands) {
 		t.Fatalf("got %d want %d", len(items), len(slashCommands))
+	}
+	skills := []slashCommand{{Name: "/git", Desc: "skill"}}
+	items = filterCommands("/", skills)
+	if len(items) != len(slashCommands)+1 {
+		t.Fatalf("got %d want %d", len(items), len(slashCommands)+1)
+	}
+}
+
+func TestCompleterSkillPrefix(t *testing.T) {
+	var c completer
+	c.updateWith("/gi", nil, nil, []slashCommand{{Name: "/git", Desc: "skill · git"}})
+	if !c.visible || len(c.items) == 0 || c.items[0].Name != "/git" {
+		t.Fatalf("items=%#v", c.items)
 	}
 }
 

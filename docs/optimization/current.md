@@ -1,17 +1,26 @@
-# YunmengZe → YunmengZe Agent 当前状态
+# YunmengZe Agent 当前状态
 
-更新：2026-08-12
+更新：2026-08-12（TUI 气泡化 + Phase 1/2 · 基线 **v0.2.4**）
 
-**本文件是唯一活着的优化/backlog 文档。** 只写未完成与暂缓项；已落地细节见 ADR（`docs/architecture/`）与 git。
+**本文件是唯一活着的优化/backlog 文档。** 只写未完成与暂缓项；已落地细节见 ADR（`docs/architecture/`）、changelog 与 git。
 
 ## 现状
 
-生产形态稳定：`ymzd` + CLI·TUI + `core.db`。设计知识库：`docs/architecture/`。  
-Provider 主栈热更：`internal/providerruntime` + ADR-048（不 late-bind chat；`chat`/MCP/roles 仍需 restart）。
+生产形态稳定：`ymzd` + CLI·TUI（`ymz`）+ `core.db`。设计知识库：`docs/architecture/`。  
+当前发布线：**v0.2.4**（v0.2.0 改名；v0.2.3 model 选择；v0.2.4 = O1–O4 + H7 + H1-lite + TUI Phase 2 气泡/SSE）。
 
-对照 Crush（`/tmp/opencode-compare/crush`）只读评估后：偷 **编排与 UX 契约**，不偷软权限、不把 agent/tools 拉进 TUI。
+| 对标 | 契约重叠（粗） | 说明 |
+| --- | --- | --- |
+| OpenCode 配置/协议 | ~80–90% | + `import-opencode`；stdio + 远程 MCP（O2） |
+| OpenCode 产品手感 | ~75–85% | + skill-as-slash；`chat.commands`；session prefer 已 run-level 解析（O4） |
+| OpenCode API/SDK | ~10–15% 路径类比 | 本地 `/v1/*` + Go `gatewayclient`；**不追**全量 OC OpenAPI |
+| Crush TUI | 契约 ~92% | T1–T7 + C1–C4/UX-A + 气泡卡/glamour/zone；无新 list 引擎 |
+| Hermes 分层记忆 | 架构 ~85% | + H6-min；**H1-lite curator**（turn 后 aux → entries；冻结块仍手动 refresh） |
+| Hermes 自进化 | ~5–15% | 仅 promote / pre-compress / curator 提案；无 skill 自改 / 习惯学习 |
+| Hermes 消息网关 | ~0% | 仅本机 UDS/loopback；**暂不上**飞书/微信（本机编码/定时为主） |
 
-**下一优先：** 品牌与工程命名统一为 **YunmengZe Agent（对外）/ agent 中性语义（对内）** —— 见下方 **R 改名**。
+**产品焦点：** 本机编码 + 简单任务 + 定时任务。  
+**下一优先（非必须）：** H5 purge 增强；H2/M* **仅**在上消息通道前再做。C4 skill 变更轨 / H6 完整化 / O5–O6 **暂缓**。
 
 ## 原则（不变）
 
@@ -21,110 +30,118 @@ Provider 主栈热更：`internal/providerruntime` + ADR-048（不 late-bind cha
 - plan 永远只读；高风险工具仅 agent + `chat.tools` allowlist 预授权（ADR-038）；**tool-call** 交互 permission 见 ADR-043（≠ Planner）。
 - 会话记忆为 in-process MemoryManager（ADR-044），非独立 Memory 进程。
 - **客户端分层（ADR-018/022）：** 业务用例只在 daemon；Gateway 仅 HTTP 适配；CLI 与 TUI 经 `gatewayclient` 并列，TUI **不** exec CLI、**不** import tools/providers/agent。
+- **消息通道（规划）：** 第二客户端 → `tasksubmission` / `taskcontrol`；**不**在 Gateway 内跑 tool/provider/grant。
 - **Go 精神：** 具体类型 + 调用方小接口；composition root 在 `cmd/`；无 DI 容器 / ORM / 通用事件总线。
-
-## 有序 backlog（Crush 启发）
-
-执行顺序按依赖：先稳 daemon 事件源，再叠 TUI，再编排健壮与渲染分型。
-
-| ID | 项 | 目标 | 约束 / 验收 |
-| --- | --- | --- | --- |
-| **T1** | Stream debounce + 终态 after flush | **已落地** `modelstream` 33ms 合并 delta/thinking；`PublishTerminal` 在 complete/fail/cancel 落库后 fan-out | 见 `internal/modelstream`、`chatsession` lifecycle |
-| **T2** | Permission modal（四档 + grace） | **已落地** pending 自动 open + 400ms grace；**1–4** / o s p d；Enter 循环四档；permanent 走 confirm | 仍四档；`DecidePermission*` only |
-| **T3** | Follow + Finished 冻结缓存 | **已落地** stickBottom follow（上滚关/触底开）；timeline 完成行稳定指纹、streaming 行不冻结 | 无新 viewport/list 依赖 |
-| **T4** | Loop detection + cancel 清理写 | **已落地** loop：`agent/loop_detection`；cancel/fail：`Broker.CancelIncompleteToolCalls` + chatsession lifecycle | Broker fail-closed；ADR-012 |
-| **T5** | 子 Run usage 上卷 parent | **已落地** `corequery.RunUsage` + `GET /v1/runs/{id}/usage` + TUI Metrics parent/children 旁注 | 可观测 only；ADR-039 |
-| **T6** | Tool 行分型渲染 | **已落地** `tui/tool_render.go`：fs/process/git/task/http 预览；path-only；result 行关联 name | 无 diff 引擎；无 import tools |
-| **T7** | 工具描述与 Register 同址 | **已落地** 描述在各 Tool `Definition()`；`RegisterBuiltins` 唯一注册 | 不改执行边界 |
-| **T8** | 可选增强 | Permission SSE；live markdown 稳定前缀缓存 | 非阻塞 |
-
-**TUI 渲染策略：** 表现层只在现有 `internal/tui` 增量；不引入更重的 list/viewport 依赖（相对已有 `bubbles/viewport` 不再加新合成层）。
-
-## 日志链路（L1）
-
-| ID | 项 | 状态 |
-| --- | --- | --- |
-| **L1** | 结构化日志链路 + `ymz logs --session/--task` + ADR-047 | **已落地**（gateway/tasksubmission/chatsession/taskcontrol/scheduledtasks 阶段边界；`internal/runlog`） |
-| — | 全链路 e2e harness / OTel | **不做**（真机 + 日志；单测护栏保留） |
-
-排障：`YMZ_LOG_LEVEL=debug` + `ymz logs --run <id>`（改名后见 R 表 env）。约定见 ADR-047。
-
-## 分发（Homebrew + Scoop）
-
-| ID | 项 | 状态 |
-| --- | --- | --- |
-| **D1** | GoReleaser `homebrew_casks` → `yyZe0122/homebrew-tap`；`scoops` → `yyZe0122/scoop-bucket` | **已接线**（v0.1.2 已推 cask/manifest；一键脚本降为兜底） |
-| — | winget / npm | **不做**（除非硬需求） |
-
-改名落地后 cask/scoop 名与 homepage 随 **R5** 更新。
 
 ---
 
-## 改名：YunmengZe Agent（R）— **下一优先**
+## 已关闭轨道（摘要）
 
-### 目标分层
+### Crush TUI（T）— 契约完成
 
-| 层 | 命名 | 说明 |
+| ID | 项 | 状态 |
 | --- | --- | --- |
-| **对外品牌** | **YunmengZe Agent** | README、TUI、Release 标题、brew/scoop description |
-| **对内工程** | 中性 **agent** 语义 | 去掉 AutoZe / autozeagent 品牌痕迹；配置文件 `agent.json` |
-| **可执行 / 路径品牌段** | **`ymz` / `yunmengze`** | CLI 短、目录防撞；**不要**裸 `~/.config/agent` |
+| **T1–T7** | debounce / perm modal+grace / follow·freeze / loop+cancel / child usage / tool 分型 / 描述同址 | **已落地** |
+| **T8** | Permission SSE + live 前缀缓存 + 完成态 glamour | **已落地**（streaming 仍 plain；见 Phase 2） |
 
-**不做：** 长期旧名兼容（alpha、几乎无外部用户 → 干净切断）。  
-**保留：** `internal/agent` 领域包名（agent 循环，非品牌）。  
-**Go module 不叫裸 `agent`：** 用有命名空间的路径。
+表现层只在 `internal/tui` 增量；不引入更重 list/viewport 依赖。  
+**允许** Charm 生态小型本地库（纯 Go 进二进制）：`glamour`（完成态 MD）、`bubblezone`（鼠标 expand）、`bubbles/spinner`；**禁止** Crush lazy list / Ultraviolet。
 
-### 命名表（已定默认；执行前可改格子）
+### 日志（L）· 分发（D）
 
-| 用途 | 旧 | 新 |
+| ID | 项 | 状态 |
 | --- | --- | --- |
-| 展示名 | YunmengZe | **YunmengZe Agent** |
-| CLI 主命令 | `ymz` / `ymz` | **`ymz`**（可选同二进制第二名 **`yunmengze`**） |
-| Daemon | `ymzd` | **`ymzd`** |
-| 配置/数据根（user） | XDG / AppData 分叉 | **`~/.yunmengze` 单根**（Win：`%USERPROFILE%\.yunmengze`；`YMZ_HOME` 可覆盖） |
-| 系统路径 Linux | `/etc/yunmengze` 等 | **`/etc/yunmengze`**、`/var/lib/yunmengze`、`/run/yunmengze`、`/var/log/yunmengze` |
-| 配置文件 | `agent.json` / `.local` | **`agent.json`** / **`agent.local.json`** |
-| 项目 skills | `.yunmengze/skills` | **`.yunmengze/skills`** |
-| 日志文件 | `ymzd.jsonl` | **`ymzd.jsonl`** |
-| 环境变量前缀 | `YMZ_*` | **`YMZ_*`**（如 `YMZ_LOG_LEVEL`、`YMZ_VERSION`、安装脚本 `YMZ_INSTALL_DIR`） |
-| systemd | `yunmengze.service` / user `ymz` | **`yunmengze.service`** / **`yunmengze`** |
-| Release 资产前缀 | `ymz_{ver}_{os}_{arch}` | **`ymz_{ver}_{os}_{arch}`** |
-| Go module | `github.com/yyZe0122/yunmengze-agent` | **`github.com/yyZe0122/yunmengze-agent`** |
-| GitHub 主仓 | `yyZe0122/YunmengZe` | **`yyZe0122/YunmengZe-Agent`**（`gh repo rename`，保留 redirect） |
-| Homebrew cask | `ymz` | **`ymz`**（description: YunmengZe Agent） |
-| Scoop manifest | `agent.json` | **`ymz.json`** |
-| 本地目录（可选） | `…/YunmengZe` | **`…/YunmengZe-Agent`** |
+| **L1** | 结构化日志 + `ymz logs` + ADR-047 | **已落地** |
+| **D1** | GoReleaser → homebrew-tap / scoop-bucket | **已接线**（随 v0.2.x 发版） |
+| — | 全链路 e2e / OTel；winget / npm | **不做** |
 
-三件套仍是：`ymzd` + CLI·TUI（`ymz`）+ `core.db`。
+### 改名（R）— **已完成**
 
-### 执行 Phase
+对外 **YunmengZe Agent**；可执行 `ymz` / `ymzd`；配置根 `~/.yunmengze`；module `github.com/yyZe0122/yunmengze-agent`；破坏性里程碑 **v0.2.0**，当前 **v0.2.3**。
 
-| ID | Phase | 内容 | 验收 |
+| ID | Phase | 状态 |
+| --- | --- | --- |
+| **R0–R4** | 命名冻结 · 路径常量 · cmd · module · 打包文档 | **已落地** |
+| **R5** | GitHub + 包仓改名 / remote / cask·scoop | **已完成** |
+| **R6** | v0.2.0 改名发版 | **已完成**（后续 v0.2.1–v0.2.3） |
+
+历史 changelog v0.1.x 可保留旧名作史料。**不做**旧 CLI/路径长期兼容。
+
+### Wave A/B/C + Phase 1 OpenCode（O1–O4）— **已落地**
+
+| ID | 项 | 状态 |
+| --- | --- | --- |
+| **O1** | `ymz config import-opencode` → `agent.local.json` + warnings | **已落地**（`internal/opencodeimport`） |
+| **O2** | MCP remote：Streamable HTTP + legacy SSE；`type`/`url`/`headers` | **已落地**（`internal/mcp` Dial；ADR-040） |
+| **O3** | skill-as-slash + `chat.commands` 模板 slash；import OC `command` | **已落地** |
+| **O4** | session prefer + run-level resolve（prefer→main）；`modelresolve` | **已落地**（ADR-045） |
+| **H6-min** | `injectscan`：memory 写入 + skill body + inject 路径 fail-closed | **已落地**（规则可再收紧） |
+
+---
+
+## 有序 backlog（对标 OpenCode / Crush / Hermes）
+
+依赖顺序：
+
+```text
+Phase 1：O1–O4 已落地 ──► O5–O6（仅有外部 OC 客户端需求时）
+Phase 2：C1–C4 + UX-A/B 已落地（TUI 气泡 / expand / permission SSE / journey memory）
+H7 ✅ · H1-lite ✅ · H6-min ✅
+H2 / H3–H5 / M* ── 无消息通道计划则暂缓
+```
+
+### Phase 1 — OpenCode 体验兼容（不追全量 API）
+
+| ID | 项 | 目标 | 约束 / 验收 |
 | --- | --- | --- | --- |
-| **R0** | 冻结命名 | 确认上表 5 关键：CLI / daemon / 配置根+文件名 / GH 仓名 / 资产·cask 名 | **已定** |
-| **R1** | 路径与产品常量 | paths / providerconfig / env / skills / 日志 / 展示串 | **已落地** |
-| **R2** | 二进制与 cmd | `cmd/ymz` + `cmd/ymzd`；Makefile / `dev.ps1`；无 `aze` | **已落地** |
-| **R3** | Go module | `github.com/yyZe0122/yunmengze-agent` | **已落地**（`make check` 通过） |
-| **R4** | 打包 / 安装 / 文档 | goreleaser / packaging / configs / README / AGENTS | **已落地**（`goreleaser check` 通过） |
-| **R5** | GitHub + 包仓 | `gh repo rename YunmengZe-Agent`；remote；cask/scoop 新名；删旧 manifest | **待你执行** |
-| **R6** | 发版 | **v0.2.0** 破坏性改名里程碑 | **待你执行** |
+| **O1** | `ymz config import-opencode` | 映射 model/provider/mcp/commands/compaction | **已落地** |
+| **O2** | MCP 远程（SSE/HTTP） | Streamable HTTP + legacy SSE；仍经 Broker | **已落地**（ADR-040 更新） |
+| **O3** | 用户 slash 模板 | skill-as-slash + `chat.commands` | **已落地**（仅 instruction；不扩 grant） |
+| **O4** | per-session model | prefer 存储 + run-level 解析 prefer→main | **已落地**（与 H7 共享 `modelresolve`） |
+| **O5** | 薄 compat 子集（可选） | `/compat/opencode/*` 映射 session/message/compact/skills/health | 文档 **compat profile v0.1**；PTY/LSP → 501；**非** SDK drop-in |
+| **O6** | 最小 OpenAPI + 可选 TS 客户端（可选） | 只覆盖真路径或 O5 | 不宣称全量 OC SDK |
 
-### 改名原则
+### Phase 2 — Crush TUI 抛光
 
-- 历史 changelog v0.1.x 可保留旧名作史料；新文档与 v0.2.0+ 全用新名。
-- ADR 技术结论不动；标题/产品名可随改或后补。
-- **不**把 `internal/agent` 重命名为别的业务包（领域词保留）。
-- **不**做 winget/npm；**不**做双栈旧命令长期兼容。
-- `publish-release.sh` 硬编码路径在 R4 改为 repo root 探测（或随本地目录 rename）。
+| ID | 项 | 目标 | 约束 / 验收 |
+| --- | --- | --- | --- |
+| **C1** | Permission SSE | poll → SSE | **已落地**：`permission.pending` / `permission.decided` 经 events store；TUI `applySSE` 触发 perm poll；decide 仍 `DecidePermission*` only |
+| **C2** | live 前缀缓存 | streaming 卡顿时 | **已落地**：finished prefix cache + live tail re-render（plain blocks；非 glamour MD） |
+| **C3** | 工具结果折叠增强 | 长输出可读 | **已落地**：thinking 框 + tail 窗；tool 卡片折叠；`/expand` · `e`/`E`/`c` |
+| **C4** | journey 只读时间线 | memory 变更 | **已落地（memory）**：TUI `/journey` 只读 ListMemory 前缀行；skill 变更轨未做 |
+| **UX-A** | 信息架构 | thinking/reply/tool 分区 + 终态 | **已落地**：`contentBlock`；done 横幅；activity `thinking|writing|tool|idle` |
+| **UX-B** | 气泡化 + 小库 | 圆角消息卡 / MD / 点击 | **已落地**：lipgloss 气泡；`glamour` 完成态 MD；`bubblezone` 点击 expand；`spinner` busy |
 
-### 风险
+### Phase 3 — Hermes 记忆 / skill / 习惯（in-process）
 
-| 风险 | 缓解 |
-| --- | --- |
-| 触达面大（路径/env/cmd/文档/GR） | 按 R1→R6 顺序；每 Phase `make check` |
-| module import 漏改 | 全量替换 + 编译 + test |
-| GH rename 后旧链接 | GitHub redirect + v0.2.0 更新 formula |
-| 与领域包 `agent` 混淆 | 展示名 YunmengZe Agent；路径 `yunmengze`；文件 `agent.json` |
+| ID | 项 | 目标 | 约束 / 验收 |
+| --- | --- | --- | --- |
+| **H1** | LLM Memory Curator | turn 后 aux（`models.compact`/main）→ `memory_entries` | **H1-lite 已落地**（`CurateTurn`；不改冻结块；`chat.memory.curator`） |
+| **H2** | write_approval | messaging/cron 来源的 memory/skill 写入先 stage | **暂缓**（无消息通道时不必） |
+| **H3** | Skill 自改进草稿 | 工具写 ConfigDir/project `SKILL.md` 草稿 | 永不扩 grant；可选人工 apply + backup |
+| **H4** | 工具习惯学习 | 从 permission decide 沉淀 **建议**（once→similar 提示） | **非**自动 permanent；无 yolo |
+| **H5** | Curator 维护 | 过期 memory purge；未用 agent-skill archive | 确定性优先；不自动硬删 |
+| **H6** | 注入扫描 | memory/skill 进 system 前扫注入/不可见 Unicode | **H6-min 已落地**；完整化非必须 |
+| **H7** | Job model pin | 创建时钉 model ref；空/失效 → skip+告警 | **已落地**（`jobs.model_ref` + `modelresolve` 严格解析） |
+
+需新 ADR 时：`050-in-process-self-improvement`（≠ 独立 Evolution 进程）。
+
+### Phase 4 — 消息通道（飞书 / 企微 / 微信）
+
+形状：`internal/channel`（transport + 身份 + 限流）→ `tasksubmission` → chatsession → Broker → adapter 回消息。本地 Gateway 边界不变。
+
+| ID | 项 | 目标 | 约束 / 验收 |
+| --- | --- | --- | --- |
+| **M0** | ADR-049 Channel Bridge | 架构 + 安全默认 | 默认 deny；session 映射在 `core.db` |
+| **M1** | **飞书**（第一通道） | 优先出站 WebSocket（无需公网） | @提及 + open_id allowlist |
+| **M2** | 企业微信 | 官方 bot WS / callback | 企业场景 |
+| **M3** | 个人微信（可选） | iLink long-poll 类 | **DM 为主**；群弱；ToS/产品风险高 |
+| **M4** | Pairing + allowlist | 与 M1 同发 | TUI/CLI 批准配对码；空名单=拒绝 |
+| **M5** | 通道权限档 | 新远端默认 plan 或 ask | agent 写需显式 promote |
+| **M6** | Cron 跨端投递 | job `deliver: feishu:chat_id` | delivery 仅 adapter；内容来自 completed run |
+| **M7** | composition 接线 | `cmd/ymzd` 挂 adapter | Gateway **不**成为 tool 宿主 |
+
+**安全默认：** 通道文本不可信；无 pairing 不跑；cron/messaging 高风险 fail-closed。
 
 ---
 
@@ -135,44 +152,48 @@ Provider 主栈热更：`internal/providerruntime` + ADR-048（不 late-bind cha
 | **gatewayclient 薄 ops** | CLI↔TUI 组请求胶水痛时再抽；不新建第二控制面 |
 | CLI skills | `run --skill` / `skills list`（主路径仍是 TUI `/skills`） |
 | CJK FTS 扩展 | unicode61/trigram + LIKE 兜底；专用 C 扩展另议 |
-| `write_approval` 记忆门控 | 可后置（已有 ADR-043） |
 | 更多 model roles | vision 等：有工具后再加 |
 | 大文件同包再拆 | `kernel/repository`、`tools/fs`+`broker`、`tui/cmds`+`update`；`main.go` 仅摩擦大时再抽 `wire.go` |
-| **T8 Permission SSE** | poll 体感差时：镜像 modelstream hub + gateway SSE；decide 仍只走 `DecidePermission*` |
-| **T8 live md 前缀缓存** | 引入 markdown 渲染且 streaming 卡顿时：稳定前缀 + 只重渲 tail；叠 T3 freeze |
+| **T8 live markdown** | 完成态 glamour 已接；streaming 仍 plain（故意） |
+| **O5–O6** | 仅有真实外部 OC 客户端绑定时 |
 
 ```text
 用例（daemon services）     → 已统一
 外观（gatewayclient）       → 已共享
 语法（CLI argv / TUI slash / HTTP）→ 故意分叉
+通道（channel adapter）     → 规划中；与 gatewayclient 并列的 Core 客户端
 ```
 
 ## 暂缓 / 不做
 
 | 项 | 说明 |
 | --- | --- |
-| 新 viewport/list 引擎 | 不引入 Crush-style lazy list / Ultraviolet；不新增 list 库 |
-| Crush 三档 permission | 保持 once/similar/permanent/deny 四档；只借 modal/grace/快捷键形式 |
+| 全量 OpenCode API/SDK 兼容 | ~162 路径 + 生成 SDK；与三件套冲突；只用 O5 子集或体验兼容 |
+| 新 viewport/list 引擎 | 不引入 Crush-style lazy list / Ultraviolet（气泡 = lipgloss 自绘） |
+| streaming 全量 glamour | 完成态 only；live 用 plain + C2 前缀缓存 |
+| Crush 三档 permission | 保持 once/similar/permanent/deny 四档 |
 | 沙箱 phase-2+ | namespace / bubblewrap / seccomp |
 | LSP | 另案 |
 | Provider 费用真值 | 以后台账单为准 |
-| Cron 表达式 | 固定 interval 已够 |
+| Cron 表达式 | 固定 interval 已够（除非 M/cron 强需求再议） |
 | `permission.mode=auto` | 预留；现等同 preauth |
 | monorepo 全量 client DTO | alias 可接受 |
 | TUI 与 tools 同进程 | 禁止 |
 | yolo / per-tool 软权限 | 禁止 |
-| 改名后旧路径/旧 CLI 长期兼容 | **不做**（alpha 干净切断；文档一句手动迁移） |
+| 独立 Evolution / 多 DB / Module Runtime | 禁止 |
+| 云端向量记忆默认 / Mem0 全家桶 | 禁止作默认路径 |
+| 改名后旧路径/旧 CLI 长期兼容 | **不做** |
 | winget / npm | **不做** |
 
 ## 不建议引入
 
-通用模块框架、Actor/MQ、ORM、DI 容器、工作流 DSL、跨 CLI/TUI/Gateway 的 Command Bus、恢复独立 Planner 审批轨、TUI 开 DB/exec CLI、本地 token→$ 定价表、未达标即宣称「OS sandbox」、跨会话云端向量记忆、多业务 SQLite。
+通用模块框架、Actor/MQ、ORM、DI 容器、工作流 DSL、跨 CLI/TUI/Gateway 的 Command Bus、恢复独立 Planner 审批轨、TUI 开 DB/exec CLI、本地 token→$ 定价表、未达标即宣称「OS sandbox」、跨会话云端向量记忆、多业务 SQLite、Gateway 内执行 tool/provider。
 
 ## 常用命令
 
 ```bash
 make check
 make build
-make all          # check + build + ymzd --check（改名后 ymzd --check）
+make all          # check + build + ymzd --check
 go test ./... -count=1
 ```

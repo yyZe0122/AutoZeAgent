@@ -27,6 +27,13 @@ Crush 的实现证明了更小的可行边界：以目录中的 `SKILL.md` 为�
 
 Skill 是指令内容，不是授权来源。frontmatter 和正文不能创建 Approval、发行 Grant、扩大 Grant Scope 或绕过 Policy。Skill 引导的任何工具调用仍必须进入现有 Agent -> Tool Broker -> Plan/Approval/Grant/Audit 主链路，并绑定 Canonical Plan Hash。
 
+### TUI 选择（skill-as-slash）
+
+- `/skills`：多选，挂到下次 submit 的 `skill_ids`（显式快照，ADR-036）。
+- `/<skill-id>`：切换该 skill；`/<skill-id> text`：确保选中后提交 text。
+- 斜杠优先级：内置（`/model`、`/help` 等）→ `chat.commands` → skill id。
+- 正文读取后经 `injectscan`（H6-min）fail-closed；脏 skill 不进 system 注入。
+
 ### MCP、LSP 与可执行工具
 
 - 外部工具能力优先通过 MCP 接入，不新增等价私有 RPC；

@@ -73,6 +73,27 @@ func (c *Client) MCPStatus(ctx context.Context) (MCPStatus, error) {
 	return status, nil
 }
 
+// ChatCommand is one entry from GET /v1/config/commands (instruction template only).
+type ChatCommand struct {
+	ID          string `json:"id"`
+	Description string `json:"description,omitempty"`
+	Template    string `json:"template"`
+}
+
+// ListChatCommands returns configured user slash templates (O3).
+func (c *Client) ListChatCommands(ctx context.Context) ([]ChatCommand, error) {
+	var response struct {
+		Commands []ChatCommand `json:"commands"`
+	}
+	if err := c.inner.DoJSON(ctx, http.MethodGet, "/v1/config/commands", nil, &response); err != nil {
+		return nil, fmt.Errorf("list chat commands: %w", err)
+	}
+	if response.Commands == nil {
+		return []ChatCommand{}, nil
+	}
+	return response.Commands, nil
+}
+
 // Skill is metadata from GET /v1/skills (no body or file paths).
 type Skill struct {
 	ID          string `json:"id"`

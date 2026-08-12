@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -128,7 +129,7 @@ func LoadChat(configDir string) (ChatConfig, error) {
 }
 
 // LoadMCP reads the optional mcp section. Missing file or mcp block returns zero config.
-// Env values may use {env:VAR} / {file:...} and are resolved relative to the config directory.
+// Env and header values may use {env:VAR} / {file:...} and are resolved relative to the config directory.
 func LoadMCP(configDir string) (MCPConfig, error) {
 	if err := LoadEnvFromConfigDir(configDir); err != nil {
 		return MCPConfig{}, err
@@ -162,6 +163,15 @@ func LoadMCP(configDir string) (MCPConfig, error) {
 			env[k] = resolved
 		}
 		server.Env = env
+		headers := make(map[string]string, len(server.Headers))
+		for k, v := range server.Headers {
+			resolved, err := resolveValue(v, baseDir)
+			if err != nil {
+				return MCPConfig{}, fmt.Errorf("mcp server %q header %q: %w", name, k, err)
+			}
+			headers[k] = resolved
+		}
+		server.Headers = headers
 		mcp.Servers[name] = server
 	}
 	return mcp, nil
@@ -176,11 +186,65 @@ func (c MCPConfig) validate() error {
 		if !ValidMCPServerName(name) {
 			return fmt.Errorf("mcp server name %q must match [a-zA-Z0-9_-]+", name)
 		}
-		if strings.TrimSpace(server.Command) == "" {
-			return fmt.Errorf("mcp server %q: command is required", name)
+		if err := server.validate(name); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func (s MCPServer) validate(name string) error {
+	typ, err := s.ResolvedType()
+	if err != nil {
+		return fmt.Errorf("mcp server %q: %w", name, err)
+	}
+	switch typ {
+	case MCPTypeStdio:
+		if strings.TrimSpace(s.Command) == "" {
+			return fmt.Errorf("mcp server %q: command is required for stdio", name)
+		}
+	case MCPTypeHTTP, MCPTypeSSE, MCPTypeRemote:
+		u := strings.TrimSpace(s.URL)
+		if u == "" {
+			return fmt.Errorf("mcp server %q: url is required for remote transport", name)
+		}
+		parsed, err := url.Parse(u)
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			return fmt.Errorf("mcp server %q: url must be absolute http(s)", name)
+		}
+		scheme := strings.ToLower(parsed.Scheme)
+		if scheme != "http" && scheme != "https" {
+			return fmt.Errorf("mcp server %q: url scheme must be http or https", name)
+		}
+	default:
+		return fmt.Errorf("mcp server %q: unknown type %q", name, typ)
+	}
+	return nil
+}
+
+// ResolvedType returns the effective transport type for this server.
+func (s MCPServer) ResolvedType() (string, error) {
+	typ := strings.ToLower(strings.TrimSpace(s.Type))
+	hasCmd := strings.TrimSpace(s.Command) != ""
+	hasURL := strings.TrimSpace(s.URL) != ""
+	switch typ {
+	case "":
+		if hasURL && !hasCmd {
+			return MCPTypeRemote, nil
+		}
+		if hasCmd {
+			return MCPTypeStdio, nil
+		}
+		return "", errors.New("command or url is required")
+	case MCPTypeStdio:
+		return MCPTypeStdio, nil
+	case MCPTypeHTTP, MCPTypeSSE, MCPTypeRemote:
+		return typ, nil
+	case "local":
+		return MCPTypeStdio, nil
+	default:
+		return "", fmt.Errorf("unsupported type %q (use stdio|http|sse|remote)", typ)
+	}
 }
 
 // ValidMCPServerName matches tool name safe fragment for mcp_<server>_*.

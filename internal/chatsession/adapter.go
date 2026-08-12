@@ -21,6 +21,7 @@ type chatAdapter struct {
 func (a chatAdapter) StartChat(ctx context.Context, req tasksubmission.ChatStartRequest) (tasksubmission.ChatStartResult, error) {
 	result, err := a.s.StartChat(ctx, StartRequest{
 		Task: req.Task, Actor: req.Actor, TraceID: req.TraceID, UserText: req.UserText,
+		ModelRef: req.ModelRef,
 	})
 	if err != nil {
 		return tasksubmission.ChatStartResult{}, err

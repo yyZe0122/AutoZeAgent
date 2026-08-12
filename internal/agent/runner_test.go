@@ -567,6 +567,75 @@ func TestCompactSummaryUsesCompactRole(t *testing.T) {
 	}
 }
 
+func TestRunUsesModelOverride(t *testing.T) {
+	mainP := &sequenceProvider{responses: []providerapi.CompletionResponse{
+		{Content: "main-reply"},
+	}}
+	prefP := &sequenceProvider{responses: []providerapi.CompletionResponse{
+		{Content: "prefer-reply"},
+	}}
+	store, _, _ := openAgentFixture(t)
+	runner, err := New(Config{
+		Provider: mainP, Broker: &recordingBroker{}, Records: store, Model: "main-model",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := testRunRequest()
+	req.ModelOverride = "prefer-model"
+	req.OverrideProvider = prefP
+	req.OverrideContextWindow = 4096
+	result, err := runner.Run(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != "prefer-reply" {
+		t.Fatalf("content = %q", result.Content)
+	}
+	if prefP.calls != 1 || mainP.calls != 0 {
+		t.Fatalf("prefer calls=%d main calls=%d", prefP.calls, mainP.calls)
+	}
+	if len(prefP.requests) != 1 || prefP.requests[0].Model != "prefer-model" {
+		t.Fatalf("prefer request model = %v", prefP.requests)
+	}
+}
+
+func TestRunModelOverrideDoesNotBeatSubagentRole(t *testing.T) {
+	mainP := &sequenceProvider{responses: []providerapi.CompletionResponse{
+		{Content: "main-reply"},
+	}}
+	subP := &sequenceProvider{responses: []providerapi.CompletionResponse{
+		{Content: "sub-reply"},
+	}}
+	prefP := &sequenceProvider{responses: []providerapi.CompletionResponse{
+		{Content: "prefer-reply"},
+	}}
+	store, _, _ := openAgentFixture(t)
+	runner, err := New(Config{
+		Provider: mainP, Broker: &recordingBroker{}, Records: store, Model: "main-model",
+		Roles: map[string]RoleEndpoint{
+			"subagent": {Provider: subP, Model: "sub-model"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := testRunRequest()
+	req.Role = "subagent"
+	req.ModelOverride = "prefer-model"
+	req.OverrideProvider = prefP
+	result, err := runner.Run(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != "sub-reply" {
+		t.Fatalf("content = %q", result.Content)
+	}
+	if subP.calls != 1 || prefP.calls != 0 {
+		t.Fatalf("sub=%d prefer=%d", subP.calls, prefP.calls)
+	}
+}
+
 func TestRunUsesSubagentRole(t *testing.T) {
 	mainP := &sequenceProvider{responses: []providerapi.CompletionResponse{
 		{Content: "main-reply"},

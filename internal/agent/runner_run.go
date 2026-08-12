@@ -65,6 +65,16 @@ func (r *Runner) Run(ctx context.Context, request RunRequest) (Result, error) {
 	}
 
 	provider, model, roleWindow := r.snapshotForRole(request.Role)
+	// O4: session/job pin overrides main only (not configured subagent/compact roles).
+	if r.useModelOverride(request) {
+		provider = request.OverrideProvider
+		model = strings.TrimSpace(request.ModelOverride)
+		if request.OverrideContextWindow > 0 {
+			roleWindow = request.OverrideContextWindow
+		}
+		slog.Info("agent run model override", "component", "agent", "operation", "run", "result", "override",
+			"session_id", request.SessionID, "run_id", request.RunID, "model", model)
+	}
 	if request.ContextWindow <= 0 && roleWindow > 0 {
 		request.ContextWindow = roleWindow
 	}

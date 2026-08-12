@@ -24,7 +24,7 @@ type File struct {
 	Provider map[string]Provider `json:"provider"`
 	// Chat configures agent-mode session chat workspace grants (optional).
 	Chat *ChatConfig `json:"chat,omitempty"`
-	// MCP configures stdio MCP servers (optional; ADR-040).
+	// MCP configures stdio and/or remote MCP servers (optional; ADR-040).
 	MCP *MCPConfig `json:"mcp,omitempty"`
 }
 
@@ -46,11 +46,26 @@ type MCPConfig struct {
 	Servers map[string]MCPServer `json:"servers,omitempty"`
 }
 
-// MCPServer is one stdio MCP server process.
+// MCP transport types (ADR-040 / O2). Empty + command → stdio; empty + url → remote.
+const (
+	MCPTypeStdio  = "stdio"
+	MCPTypeHTTP   = "http"   // Streamable HTTP
+	MCPTypeSSE    = "sse"    // legacy HTTP+SSE or Streamable with SSE bodies
+	MCPTypeRemote = "remote" // auto: Streamable HTTP, fallback legacy SSE
+)
+
+// MCPServer is one MCP server: stdio process and/or remote URL (ADR-040 O2).
 type MCPServer struct {
-	Command string            `json:"command"`
+	// Type is stdio | http | sse | remote. Empty infers from command/url.
+	Type string `json:"type,omitempty"`
+	// Command/Args/Env are for stdio transport.
+	Command string            `json:"command,omitempty"`
 	Args    []string          `json:"args,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
+	// URL/Headers are for remote transports. Header values may use {env:}/{file:}.
+	// Never expose URL/headers on Gateway status.
+	URL     string            `json:"url,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 // Permission modes for chat.permission.mode (ADR-043).
@@ -83,6 +98,17 @@ type ChatConfig struct {
 	Permission *ChatPermissionConfig `json:"permission,omitempty"`
 	// Memory controls in-process layered memory (ADR-044). Omit → enabled defaults.
 	Memory *ChatMemoryConfig `json:"memory,omitempty"`
+	// Commands are user slash templates (O3). Instruction text only — no grants.
+	// Key is slash name without leading slash. Builtin TUI names are rejected.
+	Commands map[string]ChatCommandConfig `json:"commands,omitempty"`
+}
+
+// ChatCommandConfig is one chat.commands entry (O3).
+type ChatCommandConfig struct {
+	// Description is short help for completer / list API.
+	Description string `json:"description,omitempty"`
+	// Template is the user-message body. Optional $ARGUMENTS is replaced by slash args.
+	Template string `json:"template"`
 }
 
 // Workspace default modes (chat.workspace.default).
@@ -111,6 +137,18 @@ type ChatMemoryConfig struct {
 	InjectMode string `json:"inject_mode,omitempty"`
 	// SessionSearch enables transcript FTS tool (default true).
 	SessionSearch *bool `json:"session_search,omitempty"`
+	// Curator is optional post-turn LLM fact extraction (H1-lite).
+	Curator *ChatMemoryCuratorConfig `json:"curator,omitempty"`
+}
+
+// ChatMemoryCuratorConfig is optional chat.memory.curator (H1-lite).
+type ChatMemoryCuratorConfig struct {
+	// Enabled defaults true when Curator is nil or Enabled is nil (and memory is on).
+	Enabled *bool `json:"enabled,omitempty"`
+	// MaxFacts caps facts written per turn (1–8). Omit → 3.
+	MaxFacts int `json:"max_facts,omitempty"`
+	// TimeoutMS bounds the aux call (1000–120000). Omit → 15000.
+	TimeoutMS int `json:"timeout_ms,omitempty"`
 }
 
 // ChatPermissionConfig is the optional chat.permission object.
@@ -190,6 +228,33 @@ func (c ChatConfig) MemorySessionSearchEnabled() bool {
 		return true
 	}
 	return *c.Memory.SessionSearch
+}
+
+// MemoryCuratorEnabled reports whether post-turn LLM curator is on (default true when memory on).
+func (c ChatConfig) MemoryCuratorEnabled() bool {
+	if !c.MemoryEnabled() {
+		return false
+	}
+	if c.Memory == nil || c.Memory.Curator == nil || c.Memory.Curator.Enabled == nil {
+		return true
+	}
+	return *c.Memory.Curator.Enabled
+}
+
+// MemoryCuratorMaxFacts returns max facts per turn (default 3).
+func (c ChatConfig) MemoryCuratorMaxFacts() int {
+	if c.Memory == nil || c.Memory.Curator == nil || c.Memory.Curator.MaxFacts <= 0 {
+		return 3
+	}
+	return c.Memory.Curator.MaxFacts
+}
+
+// MemoryCuratorTimeoutMS returns aux timeout in ms (default 15000).
+func (c ChatConfig) MemoryCuratorTimeoutMS() int {
+	if c.Memory == nil || c.Memory.Curator == nil || c.Memory.Curator.TimeoutMS <= 0 {
+		return 15_000
+	}
+	return c.Memory.Curator.TimeoutMS
 }
 
 // PermissionModeOrDefault returns chat.permission.mode or preauth.

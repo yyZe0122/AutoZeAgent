@@ -20,8 +20,11 @@ type Gateway interface {
 	SetModelConfig(ctx context.Context, model string) (gatewayclient.ModelConfig, error)
 	MCPStatus(ctx context.Context) (gatewayclient.MCPStatus, error)
 	ListSkills(ctx context.Context) ([]gatewayclient.Skill, error)
+	ListChatCommands(ctx context.Context) ([]gatewayclient.ChatCommand, error)
 
 	ListSessions(ctx context.Context, limit int) ([]gatewayclient.Session, error)
+	GetSession(ctx context.Context, id gatewayclient.SessionID) (gatewayclient.Session, error)
+	SetSessionPreferredModel(ctx context.Context, id gatewayclient.SessionID, model string) (gatewayclient.Session, error)
 	SessionMessages(ctx context.Context, id gatewayclient.SessionID, limit int) ([]gatewayclient.TranscriptMessage, error)
 	TaskMessages(ctx context.Context, id gatewayclient.TaskID, limit int) ([]gatewayclient.TranscriptMessage, error)
 	CompactSession(ctx context.Context, id gatewayclient.SessionID, focus string) (gatewayclient.CompactResult, error)

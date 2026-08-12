@@ -82,6 +82,12 @@ type Compactor interface {
 	CompactSummary(ctx context.Context, head []providerapi.Message) (string, error)
 }
 
+// MemoryCuratorCaller is optional post-turn LLM fact extraction (H1-lite).
+// Typically agent.Runner (uses models.compact when configured).
+type MemoryCuratorCaller interface {
+	ProposeMemoryFacts(ctx context.Context, userText, assistantText string, maxFacts int) (string, error)
+}
+
 // StreamFanout notifies local UIs after durable run terminal writes (optional).
 type StreamFanout interface {
 	PublishTerminal(sessionID, taskID, runID string)
@@ -135,6 +141,8 @@ type Config struct {
 	Context *contextpack.Store
 	// Compactor summarizes head turns when compaction is enabled (optional; extractive fallback).
 	Compactor Compactor
+	// MemoryCurator optionally extracts durable facts after successful turns (H1-lite).
+	MemoryCurator MemoryCuratorCaller
 	// CompactionEnabled defaults true when nil.
 	CompactionEnabled *bool
 	// Calibrator is optional for pre-pack estimate pressure.
@@ -145,8 +153,26 @@ type Config struct {
 	Stream StreamFanout
 	// ToolCalls is optional; cancel/fail sweeps still-running tool_calls (ADR-012).
 	ToolCalls ToolCallCleaner
-	Now       func() time.Time
-	OnError   func(error)
+	// ModelResolver optionally applies session PreferredModel per run (O4).
+	ModelResolver ModelPinResolver
+	Now           func() time.Time
+	OnError       func(error)
+}
+
+// ModelPinResolver resolves a selection ref (provider/model) for one chat run.
+// ResolveOrFallback: empty/error → nil (use daemon main). Shared with H7 job pins.
+// ResolveStrict: empty pin → nil,nil; invalid pin → error (H7 skip path).
+type ModelPinResolver interface {
+	ResolveOrFallback(pin string) *ModelPin
+	ResolveStrict(pin string) (*ModelPin, error)
+}
+
+// ModelPin is a per-run main endpoint override (O4).
+type ModelPin struct {
+	Ref           string
+	Provider      agent.StreamingProvider
+	Model         string
+	ContextWindow int64
 }
 
 type Service struct {
@@ -171,8 +197,10 @@ type Service struct {
 	compactionEnabled bool
 	calibrator        *contextpack.Calibrator
 	memory            *memory.Manager
+	curatorCaller     MemoryCuratorCaller
 	stream            StreamFanout
 	toolCalls         ToolCallCleaner
+	modelResolver     ModelPinResolver
 	audit             *audit.Store
 	now               func() time.Time
 	onError           func(error)
@@ -188,6 +216,8 @@ type StartRequest struct {
 	TraceID string
 	// UserText overrides task.Objective when non-empty.
 	UserText string
+	// ModelRef is an optional job-pinned selection ref (H7). Wins over session prefer.
+	ModelRef string
 }
 
 type StartResult struct {
@@ -253,9 +283,9 @@ func New(config Config) (*Service, error) {
 		permissionMode: permMode, extraTools: extra,
 		contextWindow: config.ContextWindow, contextStore: config.Context,
 		compactor: config.Compactor, compactionEnabled: compactionEnabled,
-		calibrator: config.Calibrator, memory: config.Memory, stream: config.Stream,
-		toolCalls: config.ToolCalls,
-		audit:     auditStore, now: config.Now, onError: config.OnError,
+		calibrator: config.Calibrator, memory: config.Memory, curatorCaller: config.MemoryCurator,
+		stream: config.Stream, toolCalls: config.ToolCalls, modelResolver: config.ModelResolver,
+		audit: auditStore, now: config.Now, onError: config.OnError,
 		active: make(map[kernel.TaskID]context.CancelFunc),
 	}, nil
 }
@@ -330,6 +360,22 @@ func (s *Service) StartChat(ctx context.Context, request StartRequest) (StartRes
 		actor = "local-user"
 	}
 
+	// H7: job model pin must resolve before creating a run (fail closed for unattended).
+	modelRef := strings.TrimSpace(request.ModelRef)
+	if modelRef != "" {
+		if s.modelResolver == nil {
+			return StartResult{}, applicationerror.Wrap(applicationerror.CodeUnavailable, false,
+				fmt.Errorf("%w: job model pin requires model resolver", ErrUnavailable))
+		}
+		if _, err := s.modelResolver.ResolveStrict(modelRef); err != nil {
+			slog.Error("chat start job model pin failed", runlog.Attrs("chatsession", "start", "failed", runlog.IDs{
+				SessionID: string(task.SessionID), TaskID: string(task.ID), TraceID: request.TraceID,
+			}, "model_ref", modelRef, "error", err)...)
+			return StartResult{}, applicationerror.Wrap(applicationerror.CodeInvalidRequest, false,
+				fmt.Errorf("%w: job model pin %q: %v", ErrInvalidRequest, modelRef, err))
+		}
+	}
+
 	plan, planHash, task, err := s.ensureChatWorkspaceAuth(ctx, task)
 	if err != nil {
 		return StartResult{}, err
@@ -369,7 +415,8 @@ func (s *Service) StartChat(ctx context.Context, request StartRequest) (StartRes
 	execHistory := history
 	execGrants := grantIDs
 	execUser := userText
-	go s.executeChat(execTask, execPlan, execHash, execRun, execHistory, execGrants, execUser)
+	execModelRef := modelRef
+	go s.executeChat(execTask, execPlan, execHash, execRun, execHistory, execGrants, execUser, execModelRef)
 
 	return StartResult{Task: task, RunID: runID, PlanID: plan.PlanID}, nil
 }

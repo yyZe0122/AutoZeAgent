@@ -17,6 +17,7 @@ const (
 	SourceSyncTurn    = "sync_turn"
 	SourceUser        = "user"
 	SourcePromote     = "promote"
+	SourceCurator     = "curator"
 
 	KindCurated = "curated"
 	KindSession = "session"

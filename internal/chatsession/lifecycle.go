@@ -16,7 +16,9 @@ import (
 	"github.com/yyZe0122/yunmengze-agent/internal/approval"
 	"github.com/yyZe0122/yunmengze-agent/internal/audit"
 	"github.com/yyZe0122/yunmengze-agent/internal/corequery"
+	"github.com/yyZe0122/yunmengze-agent/internal/injectscan"
 	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
+	"github.com/yyZe0122/yunmengze-agent/internal/memory"
 	"github.com/yyZe0122/yunmengze-agent/internal/runlog"
 	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
@@ -29,6 +31,7 @@ func (s *Service) executeChat(
 	history []providerapi.Message,
 	grantIDs map[string][]string,
 	userText string,
+	modelRef string,
 ) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(plan.Budget.MaxDurationMillis)*time.Millisecond)
 	defer cancel()
@@ -87,7 +90,7 @@ func (s *Service) executeChat(
 	if strings.HasPrefix(string(task.ID), "scheduled_") {
 		runActor = "scheduler"
 	}
-	result, err := s.agent.Run(ctx, agent.RunRequest{
+	runReq := agent.RunRequest{
 		RunID: string(runID), TaskID: string(task.ID), SessionID: string(task.SessionID),
 		PlanID: string(plan.PlanID), PlanHash: planHash, StepID: string(stepID),
 		Actor: runActor, TraceID: string(runID),
@@ -96,7 +99,24 @@ func (s *Service) executeChat(
 		MaxOutputTokens: maxOut, MaxTotalTokens: plan.Budget.MaxTokens,
 		MaxCostMicros: plan.Budget.MaxCostMicros, ToolTimeoutMillis: timeoutMS,
 		ContextWindow: s.contextWindow,
-	})
+	}
+	// H7 job pin > O4 session prefer > daemon main (not global SelectModel).
+	if pin := s.resolveRunModelPin(ctx, task.SessionID, modelRef); pin != nil {
+		runReq.ModelOverride = pin.Model
+		runReq.OverrideProvider = pin.Provider
+		runReq.OverrideContextWindow = pin.ContextWindow
+		if pin.ContextWindow > 0 {
+			runReq.ContextWindow = pin.ContextWindow
+		}
+		src := "session"
+		if strings.TrimSpace(modelRef) != "" {
+			src = "job"
+		}
+		slog.Info("chat run using model pin", runlog.Attrs("chatsession", "execute", "model_pin", runlog.IDs{
+			SessionID: string(task.SessionID), TaskID: string(task.ID), RunID: string(runID),
+		}, "source", src, "pin", pin.Ref, "model", pin.Model)...)
+	}
+	result, err := s.agent.Run(ctx, runReq)
 	if err != nil {
 		bg := context.WithoutCancel(ctx)
 		if errors.Is(err, context.Canceled) {
@@ -139,7 +159,29 @@ func (s *Service) executeChat(
 		if strings.TrimSpace(result.Content) != "" {
 			_ = s.memory.IndexTranscriptRecord(bg, string(task.SessionID), string(runID), 1, "assistant", result.Content, nowRFC)
 		}
+		// H1-lite: async LLM curator (does not touch frozen system block).
+		s.runMemoryCurator(bg, string(task.SessionID), userText, result.Content)
 	}
+}
+
+func (s *Service) runMemoryCurator(ctx context.Context, sessionID, userText, assistantText string) {
+	if s == nil || s.memory == nil || s.curatorCaller == nil {
+		return
+	}
+	enabled := true
+	maxFacts := 3
+	timeoutMS := 15_000
+	if s.chatCfg != nil {
+		enabled = s.chatCfg.MemoryCuratorEnabled()
+		maxFacts = s.chatCfg.MemoryCuratorMaxFacts()
+		timeoutMS = s.chatCfg.MemoryCuratorTimeoutMS()
+	}
+	if !enabled {
+		return
+	}
+	go s.memory.CurateTurn(ctx, sessionID, userText, assistantText, memory.CuratorConfig{
+		Enabled: true, MaxFacts: maxFacts, TimeoutMS: timeoutMS, Caller: s.curatorCaller,
+	})
 }
 
 // RefreshMemory invalidates the frozen system memory snapshot for a session
@@ -283,6 +325,47 @@ func (s *Service) publishTerminal(task kernel.Task, runID kernel.RunID) {
 	s.stream.PublishTerminal(string(task.SessionID), string(task.ID), string(runID))
 }
 
+// resolveRunModelPin applies H7 job pin (strict, pre-validated at StartChat) then O4 session prefer.
+// Nil → use daemon main.
+func (s *Service) resolveRunModelPin(ctx context.Context, sessionID kernel.SessionID, jobModelRef string) *ModelPin {
+	if s == nil || s.modelResolver == nil {
+		return nil
+	}
+	if pin := strings.TrimSpace(jobModelRef); pin != "" {
+		ep, err := s.modelResolver.ResolveStrict(pin)
+		if err != nil {
+			// StartChat already validated; treat as hard failure path via empty + log.
+			slog.Error("job model pin resolve failed at execute", runlog.Attrs("chatsession", "model_pin", "failed", runlog.IDs{
+				SessionID: string(sessionID),
+			}, "pin", pin, "error", err)...)
+			return nil
+		}
+		if ep != nil {
+			return ep
+		}
+	}
+	return s.sessionModelPin(ctx, sessionID)
+}
+
+// sessionModelPin loads session PreferredModel and resolves it (O4). Nil → use main.
+func (s *Service) sessionModelPin(ctx context.Context, sessionID kernel.SessionID) *ModelPin {
+	if s == nil || s.modelResolver == nil || s.repository == nil || sessionID == "" {
+		return nil
+	}
+	session, err := s.repository.GetSession(ctx, sessionID)
+	if err != nil {
+		slog.Warn("session model pin load failed", runlog.Attrs("chatsession", "model_pin", "warning", runlog.IDs{
+			SessionID: string(sessionID),
+		}, "error", err)...)
+		return nil
+	}
+	pref := strings.TrimSpace(session.PreferredModel)
+	if pref == "" {
+		return nil
+	}
+	return s.modelResolver.ResolveOrFallback(pref)
+}
+
 // skillSystemMessage loads the immutable task skill snapshot and builds a dedicated
 // system message. Empty selection yields nil. Never re-reads SKILL.md files.
 func (s *Service) skillSystemMessage(ctx context.Context, taskID kernel.TaskID) *providerapi.Message {
@@ -298,6 +381,12 @@ func (s *Service) skillSystemMessage(ctx context.Context, taskID kernel.TaskID) 
 	}
 	instructions := strings.TrimSpace(snapshot.Instructions)
 	if instructions == "" {
+		return nil
+	}
+	if err := injectscan.Scan(instructions); err != nil {
+		slog.Warn("chat skill inject rejected", runlog.Attrs("chatsession", "skill_inject", "warning", runlog.IDs{
+			TaskID: string(taskID),
+		}, "error", err)...)
 		return nil
 	}
 	content := skillSystemPreamble + "\n\n" + instructions

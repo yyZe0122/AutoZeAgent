@@ -19,6 +19,7 @@ import (
 
 	"github.com/yyZe0122/yunmengze-agent/internal/app"
 	"github.com/yyZe0122/yunmengze-agent/internal/gatewayclient"
+	"github.com/yyZe0122/yunmengze-agent/internal/opencodeimport"
 	"github.com/yyZe0122/yunmengze-agent/internal/platform/paths"
 	"github.com/yyZe0122/yunmengze-agent/internal/providerconfig"
 )
@@ -80,6 +81,91 @@ func runConfigValidate(args []string) error {
 		return err
 	}
 	return writeJSON(check)
+}
+
+func runConfigImportOpenCode(args []string) error {
+	flags := flag.NewFlagSet("config import-opencode", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	modeValue := flags.String("mode", string(paths.ModeUser), "runtime mode: user or system")
+	dryRun := flags.Bool("dry-run", false, "print mapped config and warnings without writing")
+	output := flags.String("output", "", "write path (default: <config-dir>/agent.local.json)")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	src := ""
+	if flags.NArg() == 1 {
+		src = flags.Arg(0)
+	} else if flags.NArg() > 1 {
+		return errors.New("use ymz config import-opencode [path] [--mode user|system] [--dry-run] [--output path]")
+	}
+	if src == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("resolve home for default opencode path: %w", err)
+		}
+		// Prefer XDG-style then legacy ~/.opencode
+		candidates := []string{
+			filepath.Join(home, ".config", "opencode", "opencode.json"),
+			filepath.Join(home, ".config", "opencode", "opencode.jsonc"),
+			filepath.Join(home, ".opencode", "opencode.json"),
+			filepath.Join(home, ".opencode", "opencode.jsonc"),
+		}
+		for _, c := range candidates {
+			if st, err := os.Stat(c); err == nil && st.Mode().IsRegular() {
+				src = c
+				break
+			}
+		}
+		if src == "" {
+			return errors.New("opencode config path required (no default found under ~/.config/opencode or ~/.opencode)")
+		}
+	}
+	mode, err := paths.ParseMode(*modeValue)
+	if err != nil {
+		return err
+	}
+	layout, err := paths.Resolve(mode)
+	if err != nil {
+		return err
+	}
+	res, err := opencodeimport.ConvertFile(src)
+	if err != nil {
+		return err
+	}
+	for _, w := range res.Warnings {
+		fmt.Fprintln(os.Stderr, "warning:", w)
+	}
+	if *dryRun {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(res.File); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "dry-run: would write from %s (%d warnings)\n", res.Source, len(res.Warnings))
+		return nil
+	}
+	outPath := strings.TrimSpace(*output)
+	if outPath == "" {
+		outPath, err = opencodeimport.WriteLocal(layout.ConfigDir, res.File)
+		if err != nil {
+			return err
+		}
+	} else {
+		data, err := json.MarshalIndent(res.File, "", "  ")
+		if err != nil {
+			return err
+		}
+		data = append(data, '\n')
+		if err := os.MkdirAll(filepath.Dir(outPath), 0o700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(outPath, data, 0o600); err != nil {
+			return err
+		}
+	}
+	fmt.Fprintf(os.Stdout, "imported %s → %s (%d warnings)\n", res.Source, outPath, len(res.Warnings))
+	fmt.Fprintln(os.Stderr, "run: ymz config validate")
+	return nil
 }
 
 func runHealth(args []string) error {
