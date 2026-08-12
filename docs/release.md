@@ -1,8 +1,82 @@
 # Release and publication
 
-Moved out of the root README so install/run docs stay short. Chinese notes follow each block where useful.
+日常安装/运行见根 [README](../README.md)。**本页是唯一发版操作手册**——按下面默认路径执行即可，不必再向 agent 单独确认流程。
 
-从根 README 外移：日常安装/运行见仓库根目录 README；本页仅发布、资产命名与公开前审核。
+This page is the **only** release runbook. Follow the default path; do not invent parallel steps.
+
+---
+
+## Default path (this host) / 默认一键发版
+
+**Scheme A:** only **root** may commit / tag / push / upload on this machine.
+
+### Every release (copy-paste)
+
+```bash
+sudo -i
+cd /home/yyze/projects/AutoZeAgent
+
+# Auth once per machine (preferred): gh auth login
+# Or export for this shell:
+#   export GITHUB_TOKEN=...            # main repo Contents (+ Workflows if touching .github)
+#   export PACKAGE_GITHUB_TOKEN=...    # homebrew-tap + scoop-bucket Contents R/W
+
+# 1) Changelog MUST exist before publish (tag name == file name)
+#    docs/changelog/vX.Y.Z.md
+
+# 2) Dirty tree → commit everything safe + push + tag + local GoReleaser upload
+./scripts/publish-release.sh vX.Y.Z \
+  --commit-paths all --yes \
+  --message "release: vX.Y.Z"
+
+# Clean main already pushed, only tag + upload:
+# ./scripts/publish-release.sh vX.Y.Z
+```
+
+Replace `vX.Y.Z` with the real tag (e.g. `v0.2.2`). Script runs `make check`, creates annotated tag, pushes `main` + tag, then **local** `goreleaser release` (not GitHub Actions minutes).
+
+### Pre-flight checklist
+
+| Step | Action |
+| --- | --- |
+| 1 | Bump / write **`docs/changelog/vX.Y.Z.md`** (bilingual highlights, asset table, install). Missing file **fails** publish. |
+| 2 | No secrets in tree: no `agent.local.json`, `*.db`, `env` with real keys, `bin/`, tokens in docs. |
+| 3 | `make check` green (script runs it unless `--skip-check`). |
+| 4 | `gh auth login` or valid `GITHUB_TOKEN` + `PACKAGE_GITHUB_TOKEN`. |
+| 5 | Run `./scripts/publish-release.sh vX.Y.Z …` as **root**. |
+
+### After publish
+
+```bash
+gh release view vX.Y.Z --repo yyZe0122/YunmengZe-Agent
+# Must list platform archives + checksums.txt (not only Source code zip)
+
+gh api repos/yyZe0122/homebrew-tap/commits --jq '.[0].commit.message'
+gh api repos/yyZe0122/scoop-bucket/commits --jq '.[0].commit.message'
+```
+
+Users:
+
+```bash
+brew upgrade --cask ymz
+# or
+export YMZ_VERSION=vX.Y.Z
+curl -fsSL "https://raw.githubusercontent.com/yyZe0122/YunmengZe-Agent/main/packaging/scripts/install-user.sh" | sh
+```
+
+### Common variants
+
+| Situation | Command |
+| --- | --- |
+| Only snapshot (no tag/upload) | `./scripts/publish-release.sh vX.Y.Z --snapshot-only` |
+| Tag already on HEAD; re-upload assets | `./scripts/publish-release.sh vX.Y.Z --upload-only` |
+| Move tag to current HEAD | `./scripts/publish-release.sh vX.Y.Z --force-tag --yes` |
+| Print steps only | `./scripts/publish-release.sh vX.Y.Z --dry-run` |
+| Push tag, let Actions publish | `./scripts/publish-release.sh vX.Y.Z --via-actions` (needs billing OK) |
+
+Script: [`scripts/publish-release.sh`](../scripts/publish-release.sh).
+
+---
 
 ## User install channels / 用户安装渠道
 
@@ -16,164 +90,67 @@ Moved out of the root README so install/run docs stay short. Chinese notes follo
 Affiliate repos (auto-updated by GoReleaser on each tag):
 
 - [`yyZe0122/homebrew-tap`](https://github.com/yyZe0122/homebrew-tap) → `Casks/ymz.rb`
-- [`yyZe0122/scoop-bucket`](https://github.com/yyZe0122/scoop-bucket) → `agent.json`
+- [`yyZe0122/scoop-bucket`](https://github.com/yyZe0122/scoop-bucket)
 
 ## Asset naming / 资产命名
 
 GoReleaser builds **one archive per OS/arch**. Each archive contains **two binaries** (`ymz`, `ymzd`) plus configs and packaging scripts.
 
-每个平台一个归档；归档内含 **三个二进制** 与配置/脚本。
-
-| Pattern | Example (tag `v0.1.0`) |
+| Pattern | Example (tag `v0.2.2`) |
 | --- | --- |
-| `ymz_{version}_{os}_{arch}.tar.gz` | `ymz_0.1.0_linux_amd64.tar.gz` |
-| `ymz_{version}_windows_{arch}.zip` | `ymz_0.1.0_windows_amd64.zip` |
+| `ymz_{version}_{os}_{arch}.tar.gz` | `ymz_0.2.2_linux_amd64.tar.gz` |
+| `ymz_{version}_windows_{arch}.zip` | `ymz_0.2.2_windows_amd64.zip` |
 | `checksums.txt` | SHA-256 of all archives (fixed name) |
 
 - `{version}` = tag **without** leading `v` (GoReleaser `.Version`).
-- Fallback installers (`packaging/scripts/install-user.sh`, `install.ps1`) and package manifests must stay in sync with this pattern.
-- Prefer `YMZ_VERSION=v0.1.0` when the release is marked **Pre-release** (GitHub `latest` may skip it).
+- Prefer `YMZ_VERSION=vX.Y.Z` when the release is **Pre-release** (GitHub `latest` may skip it).
 
 ## Release notes / 更新日志
 
-1. Add `docs/changelog/vX.Y.Z.md` (bilingual body: highlights, asset table, verify, install).
-2. Tag must match the file name: tag `v0.1.0` → `docs/changelog/v0.1.0.md`.
+1. Add `docs/changelog/vX.Y.Z.md` (bilingual: highlights, asset table, verify, install).
+2. Tag must match the file name: tag `v0.2.2` → `docs/changelog/v0.2.2.md`.
 3. Publish uses: `goreleaser release … --release-notes=docs/changelog/${tag}.md`.
 4. Missing notes file **fails** the publish script / CI on purpose.
 
-## One-shot publish (root) / 一键发布
-
-**Default = local build + upload** (no GitHub Actions minutes). Only **root** may commit/tag/push on this host (scheme A).
-
-```bash
-sudo -i
-cd /home/yyze/projects/YunmengZe
-
-# Main repo Release upload
-export GITHUB_TOKEN=ghp_...   # or rely on: gh auth login → script uses gh auth token
-# Homebrew tap + Scoop bucket (Contents R/W on both). Omit only if GITHUB_TOKEN can write them.
-export PACKAGE_GITHUB_TOKEN=github_pat_...
-
-./scripts/publish-release.sh v0.1.0
-# uncommitted release pipeline files:
-./scripts/publish-release.sh v0.1.0 --commit-paths release
-# tag already on HEAD (e.g. after a failed Actions attempt):
-./scripts/publish-release.sh v0.1.0 --upload-only
-```
-
-Script: [`scripts/publish-release.sh`](../scripts/publish-release.sh)
-
-| Flag | Meaning |
-| --- | --- |
-| *(default)* | `make check` → optional snapshot → push main/tag → **local** `goreleaser release` upload |
-| `--upload-only` | Skip push; HEAD must already be tag; local upload only |
-| `--via-actions` | Push tag only; let GitHub Actions publish (**needs billing OK** + `PACKAGE_GITHUB_TOKEN` secret) |
-| `--commit-paths release` | Commit goreleaser/changelog/installers/README whitelist |
-| `--commit-paths all --yes` | Commit entire dirty tree (careful) |
-| `--snapshot-only` | `make check` + snapshot only |
-| `--force-tag --yes` | Replace existing local/remote tag |
-| `--dry-run` | Print steps |
-
-Requires `docs/changelog/vX.Y.Z.md` and `GITHUB_TOKEN` for the default path.  
-`PACKAGE_GITHUB_TOKEN` is required for brew/scoop push (falls back to `GITHUB_TOKEN` if unset).
-
-### Auth for local upload / 本地上传鉴权
+## Auth / 鉴权
 
 **推荐（root）：`gh auth login`**，脚本会自动 `gh auth token` → `GITHUB_TOKEN`。
 
-```bash
-# install gh (root), then:
-gh auth login
-# GitHub.com → HTTPS → Login with a web browser (or paste token)
-# When asked for scopes / fine-grained: need Contents + Workflows write
-# Classic login scopes must include: repo, workflow, read:org (as offered)
-```
-
-Or export PATs yourself:
-
 | Token | Required access |
 | --- | --- |
-| **`GITHUB_TOKEN`** (fine-grained) | **YunmengZe**: Contents R/W; Workflows R/W if commit touches `.github/workflows/`; Metadata Read |
-| **`PACKAGE_GITHUB_TOKEN`** (fine-grained) | **homebrew-tap** + **scoop-bucket**: Contents R/W; Metadata Read |
-| **Classic** (one token for all) | **`repo` + `workflow`** |
+| **`GITHUB_TOKEN`** | **YunmengZe-Agent**: Contents R/W; Workflows R/W if commit touches `.github/workflows` |
+| **`PACKAGE_GITHUB_TOKEN`** | **homebrew-tap** + **scoop-bucket**: Contents R/W |
+| **Classic** (one token) | **`repo` + `workflow`** |
 
-Why **Workflows** on the main repo? `POST /repos/.../releases` returns `403 Resource not accessible by personal access token` when the target commit modifies workflow files and the token cannot. Our pipeline often changes `release.yml`.
+If the Release page only shows **Source code** zip/tar.gz, binaries never uploaded — fix PAT and use default local upload (not `--via-actions` while billing is broken).
 
-Why a **separate** package token? Default Actions `GITHUB_TOKEN` and narrow fine-grained tokens **cannot** push to other repositories. GoReleaser needs write access to the tap and bucket.
+### Optional: GitHub Actions
 
-```bash
-# optional manual tokens
-export GITHUB_TOKEN='…'
-export PACKAGE_GITHUB_TOKEN='…'   # or same classic PAT if it covers all three repos
-# probe read (200) and create draft release (201, not 403) — see script 403 help
-```
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) runs on `v*` tags when Actions + billing are healthy. Prefer **local upload** when runners are unavailable. Repo secret `PACKAGE_GITHUB_TOKEN` required for brew/scoop from CI.
 
-After a successful publish, confirm:
+### Local snapshot only
 
 ```bash
-# Release assets present (not only Source code zip)
-gh release view vX.Y.Z --repo yyZe0122/YunmengZe-Agent
-# Tap / bucket commits
-gh api repos/yyZe0122/homebrew-tap/commits --jq '.[0].commit.message'
-gh api repos/yyZe0122/scoop-bucket/commits --jq '.[0].commit.message'
-```
-
-If the Release page only shows **Source code** zip/tar.gz, binaries were never uploaded (Actions billing lock and/or failed local token). Use local upload with a correct PAT, not `--via-actions`, until billing is healthy.
-
-### Optional: GitHub Actions / 可选 CI
-
-[`.github/workflows/release.yml`](../.github/workflows/release.yml) still runs on `v*` tags when Actions is enabled and billing is healthy. Prefer **local upload** when hosted runners are unavailable.
-
-**Repository secret:** set `PACKAGE_GITHUB_TOKEN` on YunmengZe (Contents R/W on `homebrew-tap` + `scoop-bucket`). Without it, the Release may succeed while brew/scoop stay stale.
-
-### Local snapshot only / 仅本地快照
-
-```bash
-export PACKAGE_GITHUB_TOKEN=dummy   # template only; snapshot skips publish
+export PACKAGE_GITHUB_TOKEN=dummy
 goreleaser release --snapshot --clean --parallelism 1 --skip=publish
-# dist/ymz_<snapshot-version>_{os}_{arch}.*
-# dist/ also contains generated cask / scoop drafts when publish runs
-```
-
-### Authenticated download / 私密下载
-
-```bash
-gh auth login
-gh release download v0.1.0 --repo yyZe0122/YunmengZe-Agent
 ```
 
 ## Private-to-public audit checklist / 转公开清单
 
-Complete every item before changing repository visibility.
+- Reachable branch/tag history is intentional; no legacy secrets in history.
+- Secrets, local config, `*.db`, logs, caches untracked (root `.gitignore`).
+- Full tests, `go mod verify`, installer checks, GoReleaser six-platform snapshot.
+- Scan history, Actions logs, release notes, archives, `checksums.txt`.
+- Authorized tester downloads every asset and smoke-tests.
+- Review visibility settings before going public.
 
-更改可见性前完成全部项：
-
-- Every reachable branch/tag starts from the intended sanitized root commit; no legacy history.
-  - 可达分支/标签均始于预期净化根提交，无旧历史。
-- API keys, local config, databases, logs, caches, personal docs, machine paths, editor/agent workspaces are untracked and ignored (see root `.gitignore`).
-  - 密钥、本地配置、库、日志、缓存、个人文档、机器路径、编辑器工作区均未跟踪且已忽略。
-- Full tests, `go mod verify`, installer syntax checks, GoReleaser validation, six-platform snapshot build.
-  - 完整测试、依赖校验、安装脚本语法、GoReleaser、六平台快照构建。
-- Scan reachable Git history, Actions logs/artifacts, release notes, archives, and `checksums.txt` for secrets/PII.
-  - 扫描历史与产物中的密钥与个人数据。
-- Authorized tester downloads every private release asset, verifies checksums, inspects layout, runs smoke checks.
-  - 授权测试员下载并校验每个私密 Release 产物。
-- Replace placeholders, review GitHub settings/permissions, and read [repository visibility docs](https://docs.github.com/repositories/managing-your-repositorys-settings-and-features/managing-repository-settings/setting-repository-visibility) before switching to public.
-  - 替换占位符、复核仓库设置，转公开前阅读 GitHub 可见性文档。
-
-## Linux system install (brief) / 系统安装（摘要）
-
-Machine-wide systemd: extract a Linux release archive, then from the extract dir:
+## Linux system install (brief)
 
 ```bash
 sudo sh packaging/scripts/install.sh .
 sudo install -m 0640 -o root -g ymz \
   configs/agent.json.example /etc/yunmengze/agent.json
-# Optional env file for {env:…} secrets (legacy name; not a Planner process):
-#   /etc/yunmengze/planner.env
 sudo systemctl enable --now ymz
 ```
 
 Details: [`packaging/install/systemd.md`](../packaging/install/systemd.md).
-
-Also see root [README](../README.md) and [v0.1.0 notes](changelog/v0.1.0.md).

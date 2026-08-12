@@ -34,6 +34,10 @@ Dependency edits: `go mod tidy && go mod verify` and keep `go.mod`/`go.sum` clea
 
 Local release matrix: `goreleaser release --snapshot --clean --parallelism 1`.
 
+**Publish (root only on this host):** write `docs/changelog/vX.Y.Z.md` first, then  
+`sudo -i && cd /home/yyze/projects/AutoZeAgent && ./scripts/publish-release.sh vX.Y.Z --commit-paths all --yes`  
+Full runbook: [`docs/release.md`](docs/release.md) — do not invent parallel release steps.
+
 `make check` on Linux also runs `scripts/check-systemd.sh` (no-ops on non-Linux / missing `systemd-analyze`).
 
 ## Layout that matters

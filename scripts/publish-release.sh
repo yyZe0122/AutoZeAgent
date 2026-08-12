@@ -4,18 +4,18 @@
 # Default path: push main/tag (if needed) → local GoReleaser build + upload
 # (does not rely on GitHub Actions minutes / billing).
 #
-# Usage (as root):
-#   export GITHUB_TOKEN=ghp_...    # repo scope; never commit
-#   cd /home/yyze/projects/AutoZeAgent   # or YunmengZe-Agent after local rename
-#   ./scripts/publish-release.sh v0.1.0
-#   ./scripts/publish-release.sh v0.1.0 --commit-paths release
-#   ./scripts/publish-release.sh v0.1.0 --upload-only      # tag already on HEAD
-#   ./scripts/publish-release.sh v0.1.0 --via-actions      # tag push only (needs Actions)
-#   ./scripts/publish-release.sh v0.1.0 --dry-run
+# Usage (as root) — full runbook: docs/release.md
+#   cd /home/yyze/projects/AutoZeAgent
+#   # require docs/changelog/vX.Y.Z.md first
+#   ./scripts/publish-release.sh v0.2.2 --commit-paths all --yes   # dirty tree → commit+push+tag+upload
+#   ./scripts/publish-release.sh v0.2.2                            # clean main → tag+upload
+#   ./scripts/publish-release.sh v0.2.2 --upload-only               # tag already on HEAD
+#   ./scripts/publish-release.sh v0.2.2 --snapshot-only             # no tag
+#   ./scripts/publish-release.sh v0.2.2 --dry-run
 #
-# Requires: git, make, goreleaser.
-#   GITHUB_TOKEN          — local upload of GitHub Release (default path)
-#   PACKAGE_GITHUB_TOKEN  — push Homebrew cask + Scoop manifest (falls back to GITHUB_TOKEN)
+# Requires: git, make, goreleaser; root only (scheme A).
+#   GITHUB_TOKEN or gh auth login  — main Release upload
+#   PACKAGE_GITHUB_TOKEN           — homebrew-tap + scoop-bucket (falls back to GITHUB_TOKEN)
 set -euo pipefail
 
 REPO_DEFAULT="/home/yyze/projects/AutoZeAgent"
