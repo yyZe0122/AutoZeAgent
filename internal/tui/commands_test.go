@@ -50,6 +50,14 @@ func TestHelpTextListsCommands(t *testing.T) {
 	}
 }
 
+func TestPaintKeywordsHighlightsSlash(t *testing.T) {
+	out := paintKeywords("try /new then /skills apply")
+	want := "try " + styleKeyword.Render("/new") + " then " + styleKeyword.Render("/skills") + " apply"
+	if out != want {
+		t.Fatalf("got %q want %q", out, want)
+	}
+}
+
 func TestIsBuiltinSlash(t *testing.T) {
 	if !isBuiltinSlash("/model") || !isBuiltinSlash("/MODEL") {
 		t.Fatal("expected /model builtin")

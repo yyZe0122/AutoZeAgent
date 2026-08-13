@@ -388,7 +388,7 @@ func TestModelListAndCron(t *testing.T) {
 		t.Fatalf("strip=%q", strip)
 	}
 	panel := mm.renderContextPanel(20)
-	for _, want := range []string{"Metrics", "tokens", "budget", "data", "/data/ymz"} {
+	for _, want := range []string{"context", "tokens", "data", "/data/ymz"} {
 		if !strings.Contains(panel, want) {
 			t.Fatalf("panel missing %q:\n%s", want, panel)
 		}

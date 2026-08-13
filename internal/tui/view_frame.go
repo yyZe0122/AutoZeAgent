@@ -17,20 +17,28 @@ func (m model) View() string {
 	}
 
 	header := m.renderHeader()
-	main := m.viewport.View()
+	chat := m.viewport.View()
+	if m.showSessionRail() {
+		rail := m.renderSessionRail(m.viewport.Height)
+		chat = lipgloss.JoinHorizontal(lipgloss.Top,
+			lipgloss.NewStyle().Width(sessionRailWidth).MaxHeight(m.viewport.Height).Render(rail),
+			lipgloss.NewStyle().Foreground(colorBorder).Render("│"),
+			lipgloss.NewStyle().Width(m.viewport.Width).MaxHeight(m.viewport.Height).Render(chat),
+		)
+	}
 	if m.showContextPanel() {
 		ctx := m.renderMetricsPanel(m.viewport.Height)
-		panelW := contextPanelWidth
-		mainW := max(20, width-panelW-4)
-		left := styleBorder.Width(mainW).Height(m.viewport.Height + 2).Render(main)
-		right := styleBorder.Width(panelW).Height(m.viewport.Height + 2).Render(ctx)
-		main = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
-	} else {
-		main = styleBorder.Width(width - 2).Render(main)
+		chat = lipgloss.JoinHorizontal(lipgloss.Top,
+			chat,
+			lipgloss.NewStyle().Foreground(colorBorder).Render("│"),
+			lipgloss.NewStyle().Width(contextPanelWidth).MaxHeight(m.viewport.Height).Render(ctx),
+		)
 	}
 
-	// Floating layers above the input (do not replace viewport content).
 	var floatParts []string
+	if m.helpOpen {
+		floatParts = append(floatParts, m.renderHelpOverlay(width))
+	}
 	if ov := renderPickerOverlay(&m, width); ov != "" {
 		floatParts = append(floatParts, ov)
 	}
@@ -40,66 +48,59 @@ func (m model) View() string {
 		}
 	}
 
-	strip := m.renderContextStrip()
-	status := m.renderStatusLine()
+	footer := m.renderFooter()
 	inputBox := m.renderInputBox(width)
 
-	parts := []string{header, main}
+	parts := []string{header, chat}
 	parts = append(parts, floatParts...)
-	parts = append(parts, strip, status, inputBox)
-	out := lipgloss.JoinVertical(lipgloss.Left, parts...)
-	return zoneScan(out)
+	parts = append(parts, footer, inputBox)
+	return zoneScan(lipgloss.JoinVertical(lipgloss.Left, parts...))
 }
 
 func (m model) renderHeader() string {
-	parts := []string{
-		styleTitle.Render("YunmengZe"),
-		styleDim.Render(string(m.mode)),
-		sseDot(m.sseState) + styleDim.Render(" "+m.sseState),
-	}
+	parts := []string{styleTitle.Render("ymz")}
 	if m.modelName != "" {
 		parts = append(parts, styleMuted.Render(truncate(m.modelName, 28)))
 	}
-	if m.sessionID != "" && m.sessionID != "…" {
-		parts = append(parts, styleDim.Render("s:"+shortID(string(m.sessionID))))
-	}
-	parts = append(parts, styleMuted.Render(string(m.theme)))
-	line := strings.Join(parts, "  ·  ")
+	parts = append(parts, sseDot(m.sseState))
 	if m.task != nil {
-		line += "\n" + styleDim.Render("  ") + shortID(string(m.task.ID)) + " " + stateBadge(m.task.State)
-		if m.task.ExecutionMode != "" {
-			line += "  " + styleDim.Render(m.task.ExecutionMode)
-		}
+		parts = append(parts, styleDim.Render(shortID(string(m.task.ID))), stateBadge(m.task.State))
 	}
-	return line
+	return strings.Join(parts, "  ·  ")
 }
 
 func (m model) renderInputBox(width int) string {
 	modeColor := colorModeAgent
 	modeLabel := "agent"
 	modeStyle := styleModeAgent
-	hint := "Tab · agent (build · read+write)"
 	if m.draftMode == modePlan {
 		modeColor = colorModePlan
 		modeLabel = "plan"
 		modeStyle = styleModePlan
-		hint = "Tab · plan (read-only · no edits)"
 	}
 	busy := ""
 	if m.busy || m.runActivity() == activityActive {
 		busy = " " + styleWarn.Render(m.spinner.View())
 	}
-	innerW := max(20, width-4)
+	innerW := max(20, width-2)
 	m.input.Width = max(10, innerW-4)
-	line1 := styleInput.Render("› ") + m.input.View() + busy
-	line2 := modeStyle.Render(modeLabel+" ▸") + "  " + styleMuted.Render(hint)
-	body := line1 + "\n" + line2
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(modeColor).
-		Padding(0, 1).
-		Width(innerW)
-	return box.Render(body)
+	m.input.PlaceholderStyle = styleMuted
+	if strings.HasPrefix(strings.TrimSpace(m.input.Value()), "/") {
+		m.input.TextStyle = styleKeyword
+	} else {
+		m.input.TextStyle = styleInput
+	}
+	prompt := styleInput.Render("› ")
+	if strings.HasPrefix(strings.TrimSpace(m.input.Value()), "/") {
+		prompt = styleKeyword.Render("› ")
+	}
+	line := prompt + m.input.View() + busy
+	rule := lipgloss.NewStyle().Foreground(modeColor).Render(strings.Repeat("─", max(8, width)))
+	meta := modeStyle.Render(modeLabel)
+	if m.sessionID == "" && m.task == nil && len(m.messages) == 0 {
+		meta += "  " + styleMuted.Render("Tab mode · type to start")
+	}
+	return rule + "\n" + line + "\n" + meta
 }
 
 func (m model) renderContextStrip() string {
@@ -108,13 +109,11 @@ func (m model) renderContextStrip() string {
 		width = 40
 	}
 	parts := []string{}
-
 	modelName := m.modelName
 	if modelName == "" {
 		modelName = "—"
 	}
 	parts = append(parts, modelName)
-
 	cwd := m.cwd
 	if cwd == "" {
 		cwd = "—"
@@ -131,14 +130,19 @@ func (m model) renderContextStrip() string {
 	parts = append(parts, ctxPart)
 
 	active := m.runActivity() == activityActive
-	wave := styleHeart.Render(heartbeatWave(active, m.animFrame))
+	pulse := heartbeatWave(active, m.animFrame)
+	if active {
+		pulse = styleHeart.Render(pulse)
+	} else {
+		pulse = styleMuted.Render(pulse)
+	}
 	label := m.activityLabel()
 	if active {
 		if el := formatDuration(m.activityElapsed()); el != "" {
 			label += " " + el
 		}
 	}
-	parts = append(parts, wave+" "+label)
+	parts = append(parts, pulse+" "+label)
 
 	if !m.showContextPanel() {
 		if used, maxTok, ok := m.metrics().TaskTokenUsage(); ok {
@@ -149,13 +153,44 @@ func (m model) renderContextStrip() string {
 			}
 		}
 	}
-
 	return styleStatus.Render(truncate(strings.Join(parts, "  ·  "), width))
+}
+
+func (m model) renderFooter() string {
+	width := m.width - 2
+	if width < 20 {
+		width = 40
+	}
+	if m.errMsg != "" {
+		return styleError.Render(truncate(m.errMsg, width))
+	}
+	if m.pendingPermCount > 0 {
+		line := fmt.Sprintf("%d tool permission(s) pending · 1–4 decide · /perm", m.pendingPermCount)
+		if m.statusMsg != "" {
+			line = m.statusMsg
+			if idx := strings.IndexByte(line, '\n'); idx >= 0 {
+				line = line[:idx] + "…"
+			}
+		}
+		return styleError.Render(truncate(line, width))
+	}
+	if m.statusMsg != "" && m.statusMsg != "daemon ok" {
+		line := m.statusMsg
+		if idx := strings.IndexByte(line, '\n'); idx >= 0 {
+			line = line[:idx] + "…"
+		}
+		return styleStatus.Render(truncate(line, width))
+	}
+	return m.renderContextStrip()
+}
+
+func (m model) renderStatusLine() string {
+	return m.renderFooter()
 }
 
 func (m model) renderMetricsPanel(height int) string {
 	var b strings.Builder
-	b.WriteString(styleMetricsTitle.Render("Metrics") + "\n\n")
+	b.WriteString(styleMetricsTitle.Render("context") + "\n\n")
 
 	b.WriteString(stylePanelLabel.Render("tokens") + "\n")
 	if used, maxTok, ok := m.metrics().TaskTokenUsage(); ok {
@@ -190,24 +225,18 @@ func (m model) renderMetricsPanel(height int) string {
 		}
 		b.WriteString("\n")
 	}
-	b.WriteString("\n")
 
-	b.WriteString(stylePanelLabel.Render("budget") + "\n")
 	if summary := m.budgetSummary(); summary != "" {
+		b.WriteString("\n")
+		b.WriteString(stylePanelLabel.Render("budget") + "\n")
 		b.WriteString("  " + summary + "\n")
-	} else {
-		b.WriteString(styleDim.Render("  —") + "\n")
 	}
-	b.WriteString("\n")
-
-	b.WriteString(stylePanelLabel.Render("data") + "\n")
 	if m.dataDir != "" {
+		b.WriteString("\n")
+		b.WriteString(stylePanelLabel.Render("data") + "\n")
 		b.WriteString("  " + truncate(m.dataDir, 36) + "\n")
-	} else {
-		b.WriteString(styleDim.Render("  —") + "\n")
 	}
 
-	// cache / MCP only when daemon surfaces real data (no permanent "—" placeholders).
 	if rate, ok := m.metrics().CacheHitRate(); ok {
 		b.WriteString("\n")
 		b.WriteString(stylePanelLabel.Render("cache") + "\n")
@@ -247,43 +276,19 @@ func (m model) budgetSummary() string {
 	return fmt.Sprintf("tok=%d cost_µ=%d dur_ms=%d", b.MaxTokens, b.MaxCostMicros, b.MaxDurationMillis)
 }
 
-func (m model) renderStatusLine() string {
-	width := m.width - 4
-	if width < 20 {
-		width = 40
+func (m model) renderHelpOverlay(width int) string {
+	text := strings.TrimSpace(helpText())
+	lines := strings.Split(text, "\n")
+	if len(lines) > helpOverlayMax {
+		lines = append(lines[:helpOverlayMax], styleMuted.Render("… Esc to close"))
+		text = strings.Join(lines, "\n")
 	}
-	if m.errMsg != "" {
-		return styleError.Render(truncate(m.errMsg, width))
-	}
-	if m.pendingPermCount > 0 {
-		line := fmt.Sprintf("%d tool permission(s) pending · 1–4 decide · /perm", m.pendingPermCount)
-		if m.statusMsg != "" {
-			line = m.statusMsg
-			if idx := strings.IndexByte(line, '\n'); idx >= 0 {
-				line = line[:idx] + "…"
-			}
-		}
-		return styleError.Render(truncate(line, width))
-	}
-	if m.statusMsg != "" {
-		line := m.statusMsg
-		if idx := strings.IndexByte(line, '\n'); idx >= 0 {
-			line = line[:idx] + "…"
-		}
-		return styleStatus.Render(truncate(line, width))
-	}
-	return styleStatus.Render("Tab mode · e expand · /help · /skills · /perm · /journey · PgUp")
+	boxW := max(40, width-2)
+	return styleHelpBox.Width(boxW).Render(text)
 }
 
-// syncViewport rebuilds the main conversation content.
-// force=true skips the content-equality short-circuit (resize/help/theme).
 func (m *model) syncViewport(force bool) {
-	var content string
-	if m.helpOpen {
-		content = styleHelpBox.Width(max(40, m.width-8)).Render(strings.TrimSpace(helpText()))
-	} else {
-		content = renderSessionView(m)
-	}
+	content := renderSessionView(m)
 	if !force && content == m.viewportContent {
 		if m.stickBottom {
 			m.viewport.GotoBottom()

@@ -65,7 +65,7 @@ func TestLoadThemeMissingDefaultsNight(t *testing.T) {
 
 func TestHeartbeatWave(t *testing.T) {
 	idle := heartbeatWave(false, 0)
-	if idle != "────────" {
+	if idle != "·" {
 		t.Fatalf("idle = %q", idle)
 	}
 	a := heartbeatWave(true, 0)
@@ -73,8 +73,8 @@ func TestHeartbeatWave(t *testing.T) {
 	if a == b {
 		t.Fatalf("active frames should differ: %q %q", a, b)
 	}
-	if len([]rune(a)) != 8 {
-		t.Fatalf("width = %d", len([]rune(a)))
+	if a != "●" && a != "◉" {
+		t.Fatalf("active glyph = %q", a)
 	}
 }
 

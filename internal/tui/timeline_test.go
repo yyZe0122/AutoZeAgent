@@ -41,7 +41,7 @@ func TestBuildTimelineOrder(t *testing.T) {
 		t.Fatalf("kinds = %s", joined)
 	}
 	text := renderTimeline(items)
-	if !strings.Contains(text, "you") || !strings.Contains(text, "all good") {
+	if !strings.Contains(text, "carefully") || !strings.Contains(text, "all good") {
 		t.Fatalf("render = %s", text)
 	}
 }
@@ -121,12 +121,12 @@ func TestDoneBanner(t *testing.T) {
 		Kind: tlDone, Title: "done · idle", State: gatewayclient.TaskStateCompleted,
 	}}
 	out := renderTimeline(items)
-	if !strings.Contains(out, "done") || !strings.Contains(out, "═") {
+	if !strings.Contains(out, "done") || !strings.Contains(out, "─") {
 		t.Fatalf("render = %s", out)
 	}
 }
 
-func TestBubbleCardsHaveBorder(t *testing.T) {
+func TestMessageRenderFlattened(t *testing.T) {
 	items := []timelineItem{
 		{Kind: tlUser, Title: "you", Body: "hello there"},
 		{Kind: tlRun, Title: "assistant", Blocks: []contentBlock{
@@ -134,12 +134,11 @@ func TestBubbleCardsHaveBorder(t *testing.T) {
 		}},
 	}
 	out := renderTimeline(items)
-	// Rounded border uses ╭╮╰╯ or unicode box corners depending on lipgloss.
-	if !strings.Contains(out, "you") || !strings.Contains(out, "hello") {
-		t.Fatalf("user bubble missing: %s", out)
+	if !strings.Contains(out, "hello") {
+		t.Fatalf("user message missing: %s", out)
 	}
-	if !strings.Contains(out, "assistant") {
-		t.Fatalf("assistant bubble missing: %s", out)
+	if !strings.Contains(out, "hi back") {
+		t.Fatalf("assistant reply missing: %s", out)
 	}
 }
 

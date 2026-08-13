@@ -78,34 +78,74 @@ func skillSlashName(id string) string {
 
 func helpText() string {
 	var b strings.Builder
-	b.WriteString("Commands\n")
+	b.WriteString(styleTitle.Render("Commands") + "\n")
 	for _, cmd := range slashCommands {
 		b.WriteString("  ")
-		b.WriteString(cmd.Help)
+		b.WriteString(paintKeywords(cmd.Help))
 		b.WriteByte('\n')
 	}
-	b.WriteString("\nKeys\n")
-	b.WriteString("  Tab            complete slash, else toggle agent↔plan mode\n")
-	b.WriteString("  Shift+Tab      toggle agent↔plan mode\n")
+	b.WriteString("\n")
+	b.WriteString(styleTitle.Render("Keys") + "\n")
+	b.WriteString("  " + styleKeyword.Render("Tab") + "            complete slash, else toggle agent↔plan mode\n")
+	b.WriteString("  " + styleKeyword.Render("Shift+Tab") + "      toggle agent↔plan mode\n")
 	b.WriteString("  ↑↓             picker / completer / history (not chat)\n")
-	b.WriteString("  PgUp/PgDn      always scroll conversation\n")
-	b.WriteString("  e / E / c      expand last foldable · expand all · collapse (empty input)\n")
-	b.WriteString("  Enter          complete slash once, then execute; open picker item\n")
-	b.WriteString("  Esc            close picker / completer / clear input\n")
-	b.WriteString("  Ctrl+C         clear input (exit via /quit only)\n")
-	b.WriteString("\nModes (input border + chip)\n")
-	b.WriteString("  agent  multi-turn chat + workspace tools (build/write)\n")
-	b.WriteString("  plan   multi-turn chat + workspace tools (read-only)\n")
-	b.WriteString("\nChat\n")
+	b.WriteString("  " + styleKeyword.Render("PgUp") + "/" + styleKeyword.Render("PgDn") + "      always scroll conversation\n")
+	b.WriteString("  " + styleKeyword.Render("e") + " / " + styleKeyword.Render("E") + " / " + styleKeyword.Render("c") + "      expand last foldable · expand all · collapse (empty input)\n")
+	b.WriteString("  " + styleKeyword.Render("Enter") + "          complete slash once, then execute; open picker item\n")
+	b.WriteString("  " + styleKeyword.Render("Esc") + "            close picker / completer / help / clear input\n")
+	b.WriteString("  " + styleKeyword.Render("Ctrl+C") + "         clear input (exit via /quit only)\n")
+	b.WriteString("\n")
+	b.WriteString(styleTitle.Render("Modes") + styleDim.Render(" (input rule color)") + "\n")
+	b.WriteString("  " + styleModeAgent.Render("agent") + "  multi-turn chat + workspace tools (build/write)\n")
+	b.WriteString("  " + styleModePlan.Render("plan") + "   multi-turn chat + workspace tools (read-only)\n")
+	b.WriteString("\n")
+	b.WriteString(styleTitle.Render("Chat") + "\n")
 	b.WriteString("  Plain text continues the current session (or starts one).\n")
-	b.WriteString("  /new always opens a fresh session. Tab sets agent|plan mode.\n")
-	b.WriteString("  /skills preloads instruction skills for the next submit (explicit snapshot).\n")
-	b.WriteString("  Other skills: model calls skills_list then skill_view. /<skill-id> toggles preload.\n")
-	b.WriteString("  chat.commands templates: /<cmd> [args] expand $ARGUMENTS and submit (instruction only).\n")
+	b.WriteString("  " + paintKeywords("/new always opens a fresh session. Tab sets agent|plan mode.") + "\n")
+	b.WriteString("  " + paintKeywords("/skills preloads instruction skills for the next submit (explicit snapshot).") + "\n")
+	b.WriteString("  Other skills: model calls skills_list then skill_view. " + paintKeywords("/<skill-id>") + " toggles preload.\n")
+	b.WriteString("  chat.commands templates: " + paintKeywords("/<cmd>") + " [args] expand $ARGUMENTS and submit (instruction only).\n")
 	b.WriteString("  Priority: built-in > chat.commands > skill ids.\n")
-	b.WriteString("  /perm opens pending tool permissions when chat.permission.mode=ask.\n")
-	b.WriteString("  /retry resubmits the last user message on the focused session.\n")
+	b.WriteString("  " + paintKeywords("/perm opens pending tool permissions when chat.permission.mode=ask.") + "\n")
+	b.WriteString("  " + paintKeywords("/retry resubmits the last user message on the focused session.") + "\n")
 	return b.String()
+}
+
+func paintKeywords(s string) string {
+	var b strings.Builder
+	runes := []rune(s)
+	for i := 0; i < len(runes); {
+		if runes[i] == '/' && (i == 0 || !slashNameRune(runes[i-1])) {
+			j := i + 1
+			if j < len(runes) && runes[j] == '<' {
+				for j < len(runes) && runes[j] != '>' {
+					j++
+				}
+				if j < len(runes) {
+					j++
+				}
+				b.WriteString(styleKeyword.Render(string(runes[i:j])))
+				i = j
+				continue
+			}
+			for j < len(runes) && slashNameRune(runes[j]) {
+				j++
+			}
+			if j > i+1 {
+				b.WriteString(styleKeyword.Render(string(runes[i:j])))
+				i = j
+				continue
+			}
+		}
+		b.WriteRune(runes[i])
+		i++
+	}
+	return b.String()
+}
+
+func slashNameRune(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+		(r >= '0' && r <= '9') || r == '-' || r == '_'
 }
 
 func parseSlash(line string) (name, arg string) {

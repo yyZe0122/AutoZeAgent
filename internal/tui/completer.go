@@ -216,11 +216,12 @@ func (c *completer) render(max int) string {
 	var b strings.Builder
 	for i := start; i < end; i++ {
 		cmd := c.items[i]
-		line := cmd.Name + "  " + cmd.Desc
+		name := styleKeyword.Render(cmd.Name)
+		desc := styleDim.Render(cmd.Desc)
 		if i == c.cursor {
-			b.WriteString(styleCompSel.Render("› " + line))
+			b.WriteString(styleCompSel.Render("› ") + styleKeyword.Render(cmd.Name) + "  " + desc)
 		} else {
-			b.WriteString(styleComp.Render("  " + line))
+			b.WriteString("  " + name + "  " + desc)
 		}
 		if i < end-1 {
 			b.WriteByte('\n')

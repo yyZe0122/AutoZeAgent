@@ -45,8 +45,11 @@ const (
 	commandTimeout    = 30 * time.Second
 	historyLimit      = 50
 	contextBreakWidth = 100
-	contextPanelWidth = 30
+	contextPanelWidth = 26
+	sessionRailBreak  = 120
+	sessionRailWidth  = 22
 	overlayMaxLines   = 10
+	helpOverlayMax    = 14
 	// timeline body defaults (fold large run results).
 	timelineBodyMaxLines = 12
 	timelineBodyMaxChars = 2400
@@ -303,6 +306,8 @@ func (m *model) toggleDraftMode() {
 }
 
 func (m *model) applyPlaceholder() {
+	m.input.PlaceholderStyle = styleMuted
+	m.input.TextStyle = styleInput
 	if m.draftMode == modePlan {
 		m.input.Placeholder = "plan mode · read-only analysis (no edits)"
 	} else {

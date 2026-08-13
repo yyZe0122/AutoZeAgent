@@ -38,6 +38,7 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEsc:
 		if m.helpOpen {
 			m.helpOpen = false
+			m.layout()
 			m.syncViewport(true)
 			return m, nil
 		}
@@ -100,7 +101,6 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyRunes:
-		// Expand hotkeys when input empty and no picker (e / E / c).
 		if m.list == listNone && !m.completer.visible && !m.helpOpen &&
 			strings.TrimSpace(m.input.Value()) == "" && len(msg.Runes) == 1 {
 			switch msg.Runes[0] {
@@ -348,12 +348,8 @@ func (m *model) historyNext() {
 }
 
 func (m *model) layout() {
-	header := 2
-	if m.task != nil {
-		header = 3
-	}
-	// strip + status + input box (2 lines + border)
-	footer := 6
+	header := 1
+	footer := 4
 	if m.completer.visible {
 		footer += min(6, len(m.completer.items)) + 2
 	}
@@ -361,13 +357,19 @@ func (m *model) layout() {
 		n := min(overlayMaxLines, max(1, m.listLen()))
 		footer += n + 3
 	}
+	if m.helpOpen {
+		footer += helpOverlayMax + 2
+	}
 	h := m.height - header - footer
 	if h < 5 {
 		h = 5
 	}
-	w := m.width - 4
+	w := m.width - 1
+	if m.showSessionRail() {
+		w -= sessionRailWidth + 1
+	}
 	if m.showContextPanel() {
-		w = m.width - contextPanelWidth - 6
+		w -= contextPanelWidth + 1
 	}
 	if w < 20 {
 		w = 20
@@ -379,6 +381,10 @@ func (m *model) layout() {
 
 func (m *model) showContextPanel() bool {
 	return m.width >= contextBreakWidth
+}
+
+func (m *model) showSessionRail() bool {
+	return m.width >= sessionRailBreak
 }
 
 func (m *model) needsRunPoll() bool {

@@ -36,59 +36,62 @@ type Theme struct {
 	Title     lipgloss.Color
 	Surface   lipgloss.Color
 	Heart     lipgloss.Color
-	ModeAgent lipgloss.Color // input border / chip for agent (build) mode
-	ModePlan  lipgloss.Color // input border / chip for plan mode
-	Thinking  lipgloss.Color // thinking block chrome
-	Tool      lipgloss.Color // tool call / result chrome
-	Reply     lipgloss.Color // final assistant reply body
-	Journey   lipgloss.Color // memory/skill journey rows
-	Done      lipgloss.Color // turn-complete banner
+	ModeAgent lipgloss.Color
+	ModePlan  lipgloss.Color
+	Thinking  lipgloss.Color
+	Tool      lipgloss.Color
+	Reply     lipgloss.Color
+	Journey   lipgloss.Color
+	Done      lipgloss.Color
+	Keyword   lipgloss.Color
 }
 
-// Day: gold + marble.
+// Day: 泽昼 — moon-white paper, deep mist-teal, cinnabar seal.
 var dayTheme = Theme{
 	Name:      ThemeDay,
-	Accent:    lipgloss.Color("#C9A227"),
-	Dim:       lipgloss.Color("#6B5E4E"),
-	Muted:     lipgloss.Color("#A89880"),
-	Border:    lipgloss.Color("#C4B8A8"),
-	OK:        lipgloss.Color("#2F6B4F"),
-	Warn:      lipgloss.Color("#B8860B"),
-	Err:       lipgloss.Color("#A63D2F"),
-	Input:     lipgloss.Color("#2C2416"),
-	Title:     lipgloss.Color("#3D2E1A"),
-	Surface:   lipgloss.Color("#F5F0E6"),
-	Heart:     lipgloss.Color("#E85A8C"),
-	ModeAgent: lipgloss.Color("#2F6B4F"),
-	ModePlan:  lipgloss.Color("#C9A227"),
-	Thinking:  lipgloss.Color("#8B7B6B"),
-	Tool:      lipgloss.Color("#3D6B8A"),
-	Reply:     lipgloss.Color("#2C2416"),
-	Journey:   lipgloss.Color("#6B5B8A"),
-	Done:      lipgloss.Color("#2F6B4F"),
+	Accent:    lipgloss.Color("#2F6B62"),
+	Dim:       lipgloss.Color("#4A4F48"),
+	Muted:     lipgloss.Color("#7A8078"),
+	Border:    lipgloss.Color("#C4C8BC"),
+	OK:        lipgloss.Color("#2A5A40"),
+	Warn:      lipgloss.Color("#8A6418"),
+	Err:       lipgloss.Color("#8B3A30"),
+	Input:     lipgloss.Color("#161814"),
+	Title:     lipgloss.Color("#161814"),
+	Surface:   lipgloss.Color("#E6E8E2"),
+	Heart:     lipgloss.Color("#B8322C"),
+	ModeAgent: lipgloss.Color("#2F6B62"),
+	ModePlan:  lipgloss.Color("#8A6418"),
+	Thinking:  lipgloss.Color("#5A5C56"),
+	Tool:      lipgloss.Color("#3A524E"),
+	Reply:     lipgloss.Color("#161814"),
+	Journey:   lipgloss.Color("#4A444C"),
+	Done:      lipgloss.Color("#1A7A58"),
+	Keyword:   lipgloss.Color("#A56B12"),
 }
 
-// Night: near-white accent + dark separators.
+// Night: 泽夜 — xuan ink, mist teal, reed gold; Heart/Done are the seal.
 var nightTheme = Theme{
 	Name:      ThemeNight,
-	Accent:    lipgloss.Color("#E8E8E8"),
-	Dim:       lipgloss.Color("#9A9A9A"),
-	Muted:     lipgloss.Color("#5A5A5A"),
-	Border:    lipgloss.Color("#3A3A3A"),
-	OK:        lipgloss.Color("#5ECF8A"),
-	Warn:      lipgloss.Color("#E0B040"),
-	Err:       lipgloss.Color("#FF6B6B"),
-	Input:     lipgloss.Color("#F0F0F0"),
-	Title:     lipgloss.Color("#FFFFFF"),
-	Surface:   lipgloss.Color("#121212"),
-	Heart:     lipgloss.Color("#FF6B9D"),
-	ModeAgent: lipgloss.Color("#3DDC97"),
-	ModePlan:  lipgloss.Color("#E0B040"),
-	Thinking:  lipgloss.Color("#7A7A9A"),
-	Tool:      lipgloss.Color("#6AB0E0"),
-	Reply:     lipgloss.Color("#E8E8E8"),
-	Journey:   lipgloss.Color("#B08AE0"),
-	Done:      lipgloss.Color("#5ECF8A"),
+	Accent:    lipgloss.Color("#9EC9B8"),
+	Dim:       lipgloss.Color("#B4BAAF"),
+	Muted:     lipgloss.Color("#7A8278"),
+	Border:    lipgloss.Color("#2C3228"),
+	OK:        lipgloss.Color("#7AAD90"),
+	Warn:      lipgloss.Color("#D4B46A"),
+	Err:       lipgloss.Color("#D07060"),
+	Input:     lipgloss.Color("#F4F5EE"),
+	Title:     lipgloss.Color("#F4F5EE"),
+	Surface:   lipgloss.Color("#121410"),
+	Heart:     lipgloss.Color("#C73E3A"),
+	ModeAgent: lipgloss.Color("#9EC9B8"),
+	ModePlan:  lipgloss.Color("#D4B46A"),
+	Thinking:  lipgloss.Color("#8A9094"),
+	Tool:      lipgloss.Color("#8AA098"),
+	Reply:     lipgloss.Color("#F4F5EE"),
+	Journey:   lipgloss.Color("#9A8E9C"),
+	Done:      lipgloss.Color("#3AA88A"),
+	Keyword:   lipgloss.Color("#F0D78A"),
 }
 
 type tuiPrefs struct {
@@ -131,27 +134,24 @@ func applyTheme(t Theme) {
 	colorBubbleAssistant = t.OK
 	colorBubbleThinking = t.Thinking
 	colorBubbleTool = t.Tool
+	colorKeyword = t.Keyword
 
 	styleTitle = lipgloss.NewStyle().Bold(true).Foreground(colorTitle)
 	styleDim = lipgloss.NewStyle().Foreground(colorDim)
 	styleMuted = lipgloss.NewStyle().Foreground(colorMuted)
-	styleTabOn = lipgloss.NewStyle().Bold(true).Foreground(colorAccent).Underline(true)
-	styleTabOff = lipgloss.NewStyle().Foreground(colorDim)
 	styleError = lipgloss.NewStyle().Foreground(colorErr)
 	styleOK = lipgloss.NewStyle().Foreground(colorOK)
 	styleWarn = lipgloss.NewStyle().Foreground(colorWarn)
 	styleBadge = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
-	styleHeader = lipgloss.NewStyle().Bold(true).Padding(0, 1).Foreground(colorTitle)
-	styleBorder = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorBorder).Padding(0, 1)
 	styleStatus = lipgloss.NewStyle().Foreground(colorDim)
 	styleInput = lipgloss.NewStyle().Foreground(colorInput)
-	styleCompSel = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	styleKeyword = lipgloss.NewStyle().Foreground(colorKeyword).Bold(true)
+	styleCompSel = lipgloss.NewStyle().Foreground(colorKeyword).Bold(true)
 	styleComp = lipgloss.NewStyle().Foreground(colorDim)
-	styleHelpBox = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorAccent).Padding(0, 1)
+	styleHelpBox = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorAccent).Background(colorSurface).Padding(0, 1)
 	styleRiskHi = lipgloss.NewStyle().Foreground(colorErr).Bold(true)
 	styleRiskMed = lipgloss.NewStyle().Foreground(colorWarn)
 	styleRiskLo = lipgloss.NewStyle().Foreground(colorOK)
-	styleOverlay = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorWarn).Padding(0, 1)
 	styleTLUser = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 	styleTLSys = lipgloss.NewStyle().Foreground(colorDim)
 	styleTLPlan = lipgloss.NewStyle().Foreground(colorWarn)
@@ -168,7 +168,7 @@ func applyTheme(t Theme) {
 	stylePanelLabel = lipgloss.NewStyle().Foreground(colorMuted)
 	styleModeAgent = lipgloss.NewStyle().Foreground(colorModeAgent).Bold(true)
 	styleModePlan = lipgloss.NewStyle().Foreground(colorModePlan).Bold(true)
-	stylePickerBox = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorAccent).Padding(0, 1)
+	stylePickerBox = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorAccent).Background(colorSurface).Padding(0, 1)
 }
 
 func tuiPrefsPath(mode paths.Mode) (string, error) {

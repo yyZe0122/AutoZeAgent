@@ -121,7 +121,7 @@ func (m model) applyCommand(msg commandDoneMsg) (tea.Model, tea.Cmd) {
 		m.helpOpen = true
 		m.statusMsg = ""
 		m.errMsg = ""
-		m.syncViewport(true)
+		m.layout()
 		return m, nil
 	}
 	if msg.toggleTheme {

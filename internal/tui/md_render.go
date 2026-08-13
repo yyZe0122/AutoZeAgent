@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/glamour/ansi"
 	"github.com/charmbracelet/glamour/styles"
 )
 
@@ -59,16 +60,12 @@ func renderMarkdown(src string, width int, theme ThemeName) string {
 	if !looksLikeMarkdown(src) {
 		return src
 	}
-	styleName := styles.DarkStyle
-	if theme == ThemeDay {
-		styleName = styles.LightStyle
-	}
 	key := mdCacheKey(src, width, string(theme))
 	if out, ok := mdCacheGet(key); ok {
 		return out
 	}
 	r, err := glamour.NewTermRenderer(
-		glamour.WithStandardStyle(styleName),
+		glamour.WithStyles(mdStyle(theme)),
 		glamour.WithWordWrap(width),
 	)
 	if err != nil {
@@ -195,3 +192,30 @@ func liveMDPut(e liveMDEntry) {
 	}
 	liveMDCache = append(liveMDCache, e)
 }
+
+func mdStyle(theme ThemeName) ansi.StyleConfig {
+	if theme == ThemeDay {
+		s := styles.LightStyleConfig
+		s.Document.Color = mdStr("#161814")
+		s.Heading.Color = mdStr("#2F6B62")
+		s.H1.Color = mdStr("#161814")
+		s.H1.BackgroundColor = mdStr("#E6E8E2")
+		s.Link.Color = mdStr("#2F6B62")
+		s.LinkText.Color = mdStr("#2F6B62")
+		s.Code.Color = mdStr("#A56B12")
+		s.Code.BackgroundColor = mdStr("#DDE0D6")
+		return s
+	}
+	s := styles.DarkStyleConfig
+	s.Document.Color = mdStr("#F4F5EE")
+	s.Heading.Color = mdStr("#F0D78A")
+	s.H1.Color = mdStr("#F4F5EE")
+	s.H1.BackgroundColor = mdStr("#121410")
+	s.Link.Color = mdStr("#9EC9B8")
+	s.LinkText.Color = mdStr("#9EC9B8")
+	s.Code.Color = mdStr("#F0D78A")
+	s.Code.BackgroundColor = mdStr("#1A1E18")
+	return s
+}
+
+func mdStr(s string) *string { return &s }

@@ -359,24 +359,9 @@ func (m *model) listEnter() tea.Cmd {
 		m.errMsg = ""
 		return nil
 	case listSessions:
-		if m.selectedIdx < 0 || m.selectedIdx >= len(m.sessions) {
-			return nil
-		}
-		s := m.sessions[m.selectedIdx]
-		m.sessionID = s.ID
-		if s.LatestTaskID != nil {
-			m.task = &gatewayclient.Task{ID: *s.LatestTaskID}
-		} else {
-			m.task = nil
-		}
+		cmd := m.focusSessionAt(m.selectedIdx)
 		m.closeList()
-		m.planID = ""
-		m.plan = nil
-		m.runs = nil
-		m.messages = nil
-		m.viewportContent = ""
-		m.stickBottom = true
-		return m.scheduleRefresh(refreshFull)
+		return cmd
 	case listTasks:
 		if m.selectedIdx < 0 || m.selectedIdx >= len(m.tasks) {
 			return nil
@@ -424,6 +409,26 @@ func (m *model) listEnter() tea.Cmd {
 	default:
 		return nil
 	}
+}
+
+func (m *model) focusSessionAt(i int) tea.Cmd {
+	if i < 0 || i >= len(m.sessions) {
+		return nil
+	}
+	s := m.sessions[i]
+	m.sessionID = s.ID
+	if s.LatestTaskID != nil {
+		m.task = &gatewayclient.Task{ID: *s.LatestTaskID}
+	} else {
+		m.task = nil
+	}
+	m.planID = ""
+	m.plan = nil
+	m.runs = nil
+	m.messages = nil
+	m.viewportContent = ""
+	m.stickBottom = true
+	return m.scheduleRefresh(refreshFull)
 }
 
 func formatJobDetail(job schedulerapi.Job) string {

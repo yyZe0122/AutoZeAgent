@@ -272,7 +272,7 @@ func renderTimelineUncached(items []timelineItem, exp expandState, opts renderOp
 	for i, item := range items {
 		b.WriteString(renderTimelineItem(item, exp, opts))
 		if i < len(items)-1 {
-			b.WriteString("\n")
+			b.WriteString("\n\n")
 		}
 	}
 	return b.String()
@@ -312,53 +312,33 @@ func renderTimelineItem(item timelineItem, exp expandState, opts renderOpts) str
 		return strings.TrimRight(b.String(), "\n")
 	}
 
-	// User / assistant / tool → bubble cards.
 	if len(item.Blocks) > 0 {
 		var parts []string
-		// Assistant title chip when streaming.
-		if item.Kind == tlRun && item.State == "streaming" {
-			parts = append(parts, styleTLRun.Render("◌ assistant · streaming"))
-		}
 		for _, bl := range item.Blocks {
 			parts = append(parts, renderBlock(bl, exp, opts, item.Kind))
 		}
 		return strings.Join(parts, "\n")
 	}
 
-	// Simple body rows as bubbles.
-	title := item.Title
-	border := colorBorder
-	titleStyle := styleTLSys
-	bodyStyle := styleTLBody
-	switch item.Kind {
-	case tlUser:
-		if title == "" {
-			title = "you"
-		}
-		title = "▸ " + title
-		border = colorBubbleUser
-		titleStyle = styleTLUser
-		bodyStyle = styleTLReply
-	case tlRun:
-		if title == "" {
-			title = "assistant"
-		}
-		title = "● " + title
-		border = colorBubbleAssistant
-		titleStyle = styleTLRun
-		bodyStyle = styleTLReply
-	case tlTool:
-		title = "⚙ " + title
-		border = colorBubbleTool
-		titleStyle = styleTLTool
-	}
 	text := item.Body
 	if item.Key != "" && !exp.open(item.Key) && needsFold(text, timelineBodyMaxLines, timelineBodyMaxChars) {
 		text = foldHead(text, timelineBodyMaxLines, timelineBodyMaxChars)
 	} else if item.Key == "" {
 		text = foldHead(text, timelineBodyMaxLines, timelineBodyMaxChars)
 	}
-	return renderBubbleCard(title, text, border, titleStyle, bodyStyle, w, item.Key)
+	switch item.Kind {
+	case tlUser:
+		return renderLeftBar(text, colorBubbleUser, w, item.Key)
+	case tlRun:
+		return renderPlainBlock(text, styleTLReply, w, item.Key)
+	case tlTool:
+		title := item.Title
+		if title == "" {
+			title = "tool"
+		}
+		return styleTLTool.Render(blockTitleTool(title, text))
+	}
+	return renderPlainBlock(text, styleTLBody, w, item.Key)
 }
 
 func itemChrome(item timelineItem) (prefix string, titleStyle lipgloss.Style) {
@@ -400,15 +380,18 @@ func renderBlock(bl contentBlock, exp expandState, opts renderOpts, parent timel
 			}
 		}
 		title := blockTitleThinking(lines, folded, bl.Live)
-		body := text
-		if folded {
-			body = styleDim.Render(fmt.Sprintf("%d lines collapsed · press e or click", lines))
+		if folded || text == "" {
+			line := styleTLThinking.Render(title)
+			if folded {
+				line += "  " + styleDim.Render(fmt.Sprintf("%d lines collapsed · press e or click", lines))
+			}
+			return zoneMark(bl.Key, line)
 		}
-		return renderBubbleCard(title, body, colorBubbleThinking, styleTLThinking, styleDim, w, bl.Key)
+		body := styleTLThinking.Render(title) + "\n" + styleDim.Render(wrapBody(text, max(12, w-2)))
+		return renderLeftBar(body, colorBubbleThinking, w, bl.Key)
 
 	case blockToolCall:
-		title := blockTitleTool(bl.ToolName, bl.Text)
-		return renderBubbleCard(title, "", colorBubbleTool, styleTLTool, styleDim, w, bl.Key)
+		return zoneMark(bl.Key, styleTLTool.Render(blockTitleTool(bl.ToolName, bl.Text)))
 
 	case blockToolResult:
 		text := bl.Text
@@ -422,53 +405,47 @@ func renderBlock(bl contentBlock, exp expandState, opts renderOpts, parent timel
 		if !open && needsFold(text, toolResultMaxLines, toolResultMaxChars) {
 			n := lineCount(text)
 			preview := firstLine(text)
-			body := fmt.Sprintf("%d lines · e expand", n)
+			line := styleTLTool.Render("· " + label + " · " + fmt.Sprintf("%d lines · e expand", n))
 			if preview != "" {
-				body += "\n" + truncate(preview, 80)
+				line += "\n" + styleDim.Render("  "+truncate(preview, 80))
 			}
-			return renderBubbleCard("└ "+label, body, colorBubbleTool, styleTLTool, styleDim, w, bl.Key)
+			return zoneMark(bl.Key, line)
 		}
 		body := text
 		if !open {
 			body = foldHead(text, toolResultMaxLines, toolResultMaxChars)
 		}
-		return renderBubbleCard("└ "+label, body, colorBubbleTool, styleTLTool, styleDim, w, bl.Key)
+		head := styleTLTool.Render("· " + label)
+		return zoneMark(bl.Key, head+"\n"+styleDim.Render(wrapBody(body, max(12, w-2))))
 
 	case blockReply:
 		text := bl.Text
-		// Strip live cursor for fold metrics.
 		plain := strings.TrimSuffix(text, "▌")
 		if !open && needsFold(plain, timelineBodyMaxLines, timelineBodyMaxChars) {
 			text = foldHead(text, timelineBodyMaxLines, timelineBodyMaxChars)
-		} else if plain != "" {
-			innerW := w - 4
+			return renderPlainBlock(text, styleTLReply, w, bl.Key)
+		}
+		if plain != "" {
+			innerW := w
 			var md string
 			if bl.Live {
 				md = renderLiveMarkdown(plain, innerW, opts.Theme, bl.Key)
 			} else {
 				md = renderMarkdown(plain, innerW, opts.Theme)
 			}
-			title := "● assistant"
-			if bl.Live {
-				title = "◌ assistant"
-			}
 			if bl.Live && md == plain {
-				return renderBubbleCard(title, text, colorBubbleAssistant, styleTLRun, styleTLReply, w, bl.Key)
+				return renderPlainBlock(text, styleTLReply, w, bl.Key)
 			}
-			return renderBubbleCard(title, md, colorBubbleAssistant, styleTLRun, styleTLReply, w, bl.Key)
+			return renderPlainBlock(md, styleTLReply, w, bl.Key)
 		}
-		title := "● assistant"
-		if bl.Live {
-			title = "◌ assistant"
-		}
-		return renderBubbleCard(title, text, colorBubbleAssistant, styleTLRun, styleTLReply, w, bl.Key)
+		return renderPlainBlock(text, styleTLReply, w, bl.Key)
 
 	default:
 		text := bl.Text
 		if !open {
 			text = foldHead(text, timelineBodyMaxLines, timelineBodyMaxChars)
 		}
-		return renderBubbleCard("·", text, colorBorder, styleTLSys, styleDim, w, bl.Key)
+		return renderPlainBlock(text, styleDim, w, bl.Key)
 	}
 }
 

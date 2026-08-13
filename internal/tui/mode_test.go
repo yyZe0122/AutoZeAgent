@@ -47,13 +47,9 @@ func TestPickerDoesNotClearTask(t *testing.T) {
 	if len(mm.timeline) == 0 {
 		t.Fatal("timeline cleared")
 	}
-	// Main view still session, not list body.
 	body := renderSessionView(&mm)
-	if !strings.Contains(body, "task-keep") && !strings.Contains(body, "Task") {
-		// focused task header uses short id
-		if !strings.Contains(body, shortID("task-keep")) {
-			t.Fatalf("session view missing task:\n%s", body)
-		}
+	if !strings.Contains(body, "hello") {
+		t.Fatalf("session view missing timeline:\n%s", body)
 	}
 	ov := renderPickerOverlay(&mm, 80)
 	if !strings.Contains(ov, "Sessions") {

@@ -20,27 +20,24 @@ var (
 	colorBubbleAssistant lipgloss.Color
 	colorBubbleThinking  lipgloss.Color
 	colorBubbleTool      lipgloss.Color
+	colorKeyword         lipgloss.Color
 
 	styleTitle        lipgloss.Style
 	styleDim          lipgloss.Style
 	styleMuted        lipgloss.Style
-	styleTabOn        lipgloss.Style
-	styleTabOff       lipgloss.Style
 	styleError        lipgloss.Style
 	styleOK           lipgloss.Style
 	styleWarn         lipgloss.Style
 	styleBadge        lipgloss.Style
-	styleHeader       lipgloss.Style
-	styleBorder       lipgloss.Style
 	styleStatus       lipgloss.Style
 	styleInput        lipgloss.Style
+	styleKeyword      lipgloss.Style
 	styleCompSel      lipgloss.Style
 	styleComp         lipgloss.Style
 	styleHelpBox      lipgloss.Style
 	styleRiskHi       lipgloss.Style
 	styleRiskMed      lipgloss.Style
 	styleRiskLo       lipgloss.Style
-	styleOverlay      lipgloss.Style
 	styleTLUser       lipgloss.Style
 	styleTLSys        lipgloss.Style
 	styleTLPlan       lipgloss.Style

@@ -71,8 +71,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.health.Core.Runtime.DataDir != "" {
 				m.dataDir = msg.health.Core.Runtime.DataDir
 			}
-			if msg.health.OK && m.statusMsg == "" {
-				m.statusMsg = "daemon ok"
+			if msg.health.OK && m.statusMsg == "daemon ok" {
+				m.statusMsg = ""
 			}
 		}
 		return m, nil

@@ -21,12 +21,9 @@ func bubbleWidth(termW int) int {
 	if termW <= 0 {
 		termW = 80
 	}
-	w := termW - 6
+	w := termW - 2
 	if w < 36 {
 		w = 36
-	}
-	if w > 88 {
-		w = 88
 	}
 	return w
 }
@@ -59,7 +56,6 @@ func wrapLine(line string, width int) []string {
 	var lines []string
 	for len(runes) > width {
 		cut := width
-		// Prefer break at last space in window.
 		for i := width; i > width/2; i-- {
 			if runes[i-1] == ' ' {
 				cut = i
@@ -86,7 +82,6 @@ func renderBubbleCard(title, body string, border lipgloss.Color, titleStyle, bod
 	head := titleStyle.Render(title)
 	var content string
 	if body != "" {
-		// Body may already contain ANSI (glamour); don't re-wrap ANSI lines.
 		if strings.Contains(body, "\x1b[") {
 			content = head + "\n" + body
 		} else {
@@ -109,27 +104,72 @@ func renderBubbleCard(title, body string, border lipgloss.Color, titleStyle, bod
 	return card
 }
 
+func renderLeftBar(body string, bar lipgloss.Color, width int, zoneID string) string {
+	innerW := width - 2
+	if innerW < 12 {
+		innerW = 12
+	}
+	var content string
+	if strings.Contains(body, "\x1b[") {
+		content = body
+	} else {
+		content = wrapBody(body, innerW)
+	}
+	out := lipgloss.NewStyle().
+		BorderLeft(true).
+		BorderStyle(lipgloss.Border{Left: "│"}).
+		BorderForeground(bar).
+		PaddingLeft(1).
+		Width(width).
+		Render(content)
+	if zoneID != "" {
+		out = zoneMark(zoneID, out)
+	}
+	return out
+}
+
+func renderPlainBlock(body string, bodyStyle lipgloss.Style, width int, zoneID string) string {
+	innerW := width
+	if innerW < 12 {
+		innerW = 12
+	}
+	var content string
+	if strings.Contains(body, "\x1b[") {
+		content = body
+	} else {
+		var b strings.Builder
+		for i, ln := range strings.Split(wrapBody(body, innerW), "\n") {
+			if i > 0 {
+				b.WriteByte('\n')
+			}
+			b.WriteString(bodyStyle.Render(ln))
+		}
+		content = b.String()
+	}
+	if zoneID != "" {
+		content = zoneMark(zoneID, content)
+	}
+	return content
+}
+
 func renderDoneBanner(title string, state string, width int) string {
 	if title == "" {
 		title = "done"
 	}
-	label := " " + title + " "
-	if state != "" {
-		label += "· " + state + " "
+	label := title
+	if state != "" && state != title {
+		label += " · " + state
 	}
-	bar := strings.Repeat("═", max(8, min(width, 48)))
-	line := styleDone.Render(bar)
-	mid := lipgloss.NewStyle().Foreground(colorOK).Bold(true).Render(label)
-	return line + "\n" + mid + "\n" + line
+	barW := max(8, min(width-lipgloss.Width(label)-3, 48))
+	if barW < 4 {
+		barW = 4
+	}
+	bar := styleDone.Render(strings.Repeat("─", barW))
+	return bar + "  " + styleDone.Render(label)
 }
 
 func renderChip(label string) string {
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorBorder).
-		Foreground(colorDim).
-		Padding(0, 1).
-		Render(label)
+	return styleMuted.Render(label)
 }
 
 func renderSystemLine(prefix, title, state string, titleStyle lipgloss.Style) string {
@@ -155,7 +195,7 @@ func blockTitleTool(name, preview string) string {
 		name = "tool"
 	}
 	if preview != "" {
-		return "⚙ " + name + " · " + preview
+		return "· " + name + " · " + preview
 	}
-	return "⚙ " + name
+	return "· " + name
 }

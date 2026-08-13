@@ -238,25 +238,15 @@ func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%dh%02dm", hours, mins)
 }
 
-// heartbeatWave returns a scrolling pink pulse when active, flat line otherwise.
-// Frame advance uses a light spring-like phase (harmonica-inspired easing).
+// heartbeatWave is a single saturated glyph while a run is active.
 func heartbeatWave(active bool, frame int) string {
-	const width = 8
 	if !active {
-		return "────────"
+		return "·"
 	}
-	// Phase with slight ease so the pulse feels less linear.
-	phase := frame
-	if frame > 0 {
-		// harmonica Spring is continuous; discrete ease: favor mid-pulse.
-		phase = frame + (frame%3)/2
+	if frame%2 == 0 {
+		return "●"
 	}
-	pattern := []rune("▁▂▃▅▇▅▃▂")
-	out := make([]rune, width)
-	for i := 0; i < width; i++ {
-		out[i] = pattern[(i+phase)%len(pattern)]
-	}
-	return string(out)
+	return "◉"
 }
 
 func formatTokens(n int64) string {
