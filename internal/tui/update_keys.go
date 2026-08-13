@@ -1,0 +1,401 @@
+package tui
+
+import (
+	"strings"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/yyZe0122/yunmengze-agent/internal/gatewayclient"
+)
+
+func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Permission modal hotkeys (four tiers) while listPermissions is open.
+	if m.list == listPermissions && msg.Type == tea.KeyRunes && len(msg.Runes) == 1 {
+		if decision, ok := permHotkeyDecision(string(msg.Runes)); ok {
+			if m.permInGrace() {
+				m.statusMsg = "permission grace · 1–4 after a moment"
+				return m, nil
+			}
+			if m.selectedIdx < 0 || m.selectedIdx >= len(m.permissions) {
+				return m, nil
+			}
+			p := m.permissions[m.selectedIdx]
+			m.busy = true
+			return m, m.permDecideCmd(p.ID, decision)
+		}
+	}
+
+	switch msg.Type {
+	case tea.KeyCtrlC:
+		m.input.SetValue("")
+		m.errMsg = ""
+		m.statusMsg = "use /quit to exit"
+		m.historyIdx = -1
+		m.completer.update("")
+		return m, nil
+
+	case tea.KeyEsc:
+		if m.helpOpen {
+			m.helpOpen = false
+			m.syncViewport(true)
+			return m, nil
+		}
+		if m.completer.visible {
+			m.completer.dismiss()
+			m.layout()
+			return m, nil
+		}
+		if m.list != listNone {
+			m.closeList()
+			m.layout()
+			return m, nil
+		}
+		m.input.SetValue("")
+		m.errMsg = ""
+		m.historyIdx = -1
+		m.completer.update("")
+		return m, nil
+
+	case tea.KeyTab:
+		if m.completer.visible {
+			if name := m.completer.accept(); name != "" {
+				if strings.HasPrefix(name, "/") {
+					m.input.SetValue(name + " ")
+				} else {
+					// Argument completion: replace from first space.
+					cur := m.input.Value()
+					if i := strings.IndexByte(cur, ' '); i >= 0 {
+						cmd := cur[:i]
+						m.input.SetValue(cmd + " " + name + " ")
+					} else {
+						m.input.SetValue(name + " ")
+					}
+				}
+				m.input.CursorEnd()
+				m.refreshCompleter()
+			}
+			m.layout()
+			return m, nil
+		}
+		// Tab toggles agent/plan permission mode (OpenCode-style).
+		m.toggleDraftMode()
+		m.statusMsg = "mode " + string(m.draftMode)
+		return m, nil
+
+	case tea.KeyShiftTab:
+		m.toggleDraftMode()
+		m.statusMsg = "mode " + string(m.draftMode)
+		return m, nil
+
+	case tea.KeyPgUp:
+		// Always scroll conversation — pickers do not steal this.
+		m.viewport.LineUp(5)
+		m.stickBottom = m.viewport.AtBottom()
+		return m, nil
+
+	case tea.KeyPgDown:
+		m.viewport.LineDown(5)
+		m.stickBottom = m.viewport.AtBottom()
+		return m, nil
+
+	case tea.KeyRunes:
+		// Expand hotkeys when input empty and no picker (e / E / c).
+		if m.list == listNone && !m.completer.visible && !m.helpOpen &&
+			strings.TrimSpace(m.input.Value()) == "" && len(msg.Runes) == 1 {
+			switch msg.Runes[0] {
+			case 'e':
+				keys := collectExpandKeys(m.timeline)
+				if len(keys) > 0 {
+					m.expand.toggle(keys[len(keys)-1])
+					m.statusMsg = "expand toggled · /expand all|none"
+					m.syncViewport(true)
+				}
+				return m, nil
+			case 'E':
+				m.expand.setAll(true)
+				m.statusMsg = "expanded all · c or /expand none to collapse"
+				m.syncViewport(true)
+				return m, nil
+			case 'c':
+				m.expand.setAll(false)
+				m.statusMsg = "collapsed"
+				m.syncViewport(true)
+				return m, nil
+			}
+		}
+
+	case tea.KeyUp:
+		if m.completer.visible {
+			m.completer.move(-1)
+			return m, nil
+		}
+		if m.inListMode() {
+			if m.selectedIdx > 0 {
+				m.selectedIdx--
+			}
+			return m, nil
+		}
+		if strings.TrimSpace(m.input.Value()) == "" || m.historyIdx >= 0 {
+			m.historyPrev()
+			return m, nil
+		}
+		m.viewport.LineUp(1)
+		m.stickBottom = false
+		return m, nil
+
+	case tea.KeyDown:
+		if m.completer.visible {
+			m.completer.move(1)
+			return m, nil
+		}
+		if m.inListMode() {
+			if m.selectedIdx < m.listLen()-1 {
+				m.selectedIdx++
+			}
+			return m, nil
+		}
+		if m.historyIdx >= 0 {
+			m.historyNext()
+			return m, nil
+		}
+		m.viewport.LineDown(1)
+		m.stickBottom = m.viewport.AtBottom()
+		return m, nil
+
+	case tea.KeyEnter:
+		// Two-stage slash completer: first Enter completes prefix → full name;
+		// second Enter (or Enter when already complete) executes.
+		// In arg mode, first Enter inserts the arg into the line.
+		if m.completer.visible {
+			name := m.completer.selectedName()
+			if name != "" {
+				typed := strings.TrimSpace(m.input.Value())
+				if m.completer.argMode {
+					// Build full command line from cmd + selected arg.
+					space := strings.IndexByte(typed, ' ')
+					cmd := typed
+					if space >= 0 {
+						cmd = typed[:space]
+					}
+					line := strings.TrimSpace(cmd + " " + name)
+					m.completer.dismiss()
+					m.input.SetValue("")
+					m.historyIdx = -1
+					m.pushHistory(line)
+					m.helpOpen = false
+					m.busy = true
+					m.layout()
+					return m, m.handleLineCmd(line)
+				}
+				if !inputIsCompleteCommand(typed, name) {
+					m.completer.dismiss()
+					m.input.SetValue(name)
+					m.input.CursorEnd()
+					m.historyIdx = -1
+					m.refreshCompleter()
+					m.layout()
+					return m, nil
+				}
+				m.completer.dismiss()
+				m.input.SetValue("")
+				m.historyIdx = -1
+				m.pushHistory(name)
+				m.helpOpen = false
+				m.busy = true
+				m.layout()
+				return m, m.handleLineCmd(name)
+			}
+		}
+		line := strings.TrimSpace(m.input.Value())
+		m.input.SetValue("")
+		m.completer.dismiss()
+		m.historyIdx = -1
+		if line == "" {
+			if m.inListMode() && m.listLen() > 0 {
+				cmd := m.listEnter()
+				m.layout()
+				m.syncViewport(false)
+				return m, cmd
+			}
+			return m, nil
+		}
+		m.pushHistory(line)
+		m.helpOpen = false
+		m.busy = true
+		// Optimistic local feedback for plain-text → /new submissions.
+		if cmd, ok := m.optimisticNew(line); ok {
+			m.layout()
+			m.syncViewport(true)
+			return m, cmd
+		}
+		m.layout()
+		return m, m.handleLineCmd(line)
+	}
+
+	prevVisible := m.completer.visible
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	m.completer.update(m.input.Value())
+	m.historyIdx = -1
+	if m.completer.visible != prevVisible {
+		m.layout()
+	}
+	return m, cmd
+}
+
+// optimisticNew paints a local user message before Submit returns.
+func (m *model) optimisticNew(line string) (tea.Cmd, bool) {
+	name, arg := parseSlash(line)
+	objective := line
+	freshSession := false
+	if name != "" {
+		if name != "/new" {
+			return nil, false
+		}
+		objective = strings.TrimSpace(arg)
+		if objective == "" {
+			return nil, false
+		}
+		freshSession = true
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	execMode := string(m.draftMode)
+	if execMode == "" {
+		execMode = gatewayclient.ExecutionModeAgent
+	}
+	if freshSession {
+		m.sessionID = ""
+		m.messages = nil
+		m.plan = nil
+		m.planID = ""
+		m.runs = nil
+	}
+	// Both agent (build) and plan (read-only) are chat turns.
+	m.task = &gatewayclient.Task{
+		ID:            "…",
+		Title:         gatewayclient.TaskTitle(objective),
+		Objective:     objective,
+		State:         gatewayclient.TaskStateRunning,
+		ExecutionMode: execMode,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	if m.sessionID != "" {
+		sid := m.sessionID
+		m.task.SessionID = &sid
+	}
+	// Append optimistic user bubble to chat transcript.
+	m.messages = append(m.messages, gatewayclient.TranscriptMessage{
+		ID:        "local-user:" + now,
+		SessionID: m.sessionID,
+		Role:      "user",
+		Content:   objective,
+		CreatedAt: now,
+	})
+	m.timeline = buildChatTimeline(m.messages, m.task, m.plan, m.runs)
+	if m.sessionID != "" {
+		m.statusMsg = "sending…"
+	} else {
+		m.statusMsg = "starting session…"
+	}
+	m.errMsg = ""
+	m.stickBottom = true
+	return m.handleLineCmd(line), true
+}
+
+func (m *model) pushHistory(line string) {
+	if line == "" {
+		return
+	}
+	if n := len(m.history); n > 0 && m.history[n-1] == line {
+		return
+	}
+	m.history = append(m.history, line)
+	if len(m.history) > historyLimit {
+		m.history = m.history[len(m.history)-historyLimit:]
+	}
+}
+
+func (m *model) historyPrev() {
+	if len(m.history) == 0 {
+		return
+	}
+	if m.historyIdx < 0 {
+		m.historyIdx = len(m.history) - 1
+	} else if m.historyIdx > 0 {
+		m.historyIdx--
+	}
+	m.input.SetValue(m.history[m.historyIdx])
+	m.input.CursorEnd()
+	m.completer.update(m.input.Value())
+}
+
+func (m *model) historyNext() {
+	if m.historyIdx < 0 {
+		return
+	}
+	if m.historyIdx >= len(m.history)-1 {
+		m.historyIdx = -1
+		m.input.SetValue("")
+		m.completer.update("")
+		return
+	}
+	m.historyIdx++
+	m.input.SetValue(m.history[m.historyIdx])
+	m.input.CursorEnd()
+	m.completer.update(m.input.Value())
+}
+
+func (m *model) layout() {
+	header := 2
+	if m.task != nil {
+		header = 3
+	}
+	// strip + status + input box (2 lines + border)
+	footer := 6
+	if m.completer.visible {
+		footer += min(6, len(m.completer.items)) + 2
+	}
+	if m.list != listNone {
+		n := min(overlayMaxLines, max(1, m.listLen()))
+		footer += n + 3
+	}
+	h := m.height - header - footer
+	if h < 5 {
+		h = 5
+	}
+	w := m.width - 4
+	if m.showContextPanel() {
+		w = m.width - contextPanelWidth - 6
+	}
+	if w < 20 {
+		w = 20
+	}
+	m.viewport.Width = w
+	m.viewport.Height = h
+	m.input.Width = max(10, m.width-8)
+}
+
+func (m *model) showContextPanel() bool {
+	return m.width >= contextBreakWidth
+}
+
+func (m *model) needsRunPoll() bool {
+	for _, run := range m.runs {
+		switch run.State {
+		case gatewayclient.RunStateCompleted, gatewayclient.RunStateFailed, gatewayclient.RunStateCancelled:
+		default:
+			return true
+		}
+	}
+	if m.task != nil {
+		switch m.task.State {
+		case gatewayclient.TaskStateCompleted, gatewayclient.TaskStateFailed, gatewayclient.TaskStateCancelled:
+			return false
+		case gatewayclient.TaskStateRunning:
+			return true
+		}
+	}
+	return false
+}
