@@ -3,44 +3,16 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
-	"github.com/yyZe0122/yunmengze-agent/internal/agent"
-	"github.com/yyZe0122/yunmengze-agent/internal/app"
-	"github.com/yyZe0122/yunmengze-agent/internal/approval"
-	"github.com/yyZe0122/yunmengze-agent/internal/artifacts"
-	"github.com/yyZe0122/yunmengze-agent/internal/chatsession"
 	"github.com/yyZe0122/yunmengze-agent/internal/configreload"
-	"github.com/yyZe0122/yunmengze-agent/internal/contextpack"
-	"github.com/yyZe0122/yunmengze-agent/internal/corequery"
 	"github.com/yyZe0122/yunmengze-agent/internal/daemonctl"
-	"github.com/yyZe0122/yunmengze-agent/internal/events"
-	"github.com/yyZe0122/yunmengze-agent/internal/gateway"
-	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
-	"github.com/yyZe0122/yunmengze-agent/internal/memory"
-	"github.com/yyZe0122/yunmengze-agent/internal/modelresolve"
-	"github.com/yyZe0122/yunmengze-agent/internal/modelstream"
 	"github.com/yyZe0122/yunmengze-agent/internal/platform/paths"
 	platformsignals "github.com/yyZe0122/yunmengze-agent/internal/platform/signals"
-	"github.com/yyZe0122/yunmengze-agent/internal/policy"
-	"github.com/yyZe0122/yunmengze-agent/internal/providerconfig"
-	"github.com/yyZe0122/yunmengze-agent/internal/providerruntime"
-	"github.com/yyZe0122/yunmengze-agent/internal/scheduledtasks"
-	"github.com/yyZe0122/yunmengze-agent/internal/scheduler"
-	"github.com/yyZe0122/yunmengze-agent/internal/skillcatalog"
-	"github.com/yyZe0122/yunmengze-agent/internal/skillmaintain"
-	coresqlite "github.com/yyZe0122/yunmengze-agent/internal/store/sqlite"
-	"github.com/yyZe0122/yunmengze-agent/internal/taskcontrol"
-	"github.com/yyZe0122/yunmengze-agent/internal/tasksubmission"
-	"github.com/yyZe0122/yunmengze-agent/internal/toolpermission"
-	"github.com/yyZe0122/yunmengze-agent/internal/tools"
 	"github.com/yyZe0122/yunmengze-agent/internal/version"
 )
 
@@ -90,290 +62,36 @@ func run(args []string) error {
 		slog.Warn("skill discovery diagnostic", "component", "skills", "operation", "discover", "result", "warning", "error", diagnostic)
 	}
 
-	database, err := coresqlite.Open(context.Background(), filepath.Join(layout.DataDir, "core.db"))
+	stores, err := openCoreStores(context.Background(), layout.DataDir)
 	if err != nil {
 		return err
 	}
-	defer database.Close()
-	eventStore, err := events.NewStore(database.SQL())
-	if err != nil {
-		return err
-	}
-	kernelRepository, err := kernel.NewRepository(database.SQL())
-	if err != nil {
-		return err
-	}
-	approvalRepository, err := approval.NewRepository(database.SQL())
-	if err != nil {
-		return err
-	}
-	artifactStore, err := artifacts.NewStore(database.SQL(), filepath.Join(layout.DataDir, "artifacts"))
-	if err != nil {
-		return err
-	}
-	toolBroker, err := tools.NewBroker(tools.Config{
-		DB: database.SQL(), Approvals: approvalRepository,
-		Policy: policy.NewEvaluator(policy.DefaultConfig()), Artifacts: artifactStore,
-	})
-	if err != nil {
-		return err
-	}
-	migrateFrom := []string{workingDirectory, layout.DataDir}
-	if clientCWD := strings.TrimSpace(os.Getenv("YMZ_CLIENT_CWD")); clientCWD != "" {
-		migrateFrom = append([]string{clientCWD}, migrateFrom...)
-	}
-	ensureResult, err := providerconfig.EnsureConfig(layout.ConfigDir, migrateFrom...)
-	if err != nil {
-		return fmt.Errorf("ensure provider config: %w", err)
-	}
-	switch {
-	case ensureResult.Migrated:
-		slog.Info("provider config migrated", "component", "daemon", "operation", "ensure_config", "result", "succeeded",
-			"config_path", ensureResult.Path, "source", ensureResult.Source)
-	case ensureResult.Created:
-		slog.Info("provider config template created", "component", "daemon", "operation", "ensure_config", "result", "succeeded",
-			"config_path", ensureResult.Path)
-	default:
-		slog.Info("provider config ready", "component", "daemon", "operation", "ensure_config", "result", "succeeded",
-			"config_path", ensureResult.Path)
-	}
-	// PathGuard ceiling from chat.workspace / chat.roots (ADR-046).
-	chatCfgForTools, err := providerconfig.LoadChat(layout.ConfigDir)
-	if err != nil {
-		return fmt.Errorf("load chat config: %w", err)
-	}
-	pathRoots := chatCfgForTools.PathCeilingRoots(workingDirectory)
-	if len(pathRoots) == 0 && !chatCfgForTools.WorkspaceAllowAll() {
-		pathRoots = []string{workingDirectory}
-	}
-	pathGuard, err := tools.RegisterBuiltinsWithOptions(toolBroker, pathRoots, chatCfgForTools.WorkspaceAllowAll(), tools.ExecutorConfig{
-		MaxOutputBytes: 4 << 20,
-		AllowedEnv:     []string{"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "HOME", "USERPROFILE"},
-	})
-	if err != nil {
-		return err
-	}
-	if chatCfgForTools.WorkspaceAllowAll() {
-		slog.Warn("chat.workspace.allow_all enabled: path containment disabled",
-			"component", "daemon", "operation", "path_guard", "result", "warning")
-	}
-	taskTool, err := tools.RegisterTaskTool(toolBroker, database.SQL(), nil)
-	if err != nil {
-		return err
-	}
-	// Memory tools registered early; backend attached after memory.Manager is created.
-	memTools, err := tools.RegisterMemoryTools(toolBroker, nil)
-	if err != nil {
-		return err
-	}
-	mcpConfig, err := providerconfig.LoadMCP(layout.ConfigDir)
-	if err != nil {
-		return fmt.Errorf("load mcp config: %w", err)
-	}
-	mcpRegistry, mcpToolNames, err := tools.RegisterMCP(context.Background(), toolBroker, mcpConfig)
-	if err != nil {
-		return err
-	}
-	if mcpRegistry != nil {
-		defer mcpRegistry.Close()
-	}
-	if len(mcpToolNames) > 0 {
-		slog.Info("mcp tools ready", "component", "daemon", "operation", "mcp_register", "result", "succeeded",
-			"tools", len(mcpToolNames))
-	}
-	providerRuntime, err := providerruntime.FromConfigDir(layout.ConfigDir)
-	if err != nil {
-		return err
-	}
-	queries, err := corequery.New(database.SQL())
-	if err != nil {
-		return err
-	}
-	recordStore, err := agent.NewRecordStore(database.SQL())
-	if err != nil {
-		return err
-	}
-	modelHub := modelstream.NewHub()
-	contextStore, err := contextpack.NewStore(database.SQL())
-	if err != nil {
-		return err
-	}
-	tokenCalibrator := contextpack.NewCalibrator()
-	var contextWindow int64
-	if providerRuntime != nil && providerRuntime.SelectedRef() != "" {
-		if resolved, resolveErr := providerconfig.ResolveModel(layout.ConfigDir, providerRuntime.SelectedRef()); resolveErr == nil && resolved != nil {
-			contextWindow = resolved.ContextWindow
-		}
-	}
-	chatCfg, chatErr := providerconfig.LoadChat(layout.ConfigDir)
-	if chatErr != nil {
-		return fmt.Errorf("load chat config: %w", chatErr)
-	}
-	maxIterations := chatCfg.MaxIterationsOrDefault()
-	compactionEnabled := chatCfg.CompactionEnabled()
-	permissionMode := chatCfg.PermissionModeOrDefault()
-	toolBroker.SetPermissionMode(permissionMode)
+	defer stores.database.Close()
 
-	// Tool-call permission service (ADR-043); gate attached for ask mode waits.
-	permStore, err := toolpermission.NewStore(database.SQL())
+	stack, err := wireTools(stores, layout, workingDirectory)
 	if err != nil {
 		return err
 	}
-	permService, err := toolpermission.New(toolpermission.Config{
-		Events: eventStore,
-		DB:     database.SQL(), Store: permStore, Approvals: approvalRepository,
-	})
-	if err != nil {
-		return err
-	}
-	toolBroker.SetPermission(toolpermission.NewGate(permService))
-
-	// In-process memory (ADR-044 productization).
-	var memoryManager *memory.Manager
-	if chatCfg.MemoryEnabled() {
-		memoryStore, err := memory.NewStore(database.SQL())
-		if err != nil {
-			return err
-		}
-		memoryManager, err = memory.New(memory.Config{
-			Store: memoryStore, MaxInjectRunes: chatCfg.MemoryMaxInjectRunes(),
-			DefaultTTL: chatCfg.MemoryDefaultTTL(),
-		})
-		if err != nil {
-			return err
-		}
-		if err := memoryManager.Initialize(context.Background()); err != nil {
-			return fmt.Errorf("memory initialize: %w", err)
-		}
-		defer func() { _ = memoryManager.Shutdown(context.Background()) }()
-		memTools.SetBackend(memoryManager)
+	if stack.mcpRegistry != nil {
+		defer stack.mcpRegistry.Close()
 	}
 
-	var agentRunner *agent.Runner
-	if providerRuntime != nil && providerRuntime.Provider() != nil && strings.TrimSpace(providerRuntime.LoadError()) == "" {
-		roleEndpoints, roleErr := providerruntime.BuildRoleEndpoints(layout.ConfigDir, providerRuntime.SelectedRef())
-		if roleErr != nil {
-			return roleErr
-		}
-		agentRunner, err = agent.New(agent.Config{
-			Provider: providerRuntime.Provider(), Broker: toolBroker, Records: recordStore,
-			Model: providerRuntime.Model(), Stream: modelHub,
-			MaxIterations: maxIterations,
-			ContextWindow: contextWindow, Roles: roleEndpoints,
-			Context: contextStore, Calibrator: tokenCalibrator,
-		})
-		if err != nil {
-			return err
-		}
-		taskTool.SetRunner(agentRunner)
-	}
-	// Chat first so ControlTask can interrupt in-flight chat runs (pause/cancel).
-	var chatService *chatsession.Service
-	if agentRunner != nil {
-		chatRoots := chatCfg.PathCeilingRoots(workingDirectory)
-		if len(chatRoots) == 0 {
-			chatRoots = []string{workingDirectory}
-		}
-		writeCeiling := chatCfg.AgentWriteCeiling()
-		allowGit := chatCfg.AgentGitEnabled()
-		allowProcess := chatCfg.AgentProcessEnabled()
-		chatCfgCopy := chatCfg
-		modelResolver := modelresolve.New(layout.ConfigDir)
-		chatService, err = chatsession.New(chatsession.Config{
-			DB: database.SQL(), Repository: kernelRepository, Approvals: approvalRepository,
-			Agent: agentRunner, Transcript: queries, WorkspaceRoots: chatRoots,
-			PathGuard: pathGuard, DaemonCWD: workingDirectory, ConfigDir: layout.ConfigDir, ChatConfig: &chatCfgCopy,
-			AllowWriteCeiling: &writeCeiling, AllowGit: allowGit, AllowProcess: allowProcess,
-			PermissionMode: permissionMode, ExtraTools: mcpToolNames,
-			ContextWindow: contextWindow, Context: contextStore, Compactor: agentRunner,
-			MemoryCurator: agentRunner, CompactionEnabled: &compactionEnabled, Calibrator: tokenCalibrator,
-			Memory: memoryManager, Stream: modelHub, ToolCalls: toolBroker,
-			ModelResolver: modelResolver.AsChatResolver(),
-			OnError: func(err error) {
-				slog.Error("chat session failure", "component", "chatsession", "operation", "execute", "result", "failed", "error", err)
-			},
-		})
-		if err != nil {
-			return err
-		}
-		slog.Info("chat workspace configured", "component", "daemon", "operation", "chat_config", "result", "succeeded",
-			"ceiling_roots", chatRoots, "allow_all", chatCfg.WorkspaceAllowAll(),
-			"agent_write_ceiling", writeCeiling, "agent_git", allowGit, "agent_process", allowProcess,
-			"context_window", contextWindow, "max_iterations", maxIterations, "compaction_enabled", compactionEnabled,
-			"permission_mode", permissionMode)
-	}
-	// Task control (pause/resume/cancel); chat interrupt when chat is configured.
-	// Assign chat only when non-nil so ChatInterrupter is a true nil interface (not typed nil).
-	var chatInterrupt taskcontrol.ChatInterrupter
-	if chatService != nil {
-		chatInterrupt = chatService
-	}
-	taskControl, err := taskcontrol.New(taskcontrol.Config{
-		DB: database.SQL(), Approvals: approvalRepository, Repository: kernelRepository, Chat: chatInterrupt,
-	})
+	chat, err := wireChat(stores, stack, layout, workingDirectory)
 	if err != nil {
 		return err
 	}
-	taskSubmissionConfig := tasksubmission.Config{Repository: kernelRepository, Skills: skillCatalog}
-	if chatService != nil {
-		taskSubmissionConfig.Chat = chatsession.AsTaskChat(chatService)
+	if chat.memoryManager != nil {
+		defer func() { _ = chat.memoryManager.Shutdown(context.Background()) }()
 	}
-	skillStore, err := skillmaintain.NewStore(database.SQL())
-	if err != nil {
-		return err
-	}
-	skillMaintain, err := skillmaintain.New(skillmaintain.Config{
-		Store: skillStore, Catalog: skillCatalog, UnusedTTL: chatCfg.SkillsUnusedTTL(),
-	})
-	if err != nil {
-		return err
-	}
-	skillMaintain.Maintain(context.Background())
-	if err := tools.RegisterSkillTools(toolBroker, skillCatalog, skillMaintain); err != nil {
-		return err
-	}
-	if err := tools.RegisterSkillDraftTool(toolBroker, tools.SkillDraftAdapter{
-		Catalog: skillCatalog, Maintain: skillMaintain,
-	}); err != nil {
-		return err
-	}
-	taskSubmissionConfig.SkillUsage = skillMaintain
-	taskSubmissionService, err := tasksubmission.New(taskSubmissionConfig)
-	if err != nil {
-		return err
-	}
-	var mainModelRef scheduler.MainModelRefFunc
-	if providerRuntime != nil {
-		mainModelRef = providerRuntime.SelectedRef
-	}
-	schedulerStore, err := scheduler.NewStoreWithMainRef(database.SQL(), mainModelRef)
-	if err != nil {
-		return err
-	}
-	var backgroundRunners []app.BackgroundRunner
-	jobRunner, err := scheduledtasks.New(scheduledtasks.Config{
-		Client:      schedulerStore,
-		Submissions: taskSubmissionService,
-		Owner:       "ymzd",
-		OnError: func(err error) {
-			slog.Error("scheduled job runner failure", "component", "scheduledtasks", "operation", "poll", "result", "failed", "error", err)
-		},
-	})
-	if err != nil {
-		return err
-	}
-	backgroundRunners = append(backgroundRunners, jobRunner)
-	core, err := app.New(app.Config{
-		Name:              "ymzd",
-		Version:           version.Version,
-		Runtime:           layout,
-		BackgroundRunners: backgroundRunners,
-	})
+
+	taskSubmissionService, taskControl, skillMaintain, schedulerStore, core, err := wireAppAndJobs(
+		stores, stack, chat, skillCatalog, layout,
+	)
 	if err != nil {
 		return err
 	}
 	if *check {
-		if err := queries.Check(context.Background()); err != nil {
+		if err := chat.queries.Check(context.Background()); err != nil {
 			return fmt.Errorf("check core database: %w", err)
 		}
 		if err := schedulerStore.Ping(context.Background()); err != nil {
@@ -388,83 +106,15 @@ func run(args []string) error {
 		return nil
 	}
 
-	var modelSwitcher gateway.ModelSwitcher
-	var modelConfig gateway.ModelConfig
-	var modelConfigError string
-	if providerRuntime != nil {
-		// Bind agent/chat first so Snapshot ready reflects ChatBound; attach gateway sink after NewAPI.
-		var mainEP providerruntime.MainEndpoint
-		if agentRunner != nil {
-			mainEP = agentRunner
-		}
-		var chatCW providerruntime.ContextWindow
-		if chatService != nil {
-			chatCW = chatService
-		}
-		providerRuntime.Bind(mainEP, chatCW, nil)
-		modelConfig, modelConfigError = providerRuntime.Snapshot()
-		// Always register switcher; SelectModel / ReloadFromDisk honor loadError and ChatBound.
-		modelSwitcher = providerRuntime
-	} else {
-		modelConfig = gateway.ModelConfig{Models: []string{}, Ready: false, Error: "provider runtime is not configured"}
-		modelConfigError = modelConfig.Error
-	}
-	var mcpStatus gateway.MCPStatusProvider
-	if mcpRegistry != nil {
-		mcpStatus = mcpStatusAdapter{registry: mcpRegistry}
-	}
-	chatCommandsProvider := chatCommandsAdapter{cfg: chatCfg}
-	var sessionCompact gateway.SessionCompactor
-	if chatService != nil {
-		sessionCompact = gateway.SessionCompactFunc(func(ctx context.Context, sessionID kernel.SessionID, focus string) (gateway.SessionCompactResult, error) {
-			r, err := chatService.ForceCompact(ctx, sessionID, focus)
-			if err != nil {
-				return gateway.SessionCompactResult{}, err
-			}
-			return gateway.SessionCompactResult{
-				SessionID: r.SessionID, Summary: r.Summary, Source: r.Source, CompactionID: r.CompactionID,
-			}, nil
-		})
-	}
-	var memoryControl gateway.MemoryControlService
-	if chatService != nil && memoryManager != nil {
-		memoryControl = memoryControlAdapter{chat: chatService}
-	}
-	gatewayAPI, err := gateway.NewAPI(gateway.APIConfig{
-		Queries: queries, TaskSubmissions: taskSubmissionService,
-		TaskControls: taskControl, Jobs: schedulerStore,
-		Core: core, Events: eventStore, Skills: skillCatalog, ModelConfig: modelConfig, ModelSwitcher: modelSwitcher,
-		ModelConfigError: modelConfigError,
-		ModelStream:      modelHub, MCP: mcpStatus, ChatCommands: chatCommandsProvider, SessionCompact: sessionCompact,
-		ToolPermissions: gateway.ToolPermissionAdapter{
-			Service:   permService,
-			TrustPath: toolpermission.DefaultTrustPath(layout.ConfigDir),
-		},
-		MemoryControl: memoryControl,
-		SkillControl:  skillControlAdapter{svc: skillMaintain},
-		SessionPrefs:  sessionPrefsAdapter{repo: kernelRepository},
-	})
+	gatewayAPI, err := wireGatewayAPI(
+		stores, stack, chat, layout, skillCatalog,
+		taskSubmissionService, taskControl, skillMaintain, schedulerStore, core,
+	)
 	if err != nil {
 		return err
 	}
-	if providerRuntime != nil {
-		var mainEP providerruntime.MainEndpoint
-		if agentRunner != nil {
-			mainEP = agentRunner
-		}
-		var chatCW providerruntime.ContextWindow
-		if chatService != nil {
-			chatCW = chatService
-		}
-		providerRuntime.Bind(mainEP, chatCW, gatewayAPI)
-	}
-	gatewayRunner, err := gateway.NewLocalRunner(gateway.LocalRunnerConfig{
-		RuntimeDir: layout.RuntimeDir,
-		Handler:    gatewayAPI,
-		OnError: func(err error) {
-			slog.Error("gateway failure", "component", "gateway", "operation", "serve", "result", "failed", "error", err)
-		},
-	})
+	bindProviderGateway(chat, gatewayAPI)
+	gatewayRunner, err := newGatewayRunner(layout, gatewayAPI)
 	if err != nil {
 		return err
 	}
@@ -486,16 +136,13 @@ func run(args []string) error {
 	ctx, cancel := platformsignals.NotifyContext(context.Background())
 	defer cancel()
 
-	// Hot-reload provider config (agent.json / agent.local.json / env). See ADR-048.
-	if providerRuntime != nil {
-		providerRuntime.NoteFingerprint()
+	if chat.providerRuntime != nil {
+		chat.providerRuntime.NoteFingerprint()
 		if w, werr := configreload.New(configreload.Options{
 			ConfigDir: layout.ConfigDir,
 			Debounce:  500 * time.Millisecond,
 			OnChange: func() {
-				// Debounced callback may run on watcher goroutine; reload takes its own lock.
-				// SelectModel suppresses a short window so its WriteSelectedModel does not double-apply.
-				if err := providerRuntime.ReloadFromDisk(); err != nil {
+				if err := chat.providerRuntime.ReloadFromDisk(); err != nil {
 					slog.Warn("provider config reload failed", "component", "configreload", "operation", "reload", "result", "warning", "error", err)
 				}
 			},
@@ -518,129 +165,4 @@ func run(args []string) error {
 	}
 	slog.Info("daemon stopped", "component", "daemon", "operation", "run", "result", "succeeded")
 	return nil
-}
-
-func discoverSkillCatalog(layout paths.Layout, workingDirectory string) (*skillcatalog.Catalog, []skillcatalog.Diagnostic) {
-	configSource := skillcatalog.SourceUser
-	if layout.Mode == paths.ModeSystem {
-		configSource = skillcatalog.SourceSystem
-	}
-	return skillcatalog.Discover([]skillcatalog.Root{
-		{Path: filepath.Join(layout.ConfigDir, "skills"), Source: configSource},
-		{Path: filepath.Join(workingDirectory, ".yunmengze", "skills"), Source: skillcatalog.SourceProject},
-	})
-}
-
-// mcpStatusAdapter maps tools.MCPRegistry to gateway.MCPStatusProvider.
-type mcpStatusAdapter struct {
-	registry *tools.MCPRegistry
-}
-
-func (a mcpStatusAdapter) MCPStatus() gateway.MCPStatus {
-	st := a.registry.Status()
-	return gateway.MCPStatus{
-		Enabled: st.Enabled,
-		Total:   st.Total,
-		OK:      st.OK,
-		Error:   st.Error,
-		Tools:   st.Tools,
-	}
-}
-
-// chatCommandsAdapter exposes chat.commands for GET /v1/config/commands (O3).
-type chatCommandsAdapter struct {
-	cfg providerconfig.ChatConfig
-}
-
-func (a chatCommandsAdapter) ChatCommands() []gateway.ChatCommandItem {
-	list := a.cfg.CommandList()
-	if len(list) == 0 {
-		return nil
-	}
-	out := make([]gateway.ChatCommandItem, 0, len(list))
-	for _, item := range list {
-		out = append(out, gateway.ChatCommandItem{
-			ID: item.ID, Description: item.Description, Template: item.Template,
-		})
-	}
-	return out
-}
-
-// memoryControlAdapter maps chatsession memory ops to gateway.MemoryControlService.
-type memoryControlAdapter struct {
-	chat *chatsession.Service
-}
-
-func (a memoryControlAdapter) RefreshMemory(sessionID string) {
-	if a.chat == nil {
-		return
-	}
-	a.chat.RefreshMemory(kernel.SessionID(sessionID))
-}
-
-func (a memoryControlAdapter) ForgetMemory(ctx context.Context, entryID string) error {
-	if a.chat == nil {
-		return errors.New("memory is unavailable")
-	}
-	return a.chat.ForgetMemory(ctx, entryID)
-}
-
-func (a memoryControlAdapter) PromoteMemory(ctx context.Context, entryID string) (corequery.MemoryEntry, error) {
-	if a.chat == nil {
-		return corequery.MemoryEntry{}, errors.New("memory is unavailable")
-	}
-	e, err := a.chat.PromoteMemory(ctx, entryID)
-	if err != nil {
-		return corequery.MemoryEntry{}, err
-	}
-	return corequery.MemoryEntry{
-		ID: e.ID, SessionID: e.SessionID, Content: e.Content, Source: e.Source,
-		Tags: e.Tags, Kind: e.Kind, Priority: e.Priority, ExpiresAt: e.ExpiresAt,
-		CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt,
-	}, nil
-}
-
-type skillControlAdapter struct {
-	svc *skillmaintain.Service
-}
-
-func (a skillControlAdapter) ApplySkillDraft(ctx context.Context, skillID, actor string) error {
-	if a.svc == nil {
-		return errors.New("skill control is unavailable")
-	}
-	_, err := a.svc.ApplyDraft(ctx, skillID, actor)
-	return err
-}
-
-func (a skillControlAdapter) RejectSkillDraft(ctx context.Context, skillID, actor string) error {
-	if a.svc == nil {
-		return errors.New("skill control is unavailable")
-	}
-	return a.svc.RejectDraft(ctx, skillID, actor)
-}
-
-func (a skillControlAdapter) SkillUsage(ctx context.Context) (map[string]gateway.SkillUsageView, error) {
-	if a.svc == nil {
-		return map[string]gateway.SkillUsageView{}, nil
-	}
-	raw, err := a.svc.UsageMap(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[string]gateway.SkillUsageView, len(raw))
-	for id, u := range raw {
-		out[id] = gateway.SkillUsageView{LastUsedAt: u.LastUsedAt, ArchivedAt: u.ArchivedAt}
-	}
-	return out, nil
-}
-
-type sessionPrefsAdapter struct {
-	repo *kernel.Repository
-}
-
-func (a sessionPrefsAdapter) SetPreferredModel(ctx context.Context, sessionID kernel.SessionID, model string) error {
-	if a.repo == nil {
-		return errors.New("session repository unavailable")
-	}
-	return a.repo.SetSessionPreferredModel(ctx, sessionID, model)
 }
