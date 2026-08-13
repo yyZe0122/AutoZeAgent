@@ -444,13 +444,20 @@ func renderBlock(bl contentBlock, exp expandState, opts renderOpts, parent timel
 		plain := strings.TrimSuffix(text, "▌")
 		if !open && needsFold(plain, timelineBodyMaxLines, timelineBodyMaxChars) {
 			text = foldHead(text, timelineBodyMaxLines, timelineBodyMaxChars)
-		} else if !bl.Live && plain != "" {
-			// Completed reply: glamour markdown.
+		} else if plain != "" {
 			innerW := w - 4
-			md := renderMarkdown(plain, innerW, opts.Theme)
+			var md string
+			if bl.Live {
+				md = renderLiveMarkdown(plain, innerW, opts.Theme, bl.Key)
+			} else {
+				md = renderMarkdown(plain, innerW, opts.Theme)
+			}
 			title := "● assistant"
-			if parent == tlRun {
-				title = "● assistant"
+			if bl.Live {
+				title = "◌ assistant"
+			}
+			if bl.Live && md == plain {
+				return renderBubbleCard(title, text, colorBubbleAssistant, styleTLRun, styleTLReply, w, bl.Key)
 			}
 			return renderBubbleCard(title, md, colorBubbleAssistant, styleTLRun, styleTLReply, w, bl.Key)
 		}
