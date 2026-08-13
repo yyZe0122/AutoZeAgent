@@ -81,14 +81,14 @@ Pin Pre-release tags (or omit `YMZ_VERSION` when a non-prerelease `latest` exist
 **Windows** → `%LOCALAPPDATA%\Programs\YunmengZe\bin` + user PATH:
 
 ```powershell
-$env:YMZ_VERSION = 'v0.2.5'
+$env:YMZ_VERSION = 'v0.2.6'
 irm "https://raw.githubusercontent.com/yyZe0122/YunmengZe-Agent/main/packaging/scripts/install.ps1" | iex
 ```
 
 **Linux / macOS** → `~/.local/bin`:
 
 ```bash
-export YMZ_VERSION=v0.2.5
+export YMZ_VERSION=v0.2.6
 curl -fsSL "https://raw.githubusercontent.com/yyZe0122/YunmengZe-Agent/main/packaging/scripts/install-user.sh" | sh
 export PATH="$HOME/.local/bin:$PATH"
 ```
@@ -306,6 +306,6 @@ Details: [`SECURITY.md`](SECURITY.md), [threat model ADR-008](docs/wiki/adr/008-
 
 ## Status
 
-Alpha. Production shape is the three-piece stack above. TUI Phase 2, OpenCode O1–O4, H3–H7 / H5-skill, Hermes skill list/view, MCP-prefer prompts, and `AGENTS.md` rules shipped in **v0.2.5**. Remaining tails (O5–O6 / H2 / M*) in [`docs/backlog/current.md`](docs/backlog/current.md).
+Alpha. Production shape is the three-piece stack above. TUI marsh palette + three-column flatten shipped in **v0.2.6**. Remaining tails (O5–O6 / H2 / M*) in [`docs/backlog/current.md`](docs/backlog/current.md).
 
 Release checklist: [`docs/release.md`](docs/release.md).

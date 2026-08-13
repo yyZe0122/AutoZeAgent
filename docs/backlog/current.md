@@ -1,13 +1,13 @@
 # YunmengZe Agent 当前状态
 
-更新：2026-08-13（文档三盒：wiki / history / backlog · 基线 **v0.2.5**）
+更新：2026-08-13（文档三盒：wiki / history / backlog · 基线 **v0.2.6**）
 
 **本文件是唯一活着的优化/backlog 文档。** 只写未完成与暂缓项；已落地细节见 ADR（`docs/wiki/adr/`）、[`docs/wiki/database.md`](../wiki/database.md)、changelog 与 git。目录：[`docs/README.md`](../README.md)。
 
 ## 现状
 
 生产形态稳定：`ymzd` + CLI·TUI（`ymz`）+ `core.db`。设计知识库：`docs/wiki/`。  
-当前发布线：**v0.2.5**（v0.2.0 改名；v0.2.3 model 选择；v0.2.4 = O1–O4 + H7 + H1-lite + TUI Phase 2；v0.2.5 = Hermes skill list/view + ADR-050 + `AGENTS.md` + H5-lite + T8）。
+当前发布线：**v0.2.6**（v0.2.5 Hermes skill/AGENTS/T8；v0.2.6 = TUI 泽夜/泽昼 + 三栏平铺 + 文档三盒）。
 
 | 对标 | 契约重叠（粗） | 说明 |
 | --- | --- | --- |
@@ -42,6 +42,7 @@
 | 轨 | 内容 | 发版 |
 | --- | --- | --- |
 | T / C / UX | T1–T8 · C1–C4 · UX-A/B（气泡 TUI + 节流 live MD） | v0.2.4–v0.2.5 |
+| TUI 视觉 | 泽夜/泽昼 · 去套娃 · 三栏骨架 · 平铺消息 · slash 芦金（仍 viewport + lipgloss） | v0.2.6 |
 | O1–O4 | import-opencode · MCP remote · `chat.commands` · session prefer | v0.2.4 |
 | H* 已落地 | H7 pin · H1-lite · H5-lite · H3 draft · H4 hint · H5-skill · H6 injectscan | v0.2.4–v0.2.5 |
 | R | 改名 YunmengZe / `ymz` / `~/.yunmengze` | v0.2.0–v0.2.1 |
