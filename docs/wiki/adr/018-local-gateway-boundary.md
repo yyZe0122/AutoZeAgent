@@ -2,7 +2,7 @@
 
 - 状态：Accepted
 - 日期：2026-07-14
-- 更新：2026-08-13（skill apply/events；T8 live markdown 节流）
+- 更新：2026-08-13（路由表对齐实现；resolve 含 H7 job pin）
 
 ## 决策
 
@@ -10,22 +10,40 @@ Gateway 是 `ymzd` 的本地控制面。`ymz` 的 **CLI 子命令**与 **TUI** �
 
 Linux/macOS 在 RuntimeDir 使用受文件权限保护的 Unix Domain Socket；Windows 使用仅监听 loopback 的随机端口和随机 Bearer Token。endpoint、Token 或 Socket 路径通过受限 discovery 文件发布。
 
-当前 API 覆盖：
+当前 API（路径以代码为准）：
 
-- health 与 Skill Catalog：`GET /v1/skills`（可选 `include_archived`；draft/last_used/archived 元数据）；`GET /v1/skills/events`；`POST /v1/skills/actions` apply|reject（ADR-050）；
-- 配置模型快照：`GET/PUT /v1/config/model`（无密钥；可选 `context_window`；PUT 热切换并回写配置顶层 `model`）；
-- 可选 MCP 状态：`GET /v1/config/mcp`（无密钥；见 ADR-040）；
-- Task 提交、查询及 pause/resume/cancel（`execution_mode=agent|plan`；双轨 chat 见 ADR-038）；
-- Session 列表与 transcript 查询；`GET /v1/sessions/{id}`；`PATCH /v1/sessions/{id}` 写 `preferred_model`（O4 会话偏好；chat run 解析 prefer→main，不改全局）；
-- `GET /v1/config/commands`：`chat.commands` 列表（id/description/template；无密钥）；
-- Plan 查询、Task usage 聚合（寿命累计 spend）；
-- Task/Session **context** 窗压：`GET /v1/tasks/{id}/context`、`GET /v1/sessions/{id}/context`（见 ADR-041）；
-- 手动压缩：`POST /v1/sessions/{id}/compact`（见 ADR-041；TUI `/compact`）；
-- Tool-call permission：`GET /v1/permissions`、`POST /v1/permissions/{id}/decide`（见 ADR-043/046；TUI `/perm`；≠ 整单 plan 审批）；
-- Run 查询与流式状态（含 model-stream）；`GET /v1/runs`、`GET /v1/runs/{id}`；
-- 可选：`GET /v1/approvals`（只读列表历史系统审批记录）；
-- Job 创建 / 列表 / 读 / pause·resume·cancel（chat-native；见 ADR-042）；
-- Event 查询和 SSE stream（含 `permission.pending` / `permission.decided`，见 ADR-043；TUI 用 SSE 触发 permission 刷新，decide 仍走 HTTP）。
+| Method | Path | 说明 |
+| --- | --- | --- |
+| `GET` | `/v1/health` | daemon 健康 |
+| `GET`/`PUT` | `/v1/config/model` | 无密钥；可选 `context_window`；PUT 热切换顶层 `model` |
+| `GET` | `/v1/config/mcp` | MCP 状态（无 URL/headers；ADR-040） |
+| `GET` | `/v1/config/commands` | `chat.commands`（id/description/template） |
+| `GET` | `/v1/skills` | Catalog；`include_archived`；draft/last_used/archived |
+| `GET` | `/v1/skills/events` | `limit` · `skill_id` |
+| `POST` | `/v1/skills/actions` | apply\|reject（ADR-050） |
+| `GET` | `/v1/memory` | `session_id` · `q` · `kind` · `limit` · `offset` · `include_global` · `include_archived` |
+| `POST` | `/v1/memory/actions` | refresh\|forget\|promote |
+| `GET` | `/v1/sessions` · `/v1/sessions/{id}` | 列表 / 读 |
+| `PATCH` | `/v1/sessions/{id}` | `{preferred_model}`（O4；空串清除） |
+| `GET` | `/v1/sessions/{id}/messages` | transcript |
+| `GET` | `/v1/sessions/{id}/context` | 窗压（ADR-041） |
+| `POST` | `/v1/sessions/{id}/compact` | `{focus?}`；TUI `/compact` |
+| `GET`/`POST` | `/v1/tasks` | 列表 / 提交（`execution_mode` · `skill_ids` · `workspace`） |
+| `GET` | `/v1/tasks/{id}` | 读 |
+| `POST` | `/v1/tasks/{id}/actions` | pause\|resume\|cancel + `expected_version` |
+| `GET` | `/v1/tasks/{id}/usage` · `/context` · `/messages` | 用量 / 窗压 / transcript |
+| `GET` | `/v1/permissions` | `session_id` · `limit` |
+| `POST` | `/v1/permissions/{id}/decide` | once\|similar\|permanent\|deny（ADR-043/046；≠ 整单审批） |
+| `GET`/`POST` | `/v1/jobs` | 列表（`include_archived`）/ 创建 |
+| `GET` | `/v1/jobs/{id}` | 读 |
+| `POST` | `/v1/jobs/{id}/actions` | pause\|resume\|cancel（cancel→archived；ADR-042） |
+| `GET` | `/v1/plans` · `/v1/plans/{id}` | 只读 |
+| `GET` | `/v1/approvals` | 只读历史系统审批 |
+| `GET` | `/v1/runs` · `/v1/runs/{id}` · `/v1/runs/{id}/usage` | 列表无 `task_id` 过滤 |
+| `GET` | `/v1/events` · `/v1/events/stream` | 查询 + SSE（含 `permission.*`） |
+| `GET` | `/v1/model-stream` | SSE `event: model` + Envelope（ADR-031） |
+
+Chat run 解析：**job pin → session prefer → main**（ADR-045）。TUI SSE 触发 permission 刷新；decide 仍走 HTTP。
 
 **不得恢复：** 人批 prompt/decide、plan-step `POST /v1/runs`、`/v1/modules`。
 
@@ -38,10 +56,12 @@ Gateway 不持有通用 `*sql.DB` 业务能力。只读查询进入 `internal/co
 ```text
 cmd/ymz          flag / daemon ensure / 子命令与 tui.Run 入口
 internal/tui             Bubble Tea UI；消费窄 `tui.Gateway`（由 gatewayclient 满足）；主 UX
+                          分发：`cmds.go` + `cmds_{session,skills,memory,perm,cron,model,refresh}.go`
+                          Elm：`update.go` + `update_{refresh,stream,keys}.go`
                           表现：lipgloss 气泡卡 + contentBlock；完成态 glamour；streaming reply 节流 live MD（T8）；
-                          bubblezone 点击 expand；无新 list/viewport 引擎（见 docs/optimization/current.md）
+                          bubblezone 点击 expand；无新 list/viewport 引擎（见 docs/backlog/current.md）
 internal/gatewayclient   共享 HTTP/SSE 外观 + transport（不 import gateway server）
 internal/gateway         服务端 only：路由 / handlers / LocalRunner
 ```
 
-TUI 与 CLI 不得 import `tools`、`providers`、`store/sqlite`、`agent`、`chatsession` 实现。主交互斜杠：`/cron`、`/compact`、`/perm`、`/expand`、`/journey`（memory + skill 事件）、`/skills`（含 apply/reject/archived；显式预载快照）、`/<skill-id>`、`/<command>`（`chat.commands`）、`/model`（全局）/ `/model prefer`（会话偏好并在 run 时生效）。折叠快捷键：`e` / `E` / `c`（输入为空时）。用户规则：`<ConfigDir>/AGENTS.md` + 可选项目 `.yunmengze/AGENTS.md`。模型经 `skills_list` / `skill_view` 按需加载。CLI：`ymz config import-opencode`（离线写 ConfigDir，不经 Gateway）。可选尾巴见 `docs/optimization/current.md`。
+TUI 与 CLI 不得 import `tools`、`providers`、`store/sqlite`、`agent`、`chatsession` 实现。主交互斜杠：`/cron`、`/compact`、`/perm`、`/expand`、`/journey`（memory + skill 事件）、`/skills`（含 apply/reject/archived；显式预载快照）、`/<skill-id>`、`/<command>`（`chat.commands`）、`/model`（全局）/ `/model prefer`（会话偏好并在 run 时生效）。折叠快捷键：`e` / `E` / `c`（输入为空时）。用户规则：`<ConfigDir>/AGENTS.md` + 可选项目 `.yunmengze/AGENTS.md`。模型经 `skills_list` / `skill_view` 按需加载。CLI：`ymz config import-opencode`（离线写 ConfigDir，不经 Gateway）。可选尾巴见 `docs/backlog/current.md`。

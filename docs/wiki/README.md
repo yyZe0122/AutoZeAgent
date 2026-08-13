@@ -1,9 +1,10 @@
-# Architecture ADRs
+# Wiki — design knowledge base
 
-Numbered decision records for YunmengZe. This directory is the project **design knowledge base**.
+Numbered ADRs plus the `core.db` map. Catalog: [`docs/README.md`](../README.md).
 
-Living status / backlog (only): [`docs/optimization/current.md`](../optimization/current.md).  
-Agent/contributor entry: [`AGENTS.md`](../../AGENTS.md).
+Living status / backlog (only): [`docs/backlog/current.md`](../backlog/current.md).  
+Agent/contributor entry: [`AGENTS.md`](../../AGENTS.md).  
+Database map: [`database.md`](database.md).
 
 ## Production shape
 
@@ -19,30 +20,30 @@ Do **not** restore deleted pieces: Module Runtime/Supervisor, out-of-process Mem
 
 | Order | ADR | Topic |
 | --- | --- | --- |
-| 1 | [001](001-core-boundaries.md) | Core process and package boundaries |
-| 2 | [004](004-database-ownership.md) | `core.db` ownership and migrations |
-| 3 | [012](012-tool-broker-execution-boundary.md) | Tool Broker is the only effect path |
-| 4 | [018](018-local-gateway-boundary.md) | Gateway + CLI/TUI client boundary |
-| 5 | [037](037-cli-daemon-lifecycle.md) | Daemon ensure / stop semantics |
-| 6 | [038](038-session-chat-boundary.md) | OpenCode-style agent build / plan RO chat |
-| 7 | [022](022-application-query-boundaries.md) | Writes via services, reads via corequery |
-| 8 | [039](039-logical-child-runs.md) | Logical child Runs (`task` tool, `parent_run_id`) |
-| 9 | [040](040-mcp-tool-broker.md) | MCP stdio + remote HTTP/SSE via Tool Broker |
-| 10 | [041](041-context-packing-and-pressure.md) | Provider-view packing, compaction, context API |
-| 11 | [042](042-chat-native-jobs.md) | Chat-native Job/cron (timed chatsession submit; H7 model pin) |
-| 12 | [043](043-tool-call-permission-interaction.md) | Crush-style tool-call permission (≠ Planner) |
-| 13 | [044](044-in-process-memory-boundary.md) | In-process MemoryManager (Hermes lifecycle) |
-| 14 | [045](045-model-roles.md) | Optional model roles (main / subagent / compact); O4 session prefer + run resolve |
-| 15 | [046](046-session-workspace-and-permission-tiers.md) | Session workspace + permission tiers |
-| 16 | [047](047-structured-logging-and-debug-chain.md) | Structured logs + real-machine debug chain |
-| 17 | [048](048-provider-config-hot-reload.md) | Provider config watch + main-stack hot-reload |
-| 18 | [050](050-in-process-self-improvement.md) | In-process skill draft / habit hint / skill usage (H3/H4/H5-skill) |
+| 1 | [001](adr/001-core-boundaries.md) | Core process and package boundaries |
+| 2 | [004](adr/004-database-ownership.md) | `core.db` ownership and migrations |
+| 3 | [012](adr/012-tool-broker-execution-boundary.md) | Tool Broker is the only effect path |
+| 4 | [018](adr/018-local-gateway-boundary.md) | Gateway + CLI/TUI client boundary |
+| 5 | [037](adr/037-cli-daemon-lifecycle.md) | Daemon ensure / stop semantics |
+| 6 | [038](adr/038-session-chat-boundary.md) | OpenCode-style agent build / plan RO chat |
+| 7 | [022](adr/022-application-query-boundaries.md) | Writes via services, reads via corequery |
+| 8 | [039](adr/039-logical-child-runs.md) | Logical child Runs (`task` tool, `parent_run_id`) |
+| 9 | [040](adr/040-mcp-tool-broker.md) | MCP stdio + remote HTTP/SSE via Tool Broker |
+| 10 | [041](adr/041-context-packing-and-pressure.md) | Provider-view packing, compaction, context API |
+| 11 | [042](adr/042-chat-native-jobs.md) | Chat-native Job/cron (timed chatsession submit; H7 model pin) |
+| 12 | [043](adr/043-tool-call-permission-interaction.md) | Crush-style tool-call permission (≠ Planner) |
+| 13 | [044](adr/044-in-process-memory-boundary.md) | In-process MemoryManager (Hermes lifecycle) |
+| 14 | [045](adr/045-model-roles.md) | Optional model roles (main / subagent / compact); O4 session prefer + run resolve |
+| 15 | [046](adr/046-session-workspace-and-permission-tiers.md) | Session workspace + permission tiers |
+| 16 | [047](adr/047-structured-logging-and-debug-chain.md) | Structured logs + real-machine debug chain |
+| 17 | [048](adr/048-provider-config-hot-reload.md) | Provider config watch + main-stack hot-reload |
+| 18 | [050](adr/050-in-process-self-improvement.md) | In-process skill draft / habit hint / skill usage (H3/H4/H5-skill) |
 
-Also: O3 `chat.commands` (ADR-038 / provider-protocols); O4 run resolve (`internal/modelresolve`, ADR-045).
+Also: O3 `chat.commands` (ADR-038 / [provider-protocols](provider-protocols.md)); O4/H7 run resolve (`internal/modelresolve`, ADR-045：job pin → prefer → main).
 
-Also useful: [003](003-policy-invariants.md) policy, [011](011-approval-capability-binding.md) grants (domain), [013](013-provider-planner-boundary.md) provider boundary (**interactive Planner superseded**), [017](017-scheduler-module-boundary.md) in-process scheduler (+ [042](042-chat-native-jobs.md) product semantics), [034](034-file-based-skills-boundary.md) skills, [035](035-standard-protocol-tool-boundary.md) protocol tools.
+Also useful: [003](adr/003-policy-invariants.md) policy, [011](adr/011-approval-capability-binding.md) grants (domain), [013](adr/013-provider-planner-boundary.md) provider boundary (**interactive Planner superseded**), [017](adr/017-scheduler-module-boundary.md) in-process scheduler (+ [042](adr/042-chat-native-jobs.md) product semantics), [034](adr/034-file-based-skills-boundary.md) skills, [035](adr/035-standard-protocol-tool-boundary.md) protocol tools.
 
-Provider wire formats: [`docs/provider-protocols.md`](../provider-protocols.md).
+Provider wire formats: [`provider-protocols.md`](provider-protocols.md).
 
 ## Index (by number)
 
@@ -51,7 +52,7 @@ Provider wire formats: [`docs/provider-protocols.md`](../provider-protocols.md).
 | 001 | Core boundaries | Production three-piece shape |
 | 003 | Policy invariants | Fail closed; grants bind plan hash |
 | 004 | Database ownership | Single `core.db` |
-| 006 | Linux runtime | XDG / system paths |
+| 006 | Linux runtime | Flat `~/.yunmengze` user root / OS system paths |
 | 007 | Cross-platform abstraction | `internal/platform` |
 | 008 | Threat model | Current host/agent threats |
 | 009 | Event schema evolution | |
@@ -92,8 +93,10 @@ Provider wire formats: [`docs/provider-protocols.md`](../provider-protocols.md).
 
 Missing numbers (002, 005, 014–015, 019–021, 025, …) are **historical gaps**, not missing files to recreate.
 
+Files live under [`adr/`](adr/) as `NNN-kebab-title.md`.
+
 ## Conventions
 
 - Filenames: `NNN-kebab-title.md`, lexicographic order.
-- Significant architecture changes get a new ADR (see `CONTRIBUTING.md`).
-- Do not invent parallel optimization notes; update `docs/optimization/current.md` only.
+- Significant architecture changes get a new ADR (see `CONTRIBUTING.md`); update this index.
+- Do not invent parallel optimization notes; update `docs/backlog/current.md` only.

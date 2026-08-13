@@ -68,7 +68,6 @@
 ```json
 "chat": {
   "workspace": { "default": "client_cwd" },
-  "roots": [],
   "allow_write": true,
   "compaction": { "enabled": true },
   "max_iterations": 16
@@ -100,5 +99,5 @@
 ## 相关
 
 - 实现：`internal/contextpack`、`internal/agent/runner.go`、`internal/chatsession`、`internal/corequery`、`providerconfig.ChatConfig`、migration 016、TUI `/compact`。
-- Provider 字段：`docs/provider-protocols.md`（`contextWindow`）。
+- Provider 字段：`docs/wiki/provider-protocols.md`（`contextWindow`）。
 - 交互 tool permission：ADR-043；记忆 `on_pre_compress`：ADR-044。

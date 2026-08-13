@@ -63,7 +63,7 @@ TUI /skills apply|reject ── Gateway ── skillmaintain ── backup + 原
 ### 可见性
 
 - `GET /v1/skills`：元数据 + `draft` / `last_used_at` / `archived_at`（无正文、无绝对路径）。
-- `GET /v1/skills/events?limit=`
+- `GET /v1/skills/events?limit=&skill_id=`
 - TUI `/journey` 可叠 skill 事件轨（C4）；`/journey skills` / `/journey memory` 可分列。
 
 ## 后果

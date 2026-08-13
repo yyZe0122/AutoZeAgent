@@ -55,10 +55,10 @@ jobs:
         id: notes
         run: |
           tag="${GITHUB_REF_NAME}"
-          notes="docs/changelog/${tag}.md"
+          notes="docs/history/changelog/${tag}.md"
           if [ ! -f "$notes" ]; then
             echo "Missing release notes file: $notes" >&2
-            echo "Add docs/changelog/${tag}.md before tagging." >&2
+            echo "Add docs/history/changelog/${tag}.md before tagging." >&2
             exit 1
           fi
           echo "path=$notes" >> "$GITHUB_OUTPUT"

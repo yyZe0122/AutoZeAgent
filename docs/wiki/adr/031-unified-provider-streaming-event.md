@@ -2,6 +2,7 @@
 
 - 状态：Accepted
 - 日期：2026-07-17
+- 更新：2026-08-13（`GET /v1/model-stream` 已落地）
 
 ## 背景
 
@@ -38,12 +39,14 @@ Stream Handler 返回的错误原样终止调用；Router 一旦已经发出事�
 
 ### Gateway 边界
 
-`GET /v1/events/stream` 继续传输已持久化的 `eventapi.Envelope`，不把 Core Domain Event 包装成 Provider Streaming Event。未来若 Gateway 增加模型输出流，它必须直接序列化 `providerapi.StreamEvent`，不得增加 Gateway 专用的 Delta/Tool Call/Complete 模型。
+`GET /v1/events/stream` 继续传输已持久化的 `eventapi.Envelope`，不把 Core Domain Event 包装成 Provider Streaming Event。
+
+`GET /v1/model-stream`（可选 `session_id` / `run_id`）已落地：SSE `event: model`，`data` 为 `modelstream.Envelope`（`seq` + session/task/run id + 内层 `providerapi.StreamEvent`）。内层不得另造 Delta/Tool Call/Complete 模型；外层 Envelope 只加路由元数据，不改 `StreamEvent` 语义。
 
 ## 后果
 
 - Provider 厂商片段只在 Provider 实现内出现；
 - Agent / chatsession 共享相同的聚合和终止语义；
 - 不完整 Tool Call 不会越过 Provider 边界；
-- Gateway 领域事件流保持兼容，模型输出流也不会再产生第三套 DTO；
+- Gateway 领域事件流保持兼容；模型输出流的内层仍是 `StreamEvent`（外层仅 Envelope 元数据）；
 - 流式增量仍是临时展示数据，恢复以 append-only Agent Run Records 的完整消息为准。

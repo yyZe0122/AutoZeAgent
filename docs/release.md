@@ -18,7 +18,7 @@ Do **not** squash a multi-feature dirty tree into one `release:` commit via `--c
 2. Each commit must compile and keep tests green (`make check` at least once before the first push).
 3. **Push those commits**, then publish.
 
-`--commit-paths all` is only for a leftover that is already one logical change (typically `docs/changelog/vX.Y.Z.md` after the feature commits are on `main`).
+`--commit-paths all` is only for a leftover that is already one logical change (typically `docs/history/changelog/vX.Y.Z.md` after the feature commits are on `main`).
 
 ### Every release (copy-paste)
 
@@ -32,7 +32,7 @@ cd /home/yyze/projects/AutoZeAgent
 #   export PACKAGE_GITHUB_TOKEN=...    # homebrew-tap + scoop-bucket Contents R/W
 
 # 1) Feature commits already on main (see above). Changelog MUST exist:
-#    docs/changelog/vX.Y.Z.md
+#    docs/history/changelog/vX.Y.Z.md
 
 # 2) Clean main (or only changelog leftover) → tag + local GoReleaser upload
 ./scripts/publish-release.sh vX.Y.Z --yes
@@ -50,7 +50,7 @@ Replace `vX.Y.Z` with the real tag (e.g. `v0.2.2`). Script runs `make check`, cr
 | Step | Action |
 | --- | --- |
 | 1 | **Batch-commit** the working tree by feature (not one mega `release:` dump). Push those commits. |
-| 2 | Bump / write **`docs/changelog/vX.Y.Z.md`** (bilingual highlights, asset table, install). Missing file **fails** publish. |
+| 2 | Bump / write **`docs/history/changelog/vX.Y.Z.md`** (bilingual highlights, asset table, install). Missing file **fails** publish. |
 | 3 | No secrets in tree: no `agent.local.json`, `*.db`, `env` with real keys, `bin/`, tokens in docs. |
 | 4 | `make check` green (script runs it unless `--skip-check`). |
 | 5 | `gh auth login` or valid `GITHUB_TOKEN` + `PACKAGE_GITHUB_TOKEN`. |
@@ -118,9 +118,9 @@ GoReleaser builds **one archive per OS/arch**. Each archive contains **two binar
 
 ## Release notes / 更新日志
 
-1. Add `docs/changelog/vX.Y.Z.md` (bilingual: highlights, asset table, verify, install).
-2. Tag must match the file name: tag `v0.2.2` → `docs/changelog/v0.2.2.md`.
-3. Publish uses: `goreleaser release … --release-notes=docs/changelog/${tag}.md`.
+1. Add `docs/history/changelog/vX.Y.Z.md` (bilingual: highlights, asset table, verify, install).
+2. Tag must match the file name: tag `v0.2.2` → `docs/history/changelog/v0.2.2.md`.
+3. Publish uses: `goreleaser release … --release-notes=docs/history/changelog/${tag}.md`.
 4. Missing notes file **fails** the publish script / CI on purpose.
 
 ## Auth / 鉴权

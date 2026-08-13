@@ -54,7 +54,7 @@ Agent 与 plan 都获得只读工具（Risk R0，不扩 grant）：
 
 注入只读快照，**从不**在运行时重新读取 `SKILL.md`。空选择不注入额外 system message；模型应 `skills_list` 再 `skill_view`。
 
-主路径为 TUI `/skills` 显式预载 + 模型 list/view。草稿 apply 不影响已创建 Task 快照（ADR-050）。CLI `skills list` / `run --skill` **未实现**（可选尾巴，见 `docs/optimization/current.md`）。
+主路径为 TUI `/skills` 显式预载 + 模型 list/view。草稿 apply 不影响已创建 Task 快照（ADR-050）。CLI `skills list` / `run --skill` **未实现**（可选尾巴，见 `docs/backlog/current.md`）。
 
 ## 后果
 

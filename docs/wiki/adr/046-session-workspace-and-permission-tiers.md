@@ -6,7 +6,7 @@ Accepted (implemented 2026-08-10)
 
 ## Context
 
-Auto-started `ymzd` used `DataDir` as cwd; empty `chat.roots` made tools see DataDir, not the directory where the user ran `ymz`. Interactive permissions (ADR-043) only offered once/session/deny, with no permanent trust table.
+Auto-started `ymzd` used `DataDir` as cwd, so tools saw DataDir instead of the directory where the user ran `ymz`. Interactive permissions (ADR-043) only offered once/similar/deny, with no permanent trust table.
 
 ## Decision
 
@@ -14,7 +14,7 @@ Auto-started `ymzd` used `DataDir` as cwd; empty `chat.roots` made tools see Dat
 
 1. Client (TUI/CLI) sends absolute `workspace` on task submit (= `os.Getwd()`).
 2. Daemon stores it in `sessions.metadata.workspace` when ensuring the session.
-3. Chat plan Paths / grants use **session workspace** (plus configured `chat.roots` / `chat.workspace.allow`).
+3. Chat plan Paths / grants use **session workspace** (plus configured `chat.workspace.allow`).
 4. Shared `PathGuard` starts with config ceiling; `AddRoot(session workspace)` on chat auth.
 5. `chat.workspace.allow_all=true` disables path-root containment (local single-user only; audited).
 
@@ -27,12 +27,9 @@ Config (optional; defaults preserve client_cwd behavior when roots empty):
     "allow": [],
     "allow_all": false
   },
-  "roots": [],
   "permission": { "mode": "ask" }
 }
 ```
-
-Legacy `chat.roots` remains valid as extra/fixed roots.
 
 ### Permission decisions (ADR-043 extension)
 

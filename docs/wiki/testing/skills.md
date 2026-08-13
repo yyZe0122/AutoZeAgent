@@ -55,7 +55,7 @@ go test ./internal/kernel ./internal/store/sqlite ./internal/skillcatalog ./inte
 - 数据库 trigger 拒绝快照 UPDATE/DELETE，读取时重新计算 SHA-256，内容被篡改则 fail closed；
 - Task Submission 忽略空白、保序去重；对未知 ID 或不可用 Catalog fail closed（`Catalog.Select` 仍拒空/重复）；
 - 相同 Task ID 的幂等重试使用持久快照，不重读已经删除或变化的 Skill 文件；
-- Chat（`chatsession`）从 Task Skill 快照注入**独立** system 消息（ADR-036）；只读快照、不重读 `SKILL.md`；不存在 Memory 模块；
+- Chat（`chatsession`）从 Task Skill 快照注入**独立** system 消息（ADR-036）；只读快照、不重读 `SKILL.md`；会话记忆走 in-process MemoryManager（ADR-044），不是独立 Memory 进程；
 - Skill 不能扩大 capability schema，也不能创建 Approval/Grant、修改 Policy 或执行 Tool；
 - `GET /v1/skills` 只公开稳定排序的元数据（可含 draft/last_used/archived），不泄露文件路径或正文；`gatewayclient.ListSkills` + TUI `/skills` 显式选择并随 `POST /v1/tasks` 附带 `skill_ids`（仅显式进快照）；模型经 `skills_list` / `skill_view` 按需加载（归档隐藏；加载不发 grant）；`/skills apply|reject` 经 `POST /v1/skills/actions`（ADR-050）；
 - `chatsession` 注入 `<ConfigDir>/AGENTS.md`，有则再追加 `<workspace>/.yunmengze/AGENTS.md`（`injectscan`；不扩 grant）；
@@ -64,12 +64,10 @@ go test ./internal/kernel ./internal/store/sqlite ./internal/skillcatalog ./inte
 额外建议：
 
 ```bash
-go test ./internal/gatewayclient ./internal/tui ./internal/chatsession -count=1
+go test ./internal/gatewayclient ./internal/tui ./internal/chatsession ./internal/memory ./internal/skillmaintain -count=1
 ```
 
 ## legacy artifact 删除回归
-
-若仓库含 `internal/architecture` 包：
 
 ```bash
 go test ./internal/architecture

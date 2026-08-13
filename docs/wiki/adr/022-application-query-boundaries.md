@@ -2,7 +2,7 @@
 
 ## 状态
 
-Accepted，2026-07-16。交互 Planner / 人批路径已删除（见 [ADR-038](038-session-chat-boundary.md)）；本 ADR 仅保留仍有效的写入/查询边界。
+Accepted，2026-07-16。交互 Planner / 人批路径已删除（见 [ADR-038](038-session-chat-boundary.md)）；本 ADR 仅保留仍有效的写入/查询边界。2026-08-13：`dependencies_test.go` 增补 TUI / CLI / Gateway 禁导入 effect 路径。
 
 ## 背景
 
@@ -52,7 +52,9 @@ TaskControl                  -> Gateway pause/resume/cancel
 
 - `pkg/*` 不导入 `internal/*`；
 - Gateway、GatewayClient、TaskSubmission、ScheduledTasks 不直接导入 `database/sql` 或 `store/sqlite`；
-- `gatewayclient` 不导入 `gateway` server。
+- `gatewayclient` 不导入 `gateway` server；
+- TUI 与 `cmd/ymz` 不导入 `tools` / `agent` / `chatsession` / `store/sqlite` / `providerruntime` / `providers`；
+- Gateway 不导入 `tools` / `agent` / `providerruntime` / `providers`。
 
 ## 后果
 

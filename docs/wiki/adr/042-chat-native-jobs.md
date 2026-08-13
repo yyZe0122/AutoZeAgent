@@ -44,7 +44,7 @@ Scheduler **只**决定何时提交；不创建 Approval、Grant、Agent Run 或
 
 ### ACK 语义
 
-Core 接受 task 并启动 chat handoff 后 ACK `task_created` + 稳定 `core_task_id`。不再把 `waiting_approval` / `ErrPlanning` 当作成功路径。失败 ACK `failed`，由既有 retry/backoff 处理。
+Core 接受 task 并启动 chat handoff 后 ACK `task_created` + 稳定 `core_task_id`。失败 ACK `failed`，由既有 retry/backoff 处理。`job_runs.status` 不含 `waiting_approval`（migration 024）。
 
 幂等：`core_task_key` = `idempotency_key/scheduled_at`；Core `task_id` 由 key 派生；`AllowExisting` + 字段匹配。
 

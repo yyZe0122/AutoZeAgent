@@ -45,13 +45,13 @@ core.db  single SQLite source of truth
 | **Tool Broker** | Only effect path: Policy → Approval → Grant → path limits → Audit |
 | **Local daemon** | Unique per mode; TUI/`run` auto-ensure; `ymz start\|stop\|restart\|status` |
 | **Multi-provider** | Nested catalog per supplier; select `providerId/modelId…` (OpenCode-style) |
-| **Hot-reload** | Main provider stack (~0.5s) while daemon runs — [ADR-048](docs/architecture/048-provider-config-hot-reload.md) |
+| **Hot-reload** | Main provider stack (~0.5s) while daemon runs — [ADR-048](docs/wiki/adr/048-provider-config-hot-reload.md) |
 | **OpenCode import** | `ymz config import-opencode` → `agent.local.json` (MCP local+remote, `chat.commands`, compaction; warn+drop plugins/LSP) |
-| **Memory · skills · cron · MCP** | In-process memory (`default_ttl` + expired soft-archive), skill drafts + Hermes `skills_list`/`skill_view` + unused archive ([ADR-050](docs/architecture/050-in-process-self-improvement.md)), `AGENTS.md` rules, chat-native jobs, stdio/remote MCP via Broker |
+| **Memory · skills · cron · MCP** | In-process memory (`default_ttl` + expired soft-archive), skill drafts + Hermes `skills_list`/`skill_view` + unused archive ([ADR-050](docs/wiki/adr/050-in-process-self-improvement.md)), `AGENTS.md` rules, chat-native jobs, stdio/remote MCP via Broker |
 | **Slash templates** | `chat.commands` → `/<cmd> [args]` expands `$ARGUMENTS` (instruction only; no grants) |
-| **Session model** | `/model prefer` stores preference; chat runs resolve **prefer → main** (global `/model` unchanged) |
+| **Session model** | `/model prefer` stores preference; chat runs resolve **job pin → prefer → main** (global `/model` unchanged) |
 
-Design KB: [`docs/architecture/`](docs/architecture/) · backlog: [`docs/optimization/current.md`](docs/optimization/current.md) · releases: [`docs/changelog/`](docs/changelog/)
+Docs: [`docs/README.md`](docs/README.md) · wiki: [`docs/wiki/`](docs/wiki/) · backlog: [`docs/backlog/current.md`](docs/backlog/current.md) · releases: [`docs/history/changelog/`](docs/history/changelog/)
 
 ## Install
 
@@ -81,14 +81,14 @@ Pin Pre-release tags (or omit `YMZ_VERSION` when a non-prerelease `latest` exist
 **Windows** → `%LOCALAPPDATA%\Programs\YunmengZe\bin` + user PATH:
 
 ```powershell
-$env:YMZ_VERSION = 'v0.1.0'
+$env:YMZ_VERSION = 'v0.2.5'
 irm "https://raw.githubusercontent.com/yyZe0122/YunmengZe-Agent/main/packaging/scripts/install.ps1" | iex
 ```
 
 **Linux / macOS** → `~/.local/bin`:
 
 ```bash
-export YMZ_VERSION=v0.1.0
+export YMZ_VERSION=v0.2.5
 curl -fsSL "https://raw.githubusercontent.com/yyZe0122/YunmengZe-Agent/main/packaging/scripts/install-user.sh" | sh
 export PATH="$HOME/.local/bin:$PATH"
 ```
@@ -187,11 +187,11 @@ Templates use two sample suppliers: **`deepseek1`** (official bare model ids) an
 
 - Selection is **`providerId/modelId…`** (first `/` only; model segment may contain `/`). Catalog keys match that segment; optional `models.<key>.id` overrides the wire/API id (OpenCode-style).  
 - Example: `deepseek1/deepseek-chat` wires `deepseek-chat`; `deepseek2/deepseek/deepseek-v4-flash` wires `deepseek/deepseek-v4-flash`.  
-- `maxTokens` = output cap; `contextWindow` = packing / UI pressure ([ADR-041](docs/architecture/041-context-packing-and-pressure.md)).  
-- Optional role map `models.subagent` / `models.compact` ([ADR-045](docs/architecture/045-model-roles.md)).  
-- Optional `chat` (workspace, tools, permission, memory, **commands**): full example [`configs/agent.json.example`](configs/agent.json.example) · wire formats [`docs/provider-protocols.md`](docs/provider-protocols.md).  
+- `maxTokens` = output cap; `contextWindow` = packing / UI pressure ([ADR-041](docs/wiki/adr/041-context-packing-and-pressure.md)).  
+- Optional role map `models.subagent` / `models.compact` ([ADR-045](docs/wiki/adr/045-model-roles.md)).  
+- Optional `chat` (workspace, tools, permission, memory, **commands**): full example [`configs/agent.json.example`](configs/agent.json.example) · wire formats [`docs/wiki/provider-protocols.md`](docs/wiki/provider-protocols.md).  
 - User rules: `~/.yunmengze/AGENTS.md` (seeded if missing; do not overwrite existing). Project `.yunmengze/AGENTS.md` is appended when present. Instruction only — no grants.  
-- Optional `mcp.servers`: stdio (`command`) or remote (`type`/`url`/`headers`) — [ADR-040](docs/architecture/040-mcp-tool-broker.md).
+- Optional `mcp.servers`: stdio (`command`) or remote (`type`/`url`/`headers`) — [ADR-040](docs/wiki/adr/040-mcp-tool-broker.md).
 
 ### Hot-reload
 
@@ -202,7 +202,7 @@ While the daemon is up, edits to `agent.json` / `agent.local.json` / `env` rebui
 | model, baseURL, protocol, literal / `{file:}` key | `chat.*`, MCP, `models.subagent\|compact` |
 | `{env:VAR}` when process VAR is still empty | process env already set; or daemon started without agent |
 
-Details: [ADR-048](docs/architecture/048-provider-config-hot-reload.md).
+Details: [ADR-048](docs/wiki/adr/048-provider-config-hot-reload.md).
 
 ## Run
 
@@ -223,31 +223,41 @@ Chat transcript uses **rounded bubbles** (user / assistant / thinking / tool), n
 
 | Input | Behavior |
 | --- | --- |
-| **Tab** | **agent** (R/W) ↔ **plan** (read-only) |
+| **Tab** · **Shift+Tab** | **agent** (R/W) ↔ **plan** (read-only); Tab also completes slash |
 | Plain text | Submit on current mode / session |
 | `/help` | Slash list + keys |
-| `/new` · `/sessions` · `/tasks` | Session / task UX |
-| `/model` | Switch **global** main (`/model provider/model`); `/model prefer [ref]` session prefer (applied on next chat run) |
+| `/new` · `/sessions` · `/tasks` | New session; list sessions; list / focus tasks |
+| `/back` · `/clear` | Session list (`/clear` aliases `/back`) |
+| `/model` | Switch **global** main (`/model provider/model`); `/model prefer [ref]` session prefer (next chat run) |
 | `/skills` · `/<skill-id>` | Multi-select preload, or skill-as-slash (instruction only). Model otherwise uses `skills_list` → `skill_view`. `/skills apply\|reject <id>` · `/skills archived` |
 | `/<cmd> [args]` | `chat.commands` template slash (`$ARGUMENTS`); priority: built-in → commands → skill |
-| `/compact` · `/perm` · `/memory` | Context, tool permission (H4 may hint prior once/similar), facts (`/memory archived`) |
+| `/compact` · `/perm` | Context compact; tool permission (H4 may hint prior once/similar) |
+| `/memory` · `/refresh-memory` | Facts (`/memory archived` · `forget\|promote <id>`); rebuild frozen inject |
 | `/expand` · `/journey` | Fold/expand; prepend memory and/or skill-event timeline (`/journey skills`) |
 | `/cron` | Jobs on focused session |
-| `/status` · `/retry` · `/stop` | Health · resubmit · cancel |
-| `/quit` | Exit TUI (daemon stays up) |
+| `/pause` · `/resume` · `/cancel` · `/stop` | Task control (`/stop` = `/cancel`) |
+| `/status` · `/retry` · `/theme` | Health · resubmit last user message · day/night theme |
+| `/quit` | Exit TUI (`/q` `/exit`; daemon stays up) |
 | **e** / **E** / **c** | Expand last foldable · expand all · collapse (empty input) |
 
 ### CLI (scripts)
 
 ```bash
+ymz version
+ymz tui --mode user
+ymz paths user
 ymz health --mode user
-ymz run --mode user "Report workspace status without changing files."
+ymz run --mode user --execution-mode plan "Report workspace status without changing files."
 ymz task status TASK_ID --mode user
-ymz logs --tail 200 --run RUN_ID
+ymz task pause|resume|cancel TASK_ID --mode user
+ymz logs --tail 200 --run RUN_ID --session SESSION_ID --task TASK_ID
 ymz job list --mode user
+ymz job create --session SESSION_ID --name NAME --title TITLE --every 1h "objective"
+ymz job status|pause|resume|cancel JOB_ID --mode user
+ymz db check --mode user
 ```
 
-Prefer TUI `/cron` to create jobs. Logs: `YMZ_LOG_LEVEL=debug` · [ADR-047](docs/architecture/047-structured-logging-and-debug-chain.md).
+Prefer TUI `/cron` to create jobs. Logs: `YMZ_LOG_LEVEL=debug` · [ADR-047](docs/wiki/adr/047-structured-logging-and-debug-chain.md).
 
 ## Architecture
 
@@ -262,9 +272,9 @@ User → CLI / TUI → local Gateway → ymzd
 | CLI · TUI | Gateway clients only — no tools, providers, or grants |
 | Gateway | HTTP/UDS adapter; no tool execution, no model calls |
 | Tool Broker | Sole model-requested effect path |
-| Jobs | Fixed-interval chat submits ([ADR-042](docs/architecture/042-chat-native-jobs.md)) |
+| Jobs | Fixed-interval chat submits ([ADR-042](docs/wiki/adr/042-chat-native-jobs.md)) |
 
-Start: [`docs/architecture/README.md`](docs/architecture/README.md).
+Start: [`docs/README.md`](docs/README.md) · [`docs/wiki/README.md`](docs/wiki/README.md).
 
 ## Development
 
@@ -288,7 +298,7 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md), [`AGENTS.md`](AGENTS.md). Vulns: [`SEC
 - Back up `core.db` before upgrades on important installs.
 - Review remote install scripts before piping to a shell.
 
-Details: [`SECURITY.md`](SECURITY.md), [threat model ADR-008](docs/architecture/008-threat-model.md).
+Details: [`SECURITY.md`](SECURITY.md), [threat model ADR-008](docs/wiki/adr/008-threat-model.md).
 
 ## License
 
@@ -296,6 +306,6 @@ Details: [`SECURITY.md`](SECURITY.md), [threat model ADR-008](docs/architecture/
 
 ## Status
 
-Alpha. Production shape is the three-piece stack above. TUI Phase 2, OpenCode O1–O4, H3–H7 / H5-skill, Hermes skill list/view, MCP-prefer prompts, and `AGENTS.md` rules are landed (unreleased after v0.2.4). Remaining tails (O5–O6 / H2 / M*) in [`docs/optimization/current.md`](docs/optimization/current.md).
+Alpha. Production shape is the three-piece stack above. TUI Phase 2, OpenCode O1–O4, H3–H7 / H5-skill, Hermes skill list/view, MCP-prefer prompts, and `AGENTS.md` rules shipped in **v0.2.5**. Remaining tails (O5–O6 / H2 / M*) in [`docs/backlog/current.md`](docs/backlog/current.md).
 
 Release checklist: [`docs/release.md`](docs/release.md).

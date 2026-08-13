@@ -6,7 +6,7 @@
 #
 # Usage (as root) — full runbook: docs/release.md
 #   cd /home/yyze/projects/AutoZeAgent
-#   # require docs/changelog/vX.Y.Z.md first
+#   # require docs/history/changelog/vX.Y.Z.md first
 #   ./scripts/publish-release.sh v0.2.2 --commit-paths all --yes   # dirty tree → commit+push+tag+upload
 #   ./scripts/publish-release.sh v0.2.2                            # clean main → tag+upload
 #   ./scripts/publish-release.sh v0.2.2 --upload-only               # tag already on HEAD
@@ -151,7 +151,7 @@ REPO_DIR=${REPO_DIR:-$REPO_DEFAULT}
 cd "$REPO_DIR" || die "cannot cd $REPO_DIR"
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "not a git repository: $REPO_DIR"
 
-NOTES="docs/changelog/${TAG}.md"
+NOTES="docs/history/changelog/${TAG}.md"
 [[ -f "$NOTES" ]] || die "missing release notes: $NOTES (create before publishing)"
 
 current_branch=$(git rev-parse --abbrev-ref HEAD)
@@ -183,7 +183,7 @@ commit_release_paths() {
   local paths=(
     .goreleaser.yaml
     .github/workflows/release.yml
-    docs/changelog/
+    docs/history/changelog/
     docs/release.md
     packaging/scripts/
     README.md

@@ -40,7 +40,6 @@ Agent 可通过 `chat.tools.git` / `chat.tools.process`（默认 false）opt-in�
 ```json
 "chat": {
   "workspace": { "default": "client_cwd", "allow": [], "allow_all": false },
-  "roots": [],
   "allow_write": true,
   "tools": { "git": false, "process": false },
   "compaction": { "enabled": true },
@@ -54,7 +53,7 @@ Agent 可通过 `chat.tools.git` / `chat.tools.process`（默认 false）opt-in�
 - `tools.git` / `tools.process`：仅 agent 预授权；
 - `permission.mode`：tool-call 交互见 ADR-043 / 四档 ADR-046（≠ 整单 Planner）；
 - 会话记忆：ADR-044；注入/skill 正文经 `injectscan`（H6）fail-closed；
-- 会话模型偏好（O4）：`metadata.model` / `preferred_model`；不改全局 main；chat run 解析 prefer→main（见 ADR-045）；
+- 会话模型偏好（O4）：`metadata.model` / `preferred_model`；不改全局 main；chat run 解析 **job pin → prefer → main**（见 ADR-045）；
 - `chat.commands`（O3）：用户 slash 模板，仅 instruction；TUI 展开后作为 user 消息提交；不扩 grant。
 
 ### 任务控制
@@ -70,7 +69,7 @@ Agent 可通过 `chat.tools.git` / `chat.tools.process`（默认 false）opt-in�
 ### 不变
 
 - Gateway 不执行 tool、不调 provider、不发 grant；
-- 新任务状态机：`created → running → (paused) → completed|failed|cancelled`；历史 DB 行中的 `planning`/`waiting_approval`/`approved` 仅只读展示；
+- 任务状态机：`created → running → (paused) → completed|failed|cancelled`；无 Planner 遗留态；
 - Skill 与 `chat.commands` 仅指令文本，不扩大授权；TUI 可 `/skills`、`/skills apply|reject`、`/<skill-id>` 或 `/<command>` 显式使用（草稿见 ADR-050）。模型经 `skills_list` / `skill_view` 按需加载（ADR-036）。
 - 可选用户规则：`<ConfigDir>/AGENTS.md`（EnsureConfig 缺则种子）始终注入；`<workspace>/.yunmengze/AGENTS.md` 存在则追加。经 `injectscan`；不扩 grant。
 

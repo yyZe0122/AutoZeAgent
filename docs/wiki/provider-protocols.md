@@ -13,7 +13,7 @@ Configuration is loaded **only** from the OS config directory (`paths.Layout.Con
 | user (all OS) | `~/.yunmengze` (`%USERPROFILE%\.yunmengze` on Windows); override with `YMZ_HOME` |
 | system | Linux `/etc/yunmengze` · Windows `ProgramData\YunmengZe\config` · macOS system path from `paths` |
 
-On first start, if ConfigDir has no file, the daemon may **migrate** once from the process working directory or data dir (legacy project `agent.local.json`), otherwise it writes a default template with `{env:…}` placeholders (no secrets) and may seed an empty `env` template. Installers do the same without overwriting existing files. Project directories are **not** searched for ongoing loads.
+On first start, if ConfigDir has no file, the daemon writes a default template with `{env:…}` placeholders (no secrets) and may seed an empty `env` template. It does **not** copy project/cwd configs. Installers do the same without overwriting existing files.
 
 ### Import from OpenCode
 
@@ -97,7 +97,7 @@ DEEPSEEK1_API_KEY=sk-...
 DEEPSEEK2_API_KEY=sk-...
 ```
 
-See also [`configs/agent.json.example`](../configs/agent.json.example) (includes env / file / literal illustrations).
+See also [`configs/agent.json.example`](../../configs/agent.json.example) (includes env / file / literal illustrations).
 
 ## Multi-provider catalog (OpenCode-style nesting)
 
@@ -146,7 +146,7 @@ Same model segment on two suppliers is fine; selection disambiguates. Templates 
 - Mistyped keys of the form `providerID/modelID` when the selection model segment is bare are still accepted as a convenience; wire id remains the bare segment (or `id`).
 - Empty `models` under a provider allows any model id (pass-through; API may still reject unknown ids).
 - TUI `/model` lists `providerId/modelId…` refs and only changes top-level **global** `model` (`PUT /v1/config/model`).
-- Session **preference** (optional): `PATCH /v1/sessions/{id}` with `preferred_model` stores `metadata.model` (O4). TUI `/model prefer [ref]` sets preference without switching global main. Chat runs resolve **prefer → main** via `internal/modelresolve` (invalid prefer falls back to main).
+- Session **preference** (optional): `PATCH /v1/sessions/{id}` with `preferred_model` stores `metadata.model` (O4). TUI `/model prefer [ref]` sets preference without switching global main. Chat runs resolve **job pin (H7) → prefer → main** via `internal/modelresolve` (invalid prefer falls back to main; invalid job pin fails start).
 - **`ready`:** true only when config load succeeded **and** agent/chat was bound at daemon start. Otherwise `error` explains (fix config, or `ymz restart` if chat never started). Secrets never appear in `error`.
 
 ### Hot-reload (ADR-048)

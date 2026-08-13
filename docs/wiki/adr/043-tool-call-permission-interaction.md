@@ -19,9 +19,9 @@ Crush 等产品在 **单次 tool call** 边界提供 allow/deny 队列，无需�
 | | 交互 Planner（禁止） | Tool-call permission（本 ADR） |
 | --- | --- | --- |
 | 对象 | 整份 plan / plan-step Start | **单次** tool call（Broker 边界） |
-| 任务状态 | `waiting_approval` 等 | task/run 保持 running；call 挂起 |
+| 任务状态 | 整单审批态（已删） | task/run 保持 running；call 挂起 |
 | 授权 | 批 plan 后批量 grant | decide 后 **scoped** grant 再 `AuthorizeAndConsume` |
-| Gateway | 已删除的人批 / plan-step Start | `GET/POST /v1/permissions…` |
+| Gateway | 已删除的人批 / plan-step Start | `GET /v1/permissions` + `POST /v1/permissions/{id}/decide` |
 
 ### 配置：`chat.permission.mode`
 
@@ -35,7 +35,6 @@ Crush 等产品在 **单次 tool call** 边界提供 allow/deny 队列，无需�
 | --- | --- |
 | **`preauth`**（默认） | 无 matching grant + `require_approval` → **立即 deny** |
 | **`ask`** | 同上条件且为 **交互** chat → **pending**；TUI/Gateway decide 后继续或 deny |
-| **`auto`** | 预留；当前解析为 `preauth` |
 
 - **plan 模式**：永不因 permission 扩大写/exec。
 - **Job/cron**：`scheduled_*` task id 或 actor `scheduler` → **不 wait**，立即 deny（fail closed）。
@@ -61,7 +60,7 @@ agent loop → Broker.Execute
 - Gateway：
   - `GET /v1/permissions?session_id=&limit=`
   - `POST /v1/permissions/{id}/decide` body：`{ "decision": "allow_once"|"allow_similar"|"allow_permanent"|"deny", "actor": "…", "confirm": false }`
-- TUI：`/perm` 列表；`/perm once|similar|permanent|deny <id-prefix>`（`allow_session` 仍接受为 similar 别名）；热键 1–4
+- TUI：`/perm` 列表；`/perm once|similar|permanent|deny <id-prefix>`；热键 1–4
 - H4：List pending 可带只读 `suggested_decision` / `suggested_reason`（once/similar 或 deny 提示）；**不**自动 decide、**不**建议 permanent。路径：双方皆空才只比 tool+capability；一侧空不匹配；非空须 `filepath.Clean` 后相等或带分隔符的目录前缀（`/tmp/foo` 不匹配 `/tmp/foobar`）。有 `session_id` 时只查同会话。
 - ask 模式：chat plan **嵌入** process/git 的 once + session CapabilityScope，**不**预发这些 grant（`issueChatGrants` 跳过）
 
@@ -75,14 +74,14 @@ CreatePending / Decide 成功后 **best-effort** 追加 Event Store 事件（不
 | `permission.decided` | Decide allow/deny 后 | TUI SSE → 刷新 pending 列表 |
 
 - `aggregate_type=tool_permission`；payload 含 `permission_id` / `session_id` / `tool` 等（无密钥）。
-- **Decide 仍只经** `POST /v1/permissions/{id}/decide`（或 client `DecidePermission*`）；SSE **不**携带决策、不替代 HTTP。
+- **Decide 仍只经** `POST /v1/permissions/{id}/decide`（或 client `DecidePermission*`）。SSE `permission.decided` payload **可含** `decision`（无密钥），仅作 TUI 刷新信号，**不**替代 HTTP decide。
 - 无 Events 配置时静默跳过 Append（单测 / 精简接线）。
 - 轮询 list 仍保留作兜底（断线 / 旧客户端）。
 
 ### Grant 范围
 
 - **allow_once**：单次 call；从 plan once scope 签发。
-- **allow_similar**（原 allow_session）：本会话同 capability，路径尽量收窄到请求路径所属 plan 根；TTL ~24h。
+- **allow_similar**：本会话同 capability，路径尽量收窄到请求路径所属 plan 根；TTL ~24h。
 - **allow_permanent**：需 `confirm:true` 二次确认；写 ConfigDir `permissions-trust.json`；长 TTL grant。
 - **deny**：不发 grant。
 - scheme A 路径/command 规则不变。见 ADR-046。

@@ -1,5 +1,7 @@
 # ADR-004：数据库所有权
 
+活人表图：[`docs/wiki/database.md`](../database.md)。
+
 - 状态：Accepted
 - 日期：2026-07-13
 - 更新：2026-08-10（memory productization migration 020 FTS / kind；ADR-044）

@@ -32,4 +32,4 @@
 
 ## 初始控制
 
-结构化 Plan、Plan Hash、Capability Grant、类型化工具、路径规范化、事件幂等、Secret 脱敏、默认拒绝策略、Gateway 不执行 tool/不发 grant。更强 Linux sandbox 见 `docs/security/linux-sandbox-roadmap.md`。
+结构化 Plan、Plan Hash、Capability Grant、类型化工具、路径规范化、事件幂等、Secret 脱敏、默认拒绝策略、Gateway 不执行 tool/不发 grant。更强 Linux sandbox 见 `docs/wiki/security/linux-sandbox-roadmap.md`。

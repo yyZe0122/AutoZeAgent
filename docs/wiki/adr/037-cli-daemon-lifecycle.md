@@ -5,7 +5,7 @@
 
 ## 决策
 
-`ymz` / `ymz` 在进入 **TUI** 或执行 **`run`** 前，通过 `internal/daemonctl` 确保本 `--mode` 下唯一的 `ymzd` 已就绪：
+`ymz` 在进入 **TUI** 或执行 **`run`** 前，通过 `internal/daemonctl` 确保本 `--mode` 下唯一的 `ymzd` 已就绪：
 
 1. 探测本地 Gateway（`gateway.json` + `/v1/health`）；
 2. 未就绪则在旁路启动 `ymzd --mode <mode>`（与 CLI 同目录或 `PATH`）；
@@ -45,4 +45,4 @@ ymz daemon start|stop|restart|status [--mode user|system]
 
 ## 与 TUI 的关系
 
-TUI 在 `ensureDaemon` 成功后调用 `tui.Run`；UI 内所有读写经 `gatewayclient`（`tui.Gateway`）打 Gateway。退出 TUI（仅 `/quit` 等斜杠）不停止 daemon。包边界与 backlog 见 `docs/optimization/current.md`。
+TUI 在 `ensureDaemon` 成功后调用 `tui.Run`；UI 内所有读写经 `gatewayclient`（`tui.Gateway`）打 Gateway。退出 TUI（仅 `/quit` 等斜杠）不停止 daemon。包边界与 backlog 见 `docs/backlog/current.md`。
