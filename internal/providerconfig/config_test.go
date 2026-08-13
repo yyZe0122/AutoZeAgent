@@ -377,6 +377,24 @@ func TestEnsureConfigWritesDefaultWhenEmpty(t *testing.T) {
 	if selected != "deepseek1/deepseek-chat" || len(models) == 0 {
 		t.Fatalf("selected=%q models=%v", selected, models)
 	}
+	agents := filepath.Join(root, AgentsFilename)
+	raw, err := os.ReadFile(agents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "用户没要求的不要做") {
+		t.Fatalf("default AGENTS.md missing rules: %s", raw)
+	}
+	if !strings.Contains(string(raw), "拿不准的先问用户") {
+		t.Fatalf("default AGENTS.md missing conservative cleanup: %s", raw)
+	}
+	if strings.Contains(string(raw), "\t4.") || strings.Contains(string(raw), "\t5.") {
+		t.Fatalf("default AGENTS.md has indented list items: %s", raw)
+	}
+	created, err := EnsureAgentsFile(root)
+	if err != nil || created {
+		t.Fatalf("second ensure created=%v err=%v", created, err)
+	}
 }
 
 func writeConfig(t *testing.T, path, model, baseURL string) {
