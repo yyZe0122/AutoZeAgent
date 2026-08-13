@@ -129,6 +129,7 @@
       "session_search": true,
       "curator": { "enabled": true, "max_facts": 3, "timeout_ms": 15000 }
     },
+    "skills": { "unused_ttl": "" },
     "commands": {
       "review": {
         "description": "Code review focus",

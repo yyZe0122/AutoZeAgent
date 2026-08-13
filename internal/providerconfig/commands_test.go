@@ -72,6 +72,22 @@ func TestValidateMemoryDefaultTTL(t *testing.T) {
 	}
 }
 
+func TestValidateSkillsUnusedTTL(t *testing.T) {
+	t.Parallel()
+	if err := (ChatConfig{Skills: &ChatSkillsConfig{UnusedTTL: "720h"}}).validate(); err != nil {
+		t.Fatal(err)
+	}
+	if d := (ChatConfig{Skills: &ChatSkillsConfig{UnusedTTL: "720h"}}).SkillsUnusedTTL(); d != 720*time.Hour {
+		t.Fatalf("ttl = %s", d)
+	}
+	if (ChatConfig{}).SkillsUnusedTTL() != 0 {
+		t.Fatal("omit should be zero")
+	}
+	if err := (ChatConfig{Skills: &ChatSkillsConfig{UnusedTTL: "nope"}}).validate(); err == nil {
+		t.Fatal("want invalid duration")
+	}
+}
+
 func TestCommandList(t *testing.T) {
 	t.Parallel()
 	cfg := ChatConfig{Commands: map[string]ChatCommandConfig{

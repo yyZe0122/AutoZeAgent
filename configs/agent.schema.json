@@ -244,6 +244,17 @@
             }
           }
         },
+        "skills": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "H5-skill unused soft-archive (ADR-050). Omit = no automatic archive.",
+          "properties": {
+            "unused_ttl": {
+              "type": "string",
+              "description": "Go duration; skills with last_used_at older than this are soft-archived (e.g. 720h). Empty or omit = no automatic archive. Never-used skills are not archived."
+            }
+          }
+        },
         "commands": {
           "type": "object",
           "additionalProperties": {

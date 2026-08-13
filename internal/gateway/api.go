@@ -41,6 +41,7 @@ type QueryService interface {
 	ListRuns(context.Context, corequery.RunListOptions) ([]corequery.Run, error)
 	GetRun(context.Context, kernel.RunID) (corequery.Run, error)
 	ListMemory(context.Context, corequery.MemoryListOptions) ([]corequery.MemoryEntry, error)
+	ListSkillEvents(context.Context, corequery.SkillEventListOptions) ([]corequery.SkillEvent, error)
 }
 
 type TaskSubmitter interface {
@@ -150,6 +151,8 @@ type APIConfig struct {
 	ToolPermissions ToolPermissionService
 	// MemoryControl is optional; when set, exposes POST /v1/memory/actions (refresh/forget/promote).
 	MemoryControl MemoryControlService
+	// SkillControl is optional; when set, exposes POST /v1/skills/actions (apply/reject).
+	SkillControl SkillControlService
 	// SessionPrefs is optional; PATCH session preferred_model (O4).
 	SessionPrefs SessionPreferenceService
 }
@@ -166,6 +169,19 @@ type MemoryControlService interface {
 	PromoteMemory(ctx context.Context, entryID string) (corequery.MemoryEntry, error)
 }
 
+// SkillControlService is the narrow write surface for skill draft apply/reject (ADR-050).
+type SkillControlService interface {
+	ApplySkillDraft(ctx context.Context, skillID, actor string) error
+	RejectSkillDraft(ctx context.Context, skillID, actor string) error
+	SkillUsage(ctx context.Context) (map[string]SkillUsageView, error)
+}
+
+// SkillUsageView is last-used / archive metadata for GET /v1/skills.
+type SkillUsageView struct {
+	LastUsedAt string `json:"last_used_at,omitempty"`
+	ArchivedAt string `json:"archived_at,omitempty"`
+}
+
 // ToolPermissionService lists and decides interactive tool permissions.
 type ToolPermissionService interface {
 	ListPending(ctx context.Context, sessionID string, limit int) ([]ToolPermissionView, error)
@@ -176,20 +192,22 @@ type ToolPermissionService interface {
 
 // ToolPermissionView is the JSON shape for permission rows.
 type ToolPermissionView struct {
-	ID         string `json:"permission_id"`
-	SessionID  string `json:"session_id,omitempty"`
-	TaskID     string `json:"task_id"`
-	RunID      string `json:"run_id"`
-	ToolCallID string `json:"tool_call_id"`
-	ToolName   string `json:"tool_name"`
-	Capability string `json:"capability,omitempty"`
-	Path       string `json:"path,omitempty"`
-	Risk       string `json:"risk,omitempty"`
-	State      string `json:"state"`
-	GrantID    string `json:"grant_id,omitempty"`
-	Decision   string `json:"decision,omitempty"`
-	CreatedAt  string `json:"created_at"`
-	DecidedAt  string `json:"decided_at,omitempty"`
+	ID                string `json:"permission_id"`
+	SessionID         string `json:"session_id,omitempty"`
+	TaskID            string `json:"task_id"`
+	RunID             string `json:"run_id"`
+	ToolCallID        string `json:"tool_call_id"`
+	ToolName          string `json:"tool_name"`
+	Capability        string `json:"capability,omitempty"`
+	Path              string `json:"path,omitempty"`
+	Risk              string `json:"risk,omitempty"`
+	State             string `json:"state"`
+	GrantID           string `json:"grant_id,omitempty"`
+	Decision          string `json:"decision,omitempty"`
+	CreatedAt         string `json:"created_at"`
+	DecidedAt         string `json:"decided_at,omitempty"`
+	SuggestedDecision string `json:"suggested_decision,omitempty"`
+	SuggestedReason   string `json:"suggested_reason,omitempty"`
 }
 
 type API struct {
@@ -210,6 +228,7 @@ type API struct {
 	sessionCompact   SessionCompactor
 	toolPermissions  ToolPermissionService
 	memoryControl    MemoryControlService
+	skillControl     SkillControlService
 	sessionPrefs     SessionPreferenceService
 }
 
@@ -234,7 +253,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		modelStream: config.ModelStream,
 		mcp:         config.MCP, chatCommands: config.ChatCommands,
 		sessionCompact: config.SessionCompact, toolPermissions: config.ToolPermissions,
-		memoryControl: config.MemoryControl, sessionPrefs: config.SessionPrefs,
+		memoryControl: config.MemoryControl, skillControl: config.SkillControl, sessionPrefs: config.SessionPrefs,
 	}, nil
 }
 
@@ -282,6 +301,10 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.handleConfigCommands(w, r)
 	case r.URL.Path == "/v1/skills":
 		a.handleSkills(w, r)
+	case r.URL.Path == "/v1/skills/events":
+		a.handleSkillEvents(w, r)
+	case r.URL.Path == "/v1/skills/actions":
+		a.handleSkillActions(w, r)
 	case r.URL.Path == "/v1/memory":
 		a.handleMemory(w, r)
 	case r.URL.Path == "/v1/memory/actions":

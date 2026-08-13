@@ -227,6 +227,34 @@ func TestListMemoryExcludesArchivedByDefault(t *testing.T) {
 	}
 }
 
+func TestListSkillEvents(t *testing.T) {
+	ctx := context.Background()
+	db, err := coresqlite.Open(ctx, t.TempDir()+"/core.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+	sqlDB := db.SQL()
+	if _, err := sqlDB.ExecContext(ctx, `
+		INSERT INTO skill_events(event_id, skill_id, action, actor, path, content_hash, created_at)
+		VALUES(?,?,?,?,?,?,?)`,
+		"ev-1", "demo", "used", "user", "", "", stamp); err != nil {
+		t.Fatal(err)
+	}
+	store, err := New(sqlDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := store.ListSkillEvents(ctx, SkillEventListOptions{Page: Page{Limit: 10}, SkillID: "demo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ID != "ev-1" || items[0].Action != "used" {
+		t.Fatalf("events = %+v", items)
+	}
+}
+
 func TestListSessionsEmpty(t *testing.T) {
 	ctx := context.Background()
 	db, err := coresqlite.Open(ctx, t.TempDir()+"/core.db")

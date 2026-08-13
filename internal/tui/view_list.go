@@ -133,10 +133,17 @@ func (m *model) listLine(i int) string {
 		if src == "" {
 			src = "?"
 		}
+		flags := src
+		if sk.Draft {
+			flags += " draft"
+		}
+		if sk.ArchivedAt != "" {
+			flags += " archived"
+		}
 		return fmt.Sprintf("%s%s  [%s]  %s",
 			mark,
 			sk.ID,
-			src,
+			flags,
 			styleDim.Render(truncate(label, 40)),
 		)
 	case listPermissions:
@@ -148,11 +155,16 @@ func (m *model) listLine(i int) string {
 		if path == "" {
 			path = "—"
 		}
-		return fmt.Sprintf("%s  %s  %s  %s",
+		hint := ""
+		if p.SuggestedReason != "" {
+			hint = " · " + p.SuggestedReason
+		}
+		return fmt.Sprintf("%s  %s  %s  %s%s",
 			shortID(p.ID),
 			p.ToolName,
 			styleDim.Render(truncate(path, 36)),
 			styleDim.Render(p.Risk),
+			styleDim.Render(hint),
 		)
 	default:
 		if i < 0 || i >= len(m.tasks) {

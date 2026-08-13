@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/yyZe0122/yunmengze-agent/internal/app"
 )
@@ -100,18 +102,88 @@ type Skill struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Source      string `json:"source"`
+	Draft       bool   `json:"draft,omitempty"`
+	LastUsedAt  string `json:"last_used_at,omitempty"`
+	ArchivedAt  string `json:"archived_at,omitempty"`
+}
+
+// SkillEvent is one skill_events row (ADR-050).
+type SkillEvent struct {
+	ID          string `json:"event_id"`
+	SkillID     string `json:"skill_id"`
+	Action      string `json:"action"`
+	Actor       string `json:"actor,omitempty"`
+	Path        string `json:"path,omitempty"`
+	ContentHash string `json:"content_hash,omitempty"`
+	CreatedAt   string `json:"created_at"`
 }
 
 // ListSkills returns discovered skill metadata (explicit selection only; no auto-match).
 func (c *Client) ListSkills(ctx context.Context) ([]Skill, error) {
+	return c.ListSkillsFilter(ctx, false)
+}
+
+// ListSkillsFilter is ListSkills with optional archived-only rows.
+func (c *Client) ListSkillsFilter(ctx context.Context, includeArchived bool) ([]Skill, error) {
+	path := "/v1/skills"
+	if includeArchived {
+		path += "?include_archived=true"
+	}
 	var response struct {
 		Skills []Skill `json:"skills"`
 	}
-	if err := c.inner.DoJSON(ctx, http.MethodGet, "/v1/skills", nil, &response); err != nil {
+	if err := c.inner.DoJSON(ctx, http.MethodGet, path, nil, &response); err != nil {
 		return nil, fmt.Errorf("list skills: %w", err)
 	}
 	if response.Skills == nil {
 		return []Skill{}, nil
 	}
 	return response.Skills, nil
+}
+
+// ListSkillEvents returns recent skill draft/apply/used events.
+func (c *Client) ListSkillEvents(ctx context.Context, skillID string, limit int) ([]SkillEvent, error) {
+	path := "/v1/skills/events"
+	q := url.Values{}
+	if s := strings.TrimSpace(skillID); s != "" {
+		q.Set("skill_id", s)
+	}
+	if limit > 0 {
+		q.Set("limit", fmt.Sprintf("%d", limit))
+	}
+	if enc := q.Encode(); enc != "" {
+		path += "?" + enc
+	}
+	var response struct {
+		Events []SkillEvent `json:"events"`
+	}
+	if err := c.inner.DoJSON(ctx, http.MethodGet, path, nil, &response); err != nil {
+		return nil, fmt.Errorf("list skill events: %w", err)
+	}
+	if response.Events == nil {
+		return []SkillEvent{}, nil
+	}
+	return response.Events, nil
+}
+
+// ApplySkillDraft promotes SKILL.md.draft after user confirmation.
+func (c *Client) ApplySkillDraft(ctx context.Context, skillID string) error {
+	var out map[string]any
+	if err := c.inner.DoJSON(ctx, http.MethodPost, "/v1/skills/actions", map[string]string{
+		"action": "apply", "skill_id": strings.TrimSpace(skillID), "actor": "tui",
+	}, &out); err != nil {
+		return fmt.Errorf("apply skill draft: %w", err)
+	}
+	return nil
+}
+
+// RejectSkillDraft discards SKILL.md.draft.
+func (c *Client) RejectSkillDraft(ctx context.Context, skillID string) error {
+	var out map[string]any
+	if err := c.inner.DoJSON(ctx, http.MethodPost, "/v1/skills/actions", map[string]string{
+		"action": "reject", "skill_id": strings.TrimSpace(skillID), "actor": "tui",
+	}, &out); err != nil {
+		return fmt.Errorf("reject skill draft: %w", err)
+	}
+	return nil
 }

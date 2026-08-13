@@ -35,7 +35,7 @@ func newProcessTool(guard *PathGuard, runner *executor.Runner) (Tool, error) {
 
 func (t *processTool) Definition() toolapi.Definition {
 	return toolapi.Definition{
-		Name: "process_exec", Description: "Execute an approved command in an approved working directory. directory must be an absolute path under an approved grant path; command and arguments must match the approved grant exactly.",
+		Name: "process_exec", Description: "Last resort: execute an approved command as argv (not a shell) in an approved working directory. Do not reimplement a configured mcp_* tool by writing Python/bash. Prefer fs_glob/fs_grep for find/grep. directory must be an absolute path under an approved grant path; command and arguments must match the approved grant exactly.",
 		Risk: string(policy.RiskR2), DefaultTimeoutMillis: 30000,
 		InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false,"required":["command","directory"],"properties":{"command":{"type":"string"},"arguments":{"type":"array","items":{"type":"string"}},"directory":{"type":"string"},"environment":{"type":"object","additionalProperties":{"type":"string"}}}}`),
 	}

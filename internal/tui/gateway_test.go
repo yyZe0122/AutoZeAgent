@@ -83,6 +83,27 @@ func (f *fakeGateway) ListSkills(context.Context) ([]gatewayclient.Skill, error)
 	return f.skills, nil
 }
 
+func (f *fakeGateway) ListSkillsFilter(_ context.Context, includeArchived bool) ([]gatewayclient.Skill, error) {
+	if !includeArchived {
+		return f.skills, nil
+	}
+	var out []gatewayclient.Skill
+	for _, s := range f.skills {
+		if s.ArchivedAt != "" {
+			out = append(out, s)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeGateway) ListSkillEvents(context.Context, string, int) ([]gatewayclient.SkillEvent, error) {
+	return nil, nil
+}
+
+func (f *fakeGateway) ApplySkillDraft(context.Context, string) error { return nil }
+
+func (f *fakeGateway) RejectSkillDraft(context.Context, string) error { return nil }
+
 func (f *fakeGateway) ListChatCommands(context.Context) ([]gatewayclient.ChatCommand, error) {
 	return f.commands, nil
 }
@@ -301,7 +322,7 @@ func TestModelListAndCron(t *testing.T) {
 		{ID: "git", Name: "Git", Description: "git helpers", Source: "user"},
 		{ID: "go", Name: "Go", Description: "go helpers", Source: "project"},
 	}
-	skillMsg := mm.skillsCmd()()
+	skillMsg := mm.skillsCmd("")()
 	skillDone := skillMsg.(commandDoneMsg)
 	if skillDone.err != nil || skillDone.openList != listSkills || len(skillDone.skills) != 2 {
 		t.Fatalf("skillsCmd = %#v", skillDone)

@@ -63,15 +63,22 @@ type Config struct {
 	Repository           Repository
 	Chat                 ChatStarter
 	Skills               *skillcatalog.Catalog
+	SkillUsage           SkillUsageRecorder
 	MaxSkillContextBytes int
 	Now                  func() time.Time
 	NewID                func(string) (string, error)
+}
+
+// SkillUsageRecorder records skill_ids as last-used (ADR-050).
+type SkillUsageRecorder interface {
+	RecordUsed(ctx context.Context, skillIDs []string, actor string) error
 }
 
 type Service struct {
 	repository           Repository
 	chat                 ChatStarter
 	skills               *skillcatalog.Catalog
+	skillUsage           SkillUsageRecorder
 	maxSkillContextBytes int
 	now                  func() time.Time
 	newID                func(string) (string, error)
@@ -122,6 +129,7 @@ func New(config Config) (*Service, error) {
 		repository:           config.Repository,
 		chat:                 config.Chat,
 		skills:               config.Skills,
+		skillUsage:           config.SkillUsage,
 		maxSkillContextBytes: config.MaxSkillContextBytes,
 		now:                  config.Now,
 		newID:                config.NewID,
@@ -164,6 +172,12 @@ func (s *Service) Submit(ctx context.Context, request Request) (Result, error) {
 		}
 	}
 
+	skillIDs, skillContext, err := s.resolveSkills(request.SkillIDs)
+	if err != nil {
+		return Result{}, classifyError(err)
+	}
+	request.SkillIDs = skillIDs
+
 	var task kernel.Task
 	if request.AllowExisting {
 		task, err = s.repository.GetTask(ctx, request.TaskID)
@@ -175,11 +189,6 @@ func (s *Service) Submit(ctx context.Context, request Request) (Result, error) {
 		}
 	}
 
-	skillIDs, skillContext, err := s.resolveSkills(request.SkillIDs)
-	if err != nil {
-		return Result{}, classifyError(err)
-	}
-	request.SkillIDs = skillIDs
 	task, err = s.repository.CreateTaskWithSkillSnapshot(
 		ctx, request.TaskID, request.SessionID, request.Title, request.Objective,
 		skillIDs, skillContext, request.ExecutionMode, s.now(),
@@ -192,6 +201,13 @@ func (s *Service) Submit(ctx context.Context, request Request) (Result, error) {
 	}
 	if err != nil {
 		return Result{}, classifyError(err)
+	}
+	if s.skillUsage != nil && len(skillIDs) > 0 {
+		actor := "user"
+		if strings.HasPrefix(string(request.TaskID), "scheduled_") {
+			actor = "scheduler"
+		}
+		_ = s.skillUsage.RecordUsed(ctx, skillIDs, actor)
 	}
 	return s.planTask(ctx, task, request)
 }
@@ -254,13 +270,29 @@ func (s *Service) startChat(ctx context.Context, task kernel.Task, request Reque
 }
 
 func (s *Service) resolveSkills(requested []string) ([]string, string, error) {
-	if len(requested) == 0 {
-		return nil, "", nil
-	}
 	if s.skills == nil {
+		if len(requested) == 0 {
+			return nil, "", nil
+		}
 		return nil, "", fmt.Errorf("%w: skill catalog is unavailable", kernel.ErrInvalidAggregate)
 	}
-	selected, err := s.skills.Select(requested)
+	explicit := make([]string, 0, len(requested))
+	seen := make(map[string]struct{}, len(requested))
+	for _, id := range requested {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		explicit = append(explicit, id)
+	}
+	if len(explicit) == 0 {
+		return nil, "", nil
+	}
+	selected, err := s.skills.Select(explicit)
 	if err != nil {
 		return nil, "", fmt.Errorf("%w: select skills: %w", kernel.ErrInvalidAggregate, err)
 	}

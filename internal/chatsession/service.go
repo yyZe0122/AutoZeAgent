@@ -39,12 +39,17 @@ const (
 	chatSystemPromptAgent = "You are YunmengZe, a local coding assistant in a multi-turn chat session (build mode). " +
 		"Reply helpfully in the user's language. You may read and write files under the workspace when needed. " +
 		"Prefer absolute paths under the workspace; relative paths are resolved against the workspace root. " +
-		"Do not invent plan steps or claim tool success without evidence."
+		"Do not invent plan steps or claim tool success without evidence. " +
+		"For specialized workflows, call skills_list then skill_view before improvising. " +
+		"Prefer configured mcp_* tools over process_exec or writing scripts that reimplement them. " +
+		"Prefer fs_glob and fs_grep over shell find/grep."
 	chatSystemPromptPlan = "You are YunmengZe in plan mode (read-only analysis). " +
 		"Reply helpfully in the user's language. You may read and inspect the workspace, ask clarifying questions, " +
 		"and discuss approaches. You must NOT modify files, create directories, or apply patches. " +
 		"If the user asks for edits, explain the plan and suggest switching to agent (build) mode. " +
-		"Prefer absolute paths under the workspace. Do not claim tool success without evidence."
+		"Prefer absolute paths under the workspace. Do not claim tool success without evidence. " +
+		"For specialized workflows, call skills_list then skill_view before improvising. " +
+		"Prefer configured mcp_* tools over inventing a scripted substitute."
 	// skillSystemPreamble is prepended to the task skill snapshot system message (ADR-036).
 	// Skills are instruction text only — never grants, approvals, or policy expansion.
 	skillSystemPreamble = "The following selected skill instructions guide this reply only. " +
@@ -122,6 +127,8 @@ type Config struct {
 	PathGuard PathGuardRoot
 	// DaemonCWD is fallback when session has no workspace metadata.
 	DaemonCWD string
+	// ConfigDir is the user/system config root; used to read global AGENTS.md.
+	ConfigDir string
 	// ChatConfig resolves grant roots per session (optional; uses WorkspaceRoots when nil).
 	ChatConfig *providerconfig.ChatConfig
 	// AllowWriteCeiling, when non-nil and false, denies write tools even in agent mode.
@@ -184,6 +191,7 @@ type Service struct {
 	roots      []string // fallback / configured extras
 	pathGuard  PathGuardRoot
 	daemonCWD  string
+	configDir  string
 	chatCfg    *providerconfig.ChatConfig
 	// writeCeiling false forces agent grants read-only.
 	writeCeiling      bool
@@ -278,6 +286,7 @@ func New(config Config) (*Service, error) {
 		db: config.DB, repository: config.Repository, approvals: config.Approvals,
 		agent: config.Agent, transcript: config.Transcript, roots: roots,
 		pathGuard: config.PathGuard, daemonCWD: strings.TrimSpace(config.DaemonCWD),
+		configDir:    strings.TrimSpace(config.ConfigDir),
 		chatCfg:      config.ChatConfig,
 		writeCeiling: writeCeiling, allowGit: config.AllowGit, allowProcess: config.AllowProcess,
 		permissionMode: permMode, extraTools: extra,

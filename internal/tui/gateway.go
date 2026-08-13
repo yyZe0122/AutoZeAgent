@@ -20,6 +20,10 @@ type Gateway interface {
 	SetModelConfig(ctx context.Context, model string) (gatewayclient.ModelConfig, error)
 	MCPStatus(ctx context.Context) (gatewayclient.MCPStatus, error)
 	ListSkills(ctx context.Context) ([]gatewayclient.Skill, error)
+	ListSkillsFilter(ctx context.Context, includeArchived bool) ([]gatewayclient.Skill, error)
+	ListSkillEvents(ctx context.Context, skillID string, limit int) ([]gatewayclient.SkillEvent, error)
+	ApplySkillDraft(ctx context.Context, skillID string) error
+	RejectSkillDraft(ctx context.Context, skillID string) error
 	ListChatCommands(ctx context.Context) ([]gatewayclient.ChatCommand, error)
 
 	ListSessions(ctx context.Context, limit int) ([]gatewayclient.Session, error)

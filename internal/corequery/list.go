@@ -62,6 +62,12 @@ type MemoryListOptions struct {
 	IncludeArchived bool
 }
 
+// SkillEventListOptions filters skill_events (ADR-050).
+type SkillEventListOptions struct {
+	Page    Page
+	SkillID string
+}
+
 func validateListOptions(page Page, sort SortDirection) error {
 	if page.Limit <= 0 || page.Limit > MaxPageSize {
 		return fmt.Errorf("core query limit must be between 1 and %d", MaxPageSize)

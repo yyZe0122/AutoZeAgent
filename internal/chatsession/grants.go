@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -281,6 +282,22 @@ func (s *Service) buildWorkspacePlan(planID kernel.PlanID, taskID kernel.TaskID,
 		risk = policy.RiskR1
 		effects = append(effects, "write workspace files when needed")
 	}
+	mcpNames := append([]string(nil), s.extraTools...)
+	slices.Sort(mcpNames)
+	for _, name := range mcpNames {
+		caps = append(caps, approval.CapabilityScope{
+			Capability: name, MaxDurationMillis: defaultToolTimeoutMS, MaxCalls: defaultMaxCalls,
+		})
+	}
+	if len(mcpNames) > 0 {
+		effects = append(effects, "use configured MCP tools")
+		risk = policy.RiskR2
+	}
+	caps = append(caps,
+		approval.CapabilityScope{Capability: "skills_list", MaxDurationMillis: defaultToolTimeoutMS, MaxCalls: defaultMaxCalls},
+		approval.CapabilityScope{Capability: "skill_view", MaxDurationMillis: defaultToolTimeoutMS, MaxCalls: defaultMaxCalls},
+	)
+	effects = append(effects, "list and load local skill instructions")
 	// High-risk tools: agent + config allowlist only (P4.3). Empty command/args = path-scoped (scheme A).
 	// ask mode (ADR-043): embed once+session plan scopes without pre-issuing grants (issueChatGrants skips these).
 	askMode := mode == kernel.ExecutionModeAgent && s.permissionMode == "ask"
@@ -311,30 +328,6 @@ func (s *Service) buildWorkspacePlan(planID kernel.PlanID, taskID kernel.TaskID,
 			effects = append(effects, "use git tools under workspace roots")
 		}
 	}
-	if mode == kernel.ExecutionModeAgent && (s.allowProcess || askMode) {
-		if s.allowProcess {
-			caps = append(caps, approval.CapabilityScope{
-				Capability: "process_exec", Paths: append([]string(nil), pathRoots...),
-				MaxDurationMillis: defaultToolTimeoutMS, MaxCalls: defaultMaxCalls,
-			})
-		}
-		if askMode && !s.allowProcess {
-			caps = append(caps,
-				approval.CapabilityScope{
-					Capability: "process_exec", Paths: append([]string(nil), pathRoots...),
-					MaxDurationMillis: defaultToolTimeoutMS, MaxCalls: 1, OneTime: true,
-				},
-				approval.CapabilityScope{
-					Capability: "process_exec", Paths: append([]string(nil), pathRoots...),
-					MaxDurationMillis: defaultToolTimeoutMS, MaxCalls: defaultMaxCalls, OneTime: false,
-				},
-			)
-		}
-		if s.allowProcess || askMode {
-			risk = policy.RiskR2
-			effects = append(effects, "execute processes under workspace roots")
-		}
-	}
 	// http_get ask scopes (network domain filled at decide via plan template with empty domains fails —
 	// http_get is not path-scoped; skip plan embed for http until domain-wildcard grants exist.
 	// Logical sub-agent (ADR-039): both modes may spawn task; grants do not expand FS.
@@ -359,29 +352,44 @@ func (s *Service) buildWorkspacePlan(planID kernel.PlanID, taskID kernel.TaskID,
 			approval.CapabilityScope{
 				Capability: "memory_promote", MaxDurationMillis: defaultToolTimeoutMS, MaxCalls: defaultMaxCalls,
 			},
+			approval.CapabilityScope{
+				Capability: "skill_draft", MaxDurationMillis: defaultToolTimeoutMS, MaxCalls: defaultMaxCalls,
+			},
 		)
 		effects = append(effects, "search/write local memory and past transcripts")
+		effects = append(effects, "propose skill drafts (user must apply)")
 		if risk == policy.RiskR0 {
 			risk = policy.RiskR1
 		}
 	} else {
 		effects = append(effects, "search local memory and past transcripts")
 	}
+	if mode == kernel.ExecutionModeAgent && (s.allowProcess || askMode) {
+		if s.allowProcess {
+			caps = append(caps, approval.CapabilityScope{
+				Capability: "process_exec", Paths: append([]string(nil), pathRoots...),
+				MaxDurationMillis: defaultToolTimeoutMS, MaxCalls: defaultMaxCalls,
+			})
+		}
+		if askMode && !s.allowProcess {
+			caps = append(caps,
+				approval.CapabilityScope{
+					Capability: "process_exec", Paths: append([]string(nil), pathRoots...),
+					MaxDurationMillis: defaultToolTimeoutMS, MaxCalls: 1, OneTime: true,
+				},
+				approval.CapabilityScope{
+					Capability: "process_exec", Paths: append([]string(nil), pathRoots...),
+					MaxDurationMillis: defaultToolTimeoutMS, MaxCalls: defaultMaxCalls, OneTime: false,
+				},
+			)
+		}
+		if s.allowProcess || askMode {
+			risk = policy.RiskR2
+			effects = append(effects, "execute processes under workspace roots")
+		}
+	}
 	if risk == policy.RiskR0 {
 		risk = policy.RiskR1
-	}
-	for _, name := range s.extraTools {
-		caps = append(caps, approval.CapabilityScope{
-			Capability: name, MaxDurationMillis: defaultToolTimeoutMS, MaxCalls: defaultMaxCalls,
-		})
-	}
-	if len(s.extraTools) > 0 {
-		effects = append(effects, "use configured MCP tools")
-		if risk == policy.RiskR0 {
-			risk = policy.RiskR2
-		} else if risk == policy.RiskR1 {
-			risk = policy.RiskR2
-		}
 	}
 	objective := "session chat workspace tools"
 	title := "session chat"

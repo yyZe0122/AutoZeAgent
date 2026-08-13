@@ -7,8 +7,10 @@ import (
 )
 
 const (
-	Filename      = "agent.json"
-	LocalFilename = "agent.local.json"
+	Filename       = "agent.json"
+	LocalFilename  = "agent.local.json"
+	AgentsFilename = "AGENTS.md"
+	MaxAgentsRunes = 8000
 
 	ProtocolOpenAIChat        = "openai-chat"
 	ProtocolOpenAIResponses   = "openai-responses"
@@ -99,6 +101,8 @@ type ChatConfig struct {
 	Permission *ChatPermissionConfig `json:"permission,omitempty"`
 	// Memory controls in-process layered memory (ADR-044). Omit → enabled defaults.
 	Memory *ChatMemoryConfig `json:"memory,omitempty"`
+	// Skills is optional unused-ttl / archive (ADR-050 H5-skill).
+	Skills *ChatSkillsConfig `json:"skills,omitempty"`
 	// Commands are user slash templates (O3). Instruction text only — no grants.
 	// Key is slash name without leading slash. Builtin TUI names are rejected.
 	Commands map[string]ChatCommandConfig `json:"commands,omitempty"`
@@ -153,6 +157,13 @@ type ChatMemoryCuratorConfig struct {
 	MaxFacts int `json:"max_facts,omitempty"`
 	// TimeoutMS bounds the aux call (1000–120000). Omit → 15000.
 	TimeoutMS int `json:"timeout_ms,omitempty"`
+}
+
+// ChatSkillsConfig is optional chat.skills (ADR-050).
+type ChatSkillsConfig struct {
+	// UnusedTTL is a Go duration; skills with last_used_at older than this are soft-archived.
+	// Empty = no automatic archive. Skills that were never used are never auto-archived.
+	UnusedTTL string `json:"unused_ttl,omitempty"`
 }
 
 // ChatPermissionConfig is the optional chat.permission object.
@@ -240,6 +251,22 @@ func (c ChatConfig) MemoryDefaultTTL() time.Duration {
 		return 0
 	}
 	raw := strings.TrimSpace(c.Memory.DefaultTTL)
+	if raw == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return 0
+	}
+	return d
+}
+
+// SkillsUnusedTTL returns chat.skills.unused_ttl or 0 (no automatic archive).
+func (c ChatConfig) SkillsUnusedTTL() time.Duration {
+	if c.Skills == nil {
+		return 0
+	}
+	raw := strings.TrimSpace(c.Skills.UnusedTTL)
 	if raw == "" {
 		return 0
 	}

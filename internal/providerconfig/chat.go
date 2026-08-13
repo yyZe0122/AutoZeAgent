@@ -240,6 +240,14 @@ func (c ChatConfig) validate() error {
 			}
 		}
 	}
+	if c.Skills != nil {
+		if ttl := strings.TrimSpace(c.Skills.UnusedTTL); ttl != "" {
+			d, err := time.ParseDuration(ttl)
+			if err != nil || d <= 0 || d > 8760*time.Hour {
+				return fmt.Errorf("chat.skills.unused_ttl must be a positive Go duration up to 8760h (or omit)")
+			}
+		}
+	}
 	if err := validateChatCommands(c.Commands); err != nil {
 		return err
 	}

@@ -33,7 +33,7 @@ func (m model) handleLineCmd(line string) tea.Cmd {
 	case "/model":
 		return m.modelCommandCmd(arg)
 	case "/skills":
-		return m.skillsCmd()
+		return m.skillsCmd(arg)
 	case "/theme":
 		return m.themeCommandCmd(arg)
 	case "/cron":
@@ -504,45 +504,88 @@ func (m model) expandCmd(arg string) tea.Cmd {
 
 func (m model) journeyCmd(arg string) tea.Cmd {
 	return func() tea.Msg {
-		_ = arg
 		sessionID := strings.TrimSpace(string(m.sessionID))
 		if sessionID == "" || sessionID == "…" {
 			return commandDoneMsg{err: fmt.Errorf("focus a session first (/sessions)")}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 		defer cancel()
-		entries, err := m.gateway.ListMemory(ctx, sessionID, "", "", 24)
-		if err != nil {
-			return commandDoneMsg{err: err}
+		want := strings.ToLower(strings.TrimSpace(arg))
+		showMem := want == "" || want == "memory"
+		showSkills := want == "" || want == "skills"
+		if !showMem && !showSkills {
+			return commandDoneMsg{err: fmt.Errorf("usage: /journey [memory|skills]")}
 		}
-		if len(entries) == 0 {
-			return commandDoneMsg{setJourney: true, journeyRows: nil, status: "journey: no memory entries for session"}
+		var rows []timelineItem
+		memN, skillN := 0, 0
+		if showMem {
+			entries, err := m.gateway.ListMemory(ctx, sessionID, "", "", 24)
+			if err != nil {
+				return commandDoneMsg{err: err}
+			}
+			memN = len(entries)
+			if memN > 0 {
+				rows = append(rows, timelineItem{
+					Kind: tlJourney, Title: "journey · memory",
+					Body: fmt.Sprintf("%d entr(y/ies)", memN), Key: "journey:memory:header",
+				})
+				for i, e := range entries {
+					kind := e.Kind
+					if kind == "" {
+						kind = e.Source
+					}
+					if kind == "" {
+						kind = "fact"
+					}
+					rows = append(rows, timelineItem{
+						Kind: tlJourney, At: e.CreatedAt, Title: fmt.Sprintf("%s · %s", kind, shortID(e.ID)),
+						Key: fmt.Sprintf("journey:mem:%d", i),
+						Blocks: []contentBlock{{
+							Kind: blockPlain, Text: e.Content, Key: fmt.Sprintf("journey:mem:%d:body", i),
+						}},
+					})
+				}
+			}
 		}
-		rows := make([]timelineItem, 0, len(entries)+1)
-		rows = append(rows, timelineItem{
-			Kind: tlJourney, Title: "journey · memory", State: "",
-			Body: fmt.Sprintf("%d entr(y/ies) · /journey again refreshes", len(entries)),
-			Key:  "journey:header",
-		})
-		for i, e := range entries {
-			kind := e.Kind
-			if kind == "" {
-				kind = e.Source
+		if showSkills {
+			events, err := m.gateway.ListSkillEvents(ctx, "", 24)
+			if err != nil {
+				return commandDoneMsg{err: err}
 			}
-			if kind == "" {
-				kind = "fact"
+			skillN = len(events)
+			if skillN > 0 {
+				rows = append(rows, timelineItem{
+					Kind: tlJourney, Title: "journey · skills",
+					Body: fmt.Sprintf("%d event(s)", skillN), Key: "journey:skills:header",
+				})
+				for i, e := range events {
+					body := e.Path
+					if e.ContentHash != "" {
+						if body != "" {
+							body += " · "
+						}
+						body += shortID(e.ContentHash)
+					}
+					if body == "" {
+						body = e.Actor
+					}
+					rows = append(rows, timelineItem{
+						Kind: tlJourney, At: e.CreatedAt,
+						Title: fmt.Sprintf("%s · %s", e.Action, e.SkillID),
+						Key:   fmt.Sprintf("journey:sk:%d", i),
+						Blocks: []contentBlock{{
+							Kind: blockPlain, Text: body, Key: fmt.Sprintf("journey:sk:%d:body", i),
+						}},
+					})
+				}
 			}
-			title := fmt.Sprintf("%s · %s", kind, shortID(e.ID))
-			rows = append(rows, timelineItem{
-				Kind: tlJourney, At: e.CreatedAt, Title: title, Key: fmt.Sprintf("journey:%d", i),
-				Blocks: []contentBlock{{
-					Kind: blockPlain, Text: e.Content, Key: fmt.Sprintf("journey:%d:body", i),
-				}},
-			})
+		}
+		if len(rows) == 0 {
+			return commandDoneMsg{setJourney: true, journeyRows: nil, status: "journey: no rows"}
 		}
 		return commandDoneMsg{
 			setJourney: true, journeyRows: rows,
-			status: fmt.Sprintf("journey: %d memory row(s) prepended · /expand last to open", len(entries)),
+			status: fmt.Sprintf("journey: %d memory · %d skill event(s)", memN, skillN),
 		}
 	}
 }
@@ -756,15 +799,45 @@ func (m model) themeCommandCmd(arg string) tea.Cmd {
 	}
 }
 
-func (m model) skillsCmd() tea.Cmd {
+func (m model) skillsCmd(arg string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 		defer cancel()
+		arg = strings.TrimSpace(arg)
+		if arg != "" {
+			parts := strings.Fields(arg)
+			action := strings.ToLower(parts[0])
+			switch action {
+			case "archived":
+				skills, err := m.gateway.ListSkillsFilter(ctx, true)
+				if err != nil {
+					return commandDoneMsg{err: err}
+				}
+				return commandDoneMsg{openList: listSkills, skills: skills, status: "archived skills · /<id> still selects"}
+			case "apply", "reject":
+				if len(parts) != 2 {
+					return commandDoneMsg{err: fmt.Errorf("usage: /skills %s <skill-id>", action)}
+				}
+				id := strings.TrimSpace(parts[1])
+				var err error
+				if action == "apply" {
+					err = m.gateway.ApplySkillDraft(ctx, id)
+				} else {
+					err = m.gateway.RejectSkillDraft(ctx, id)
+				}
+				if err != nil {
+					return commandDoneMsg{err: err}
+				}
+				return commandDoneMsg{status: fmt.Sprintf("skill %s %s", id, action)}
+			default:
+				return commandDoneMsg{err: fmt.Errorf("usage: /skills [apply|reject <id>|archived]")}
+			}
+		}
 		skills, err := m.gateway.ListSkills(ctx)
 		if err != nil {
 			return commandDoneMsg{err: err}
 		}
-		status := "toggle skills · Enter select · Esc close"
+		status := "toggle skills · Enter select · Esc close · /skills apply|reject <id>"
 		if n := len(m.selectedSkillIDs); n > 0 {
 			status = fmt.Sprintf("%d skill(s) selected · Enter toggle · Esc close", n)
 		}

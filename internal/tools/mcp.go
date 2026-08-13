@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 
@@ -101,10 +102,11 @@ type mcpTool struct {
 }
 
 func (t *mcpTool) Definition() toolapi.Definition {
-	desc := t.description
-	if strings.TrimSpace(desc) == "" {
+	desc := strings.TrimSpace(t.description)
+	if desc == "" {
 		desc = "MCP tool " + t.remoteName + " from server " + t.serverName
 	}
+	desc = "Configured MCP tool — prefer over process_exec or custom scripts. " + desc
 	schema := t.schema
 	if len(schema) == 0 {
 		schema = json.RawMessage(`{"type":"object","properties":{}}`)
@@ -140,7 +142,13 @@ func RegisterMCP(ctx context.Context, broker *Broker, config providerconfig.MCPC
 		return reg, nil, nil
 	}
 	var names []string
-	for serverName, server := range config.Servers {
+	serverNames := make([]string, 0, len(config.Servers))
+	for serverName := range config.Servers {
+		serverNames = append(serverNames, serverName)
+	}
+	sort.Strings(serverNames)
+	for _, serverName := range serverNames {
+		server := config.Servers[serverName]
 		serverName = strings.TrimSpace(serverName)
 		session, transport, err := openMCPSession(ctx, serverName, server)
 		if err != nil {

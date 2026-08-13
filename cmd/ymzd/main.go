@@ -35,6 +35,7 @@ import (
 	"github.com/yyZe0122/yunmengze-agent/internal/scheduledtasks"
 	"github.com/yyZe0122/yunmengze-agent/internal/scheduler"
 	"github.com/yyZe0122/yunmengze-agent/internal/skillcatalog"
+	"github.com/yyZe0122/yunmengze-agent/internal/skillmaintain"
 	coresqlite "github.com/yyZe0122/yunmengze-agent/internal/store/sqlite"
 	"github.com/yyZe0122/yunmengze-agent/internal/taskcontrol"
 	"github.com/yyZe0122/yunmengze-agent/internal/tasksubmission"
@@ -281,7 +282,7 @@ func run(args []string) error {
 		chatService, err = chatsession.New(chatsession.Config{
 			DB: database.SQL(), Repository: kernelRepository, Approvals: approvalRepository,
 			Agent: agentRunner, Transcript: queries, WorkspaceRoots: chatRoots,
-			PathGuard: pathGuard, DaemonCWD: workingDirectory, ChatConfig: &chatCfgCopy,
+			PathGuard: pathGuard, DaemonCWD: workingDirectory, ConfigDir: layout.ConfigDir, ChatConfig: &chatCfgCopy,
 			AllowWriteCeiling: &writeCeiling, AllowGit: allowGit, AllowProcess: allowProcess,
 			PermissionMode: permissionMode, ExtraTools: mcpToolNames,
 			ContextWindow: contextWindow, Context: contextStore, Compactor: agentRunner,
@@ -317,6 +318,26 @@ func run(args []string) error {
 	if chatService != nil {
 		taskSubmissionConfig.Chat = chatsession.AsTaskChat(chatService)
 	}
+	skillStore, err := skillmaintain.NewStore(database.SQL())
+	if err != nil {
+		return err
+	}
+	skillMaintain, err := skillmaintain.New(skillmaintain.Config{
+		Store: skillStore, Catalog: skillCatalog, UnusedTTL: chatCfg.SkillsUnusedTTL(),
+	})
+	if err != nil {
+		return err
+	}
+	skillMaintain.Maintain(context.Background())
+	if err := tools.RegisterSkillTools(toolBroker, skillCatalog, skillMaintain); err != nil {
+		return err
+	}
+	if err := tools.RegisterSkillDraftTool(toolBroker, tools.SkillDraftAdapter{
+		Catalog: skillCatalog, Maintain: skillMaintain,
+	}); err != nil {
+		return err
+	}
+	taskSubmissionConfig.SkillUsage = skillMaintain
 	taskSubmissionService, err := tasksubmission.New(taskSubmissionConfig)
 	if err != nil {
 		return err
@@ -420,6 +441,7 @@ func run(args []string) error {
 			TrustPath: toolpermission.DefaultTrustPath(layout.ConfigDir),
 		},
 		MemoryControl: memoryControl,
+		SkillControl:  skillControlAdapter{svc: skillMaintain},
 		SessionPrefs:  sessionPrefsAdapter{repo: kernelRepository},
 	})
 	if err != nil {
@@ -576,6 +598,40 @@ func (a memoryControlAdapter) PromoteMemory(ctx context.Context, entryID string)
 		Tags: e.Tags, Kind: e.Kind, Priority: e.Priority, ExpiresAt: e.ExpiresAt,
 		CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt,
 	}, nil
+}
+
+type skillControlAdapter struct {
+	svc *skillmaintain.Service
+}
+
+func (a skillControlAdapter) ApplySkillDraft(ctx context.Context, skillID, actor string) error {
+	if a.svc == nil {
+		return errors.New("skill control is unavailable")
+	}
+	_, err := a.svc.ApplyDraft(ctx, skillID, actor)
+	return err
+}
+
+func (a skillControlAdapter) RejectSkillDraft(ctx context.Context, skillID, actor string) error {
+	if a.svc == nil {
+		return errors.New("skill control is unavailable")
+	}
+	return a.svc.RejectDraft(ctx, skillID, actor)
+}
+
+func (a skillControlAdapter) SkillUsage(ctx context.Context) (map[string]gateway.SkillUsageView, error) {
+	if a.svc == nil {
+		return map[string]gateway.SkillUsageView{}, nil
+	}
+	raw, err := a.svc.UsageMap(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]gateway.SkillUsageView, len(raw))
+	for id, u := range raw {
+		out[id] = gateway.SkillUsageView{LastUsedAt: u.LastUsedAt, ArchivedAt: u.ArchivedAt}
+	}
+	return out, nil
 }
 
 type sessionPrefsAdapter struct {

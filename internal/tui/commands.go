@@ -22,13 +22,13 @@ var slashCommands = []slashCommand{
 	{Name: "/stop", Desc: "cancel task", Help: "/stop [reason]  alias for /cancel"},
 	{Name: "/retry", Desc: "resubmit last user message", Help: "/retry  resubmit last user message on focused session"},
 	{Name: "/model", Desc: "list or switch global model", Help: "/model [provider/model]  global main; /model prefer [ref] session prefer (next run)"},
-	{Name: "/skills", Desc: "select skills for next submit", Help: "/skills  toggle skills for next task (explicit only)"},
+	{Name: "/skills", Desc: "select skills for next submit", Help: "/skills  toggle; /skills apply|reject <id>; /skills archived"},
 	{Name: "/theme", Desc: "toggle day/night theme", Help: "/theme  toggle day ↔ night theme"},
 	{Name: "/cron", Desc: "list or create scheduled jobs", Help: "/cron [every objective]  list jobs, or create on current session (Tab mode)"},
 	{Name: "/compact", Desc: "compact session context", Help: "/compact [focus]  force session head summary (optional focus text)"},
 	{Name: "/perm", Desc: "tool permission queue", Help: "/perm open; keys 1–4 once|similar|permanent|deny; /perm <decision> <id>"},
 	{Name: "/expand", Desc: "expand/collapse folded blocks", Help: "/expand [all|none|last]  or keys e (last) · E (all) · c (collapse)"},
-	{Name: "/journey", Desc: "memory timeline for session", Help: "/journey  list recent memory entries as a read-only timeline"},
+	{Name: "/journey", Desc: "memory/skill timeline", Help: "/journey [memory|skills]  prepend read-only memory and/or skill events"},
 	{Name: "/memory", Desc: "list/search local memory", Help: "/memory [q…]  list facts; /memory archived; /memory forget|promote <id>; /memory refresh"},
 	{Name: "/refresh-memory", Desc: "rebuild frozen memory inject", Help: "/refresh-memory  invalidate session memory snapshot (next turn reinjects)"},
 	{Name: "/status", Desc: "health summary", Help: "/status  health + model + task + context + pending perms"},
@@ -99,8 +99,8 @@ func helpText() string {
 	b.WriteString("\nChat\n")
 	b.WriteString("  Plain text continues the current session (or starts one).\n")
 	b.WriteString("  /new always opens a fresh session. Tab sets agent|plan mode.\n")
-	b.WriteString("  /skills selects instruction skills for the next submit (not auto-matched).\n")
-	b.WriteString("  /<skill-id> toggles that skill; /<skill-id> text selects it and submits text.\n")
+	b.WriteString("  /skills preloads instruction skills for the next submit (explicit snapshot).\n")
+	b.WriteString("  Other skills: model calls skills_list then skill_view. /<skill-id> toggles preload.\n")
 	b.WriteString("  chat.commands templates: /<cmd> [args] expand $ARGUMENTS and submit (instruction only).\n")
 	b.WriteString("  Priority: built-in > chat.commands > skill ids.\n")
 	b.WriteString("  /perm opens pending tool permissions when chat.permission.mode=ask.\n")
