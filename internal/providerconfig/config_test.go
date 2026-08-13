@@ -328,7 +328,7 @@ func TestWriteSelectedModelUpdatesTopLevelOnly(t *testing.T) {
 	}
 }
 
-func TestEnsureConfigMigratesThenLoad(t *testing.T) {
+func TestEnsureConfigDoesNotCopyFromOtherDirs(t *testing.T) {
 	root := t.TempDir()
 	configDir := filepath.Join(root, "config")
 	projectDir := filepath.Join(root, "project")
@@ -336,27 +336,12 @@ func TestEnsureConfigMigratesThenLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeConfig(t, filepath.Join(projectDir, LocalFilename), "deepseek/deepseek-v4-pro", "https://api.deepseek.com")
-	result, err := EnsureConfig(configDir, projectDir)
+	result, err := EnsureConfig(configDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Migrated || result.Path == "" || result.Source == "" {
+	if !result.Created || result.Path != filepath.Join(configDir, Filename) {
 		t.Fatalf("ensure = %+v", result)
-	}
-	resolved, err := Load(configDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resolved == nil || resolved.ModelID != "deepseek-v4-pro" {
-		t.Fatalf("resolved = %+v", resolved)
-	}
-	// second ensure does not overwrite
-	again, err := EnsureConfig(configDir, projectDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if again.Migrated || again.Created {
-		t.Fatalf("second ensure should reuse: %+v", again)
 	}
 }
 
@@ -507,7 +492,7 @@ func TestLoadChatDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if chat.AllowWrite != nil || len(chat.Roots) != 0 {
+	if chat.AllowWrite != nil || chat.Workspace != nil {
 		t.Fatalf("empty dir chat = %+v", chat)
 	}
 	if !chat.AgentWriteCeiling() {
@@ -538,7 +523,7 @@ func TestLoadChatParsesAndValidates(t *testing.T) {
     }
   },
   "chat": {
-    "roots": ["/abs/workspace"],
+    "workspace": {"allow": ["/abs/workspace"]},
     "allow_write": true,
     "tools": {"git": true, "process": false}
   }
@@ -550,7 +535,7 @@ func TestLoadChatParsesAndValidates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if chat.AllowWrite == nil || !*chat.AllowWrite || len(chat.Roots) != 1 || chat.Roots[0] != "/abs/workspace" {
+	if chat.AllowWrite == nil || !*chat.AllowWrite || chat.Workspace == nil || len(chat.Workspace.Allow) != 1 || chat.Workspace.Allow[0] != "/abs/workspace" {
 		t.Fatalf("chat = %+v", chat)
 	}
 	if !chat.AgentWriteCeiling() {
@@ -578,13 +563,13 @@ func TestLoadChatParsesAndValidates(t *testing.T) {
       "models": {"deepseek-chat": {}}
     }
   },
-  "chat": {"roots": ["relative/path"]}
+   "chat": {"workspace": {"allow": ["relative/path"]}}
 }`
 	if err := os.WriteFile(filepath.Join(root, Filename), []byte(bad), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := LoadChat(root); err == nil {
-		t.Fatal("expected relative roots error")
+		t.Fatal("expected relative workspace.allow error")
 	}
 }
 
@@ -665,13 +650,8 @@ func TestLoadChatPermissionMode(t *testing.T) {
 		t.Fatalf("mode = %q", chat.PermissionModeOrDefault())
 	}
 	write(`{"permission": {"mode": "auto"}}`)
-	chat, err = LoadChat(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// auto reserved → preauth until implemented
-	if chat.PermissionModeOrDefault() != PermissionModePreauth {
-		t.Fatalf("auto should resolve to preauth, got %q", chat.PermissionModeOrDefault())
+	if _, err := LoadChat(root); err == nil {
+		t.Fatal("expected auto permission mode error")
 	}
 	write(`{"permission": {"mode": "wide-open"}}`)
 	if _, err := LoadChat(root); err == nil {

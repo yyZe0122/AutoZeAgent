@@ -70,7 +70,7 @@ type PermissionPending struct {
 
 // PermissionDecision is the outcome after user decide.
 type PermissionDecision struct {
-	Decision string // allow_once | allow_session | deny
+	Decision string // allow_once | allow_similar | allow_permanent | deny
 	GrantID  string
 	State    string
 }

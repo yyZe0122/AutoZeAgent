@@ -94,7 +94,7 @@ func TestSuggestHabit(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	insert("perm-sim", "s1", "/tmp/ws", DecisionAllowSimilar, StateAllowedSession)
+	insert("perm-sim", "s1", "/tmp/ws", DecisionAllowSimilar, StateAllowedSimilar)
 	insert("perm-deny", "s1", "/tmp/other", DecisionDeny, StateDenied)
 	insert("perm-other-sess", "s2", "/tmp/ws", DecisionAllowOnce, StateAllowedOnce)
 

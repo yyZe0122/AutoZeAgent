@@ -14,7 +14,6 @@ import (
 const (
 	StatePending          = "pending"
 	StateAllowedOnce      = "allowed_once"
-	StateAllowedSession   = "allowed_session"
 	StateAllowedSimilar   = "allowed_similar"
 	StateAllowedPermanent = "allowed_permanent"
 	StateDenied           = "denied"
@@ -22,7 +21,6 @@ const (
 	StateCancelled        = "cancelled"
 
 	DecisionAllowOnce      = "allow_once"
-	DecisionAllowSession   = "allow_session"
 	DecisionAllowSimilar   = "allow_similar"
 	DecisionAllowPermanent = "allow_permanent"
 	DecisionDeny           = "deny"

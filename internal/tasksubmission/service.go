@@ -237,9 +237,6 @@ func (s *Service) startChat(ctx context.Context, task kernel.Task, request Reque
 	switch task.State {
 	case kernel.TaskCreated, kernel.TaskRunning, kernel.TaskCompleted, kernel.TaskFailed:
 		// StartChat is idempotent for already-started turns.
-	case kernel.TaskPlanning, kernel.TaskWaitingApproval, kernel.TaskApproved:
-		// Legacy rows from deleted Planner path — do not start chat.
-		return result, nil
 	default:
 		return result, applicationerror.Wrap(applicationerror.CodeConflict, false, fmt.Errorf("%w: task %s is already %s", ErrConflict, task.ID, task.State))
 	}

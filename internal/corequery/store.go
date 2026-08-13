@@ -174,7 +174,7 @@ type Session struct {
 	LatestTaskID *coreidentity.TaskID   `json:"latest_task_id,omitempty"`
 	LatestState  string                 `json:"latest_task_state,omitempty"`
 	TaskCount    int                    `json:"task_count"`
-	// PreferredModel is optional session model preference (O4; chat run prefer→main).
+	// PreferredModel is optional session model preference (O4; chat run job pin → prefer → main).
 	PreferredModel string `json:"preferred_model,omitempty"`
 	// Workspace is session-bound client cwd when set (ADR-046).
 	Workspace string `json:"workspace,omitempty"`

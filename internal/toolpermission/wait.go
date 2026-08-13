@@ -9,7 +9,7 @@ import (
 // Decision is delivered to a waiting Broker after user decide.
 type Decision struct {
 	PermissionID string
-	Decision     string // allow_once | allow_session | deny
+	Decision     string // allow_once | allow_similar | allow_permanent | deny
 	GrantID      string
 	State        string
 }

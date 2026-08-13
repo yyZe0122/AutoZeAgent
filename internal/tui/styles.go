@@ -81,7 +81,7 @@ func stateBadge(state string) string {
 		return styleOK.Render(state)
 	case "failed", "cancelled":
 		return styleError.Render(state)
-	case "waiting_approval", "planning", "paused":
+	case "paused":
 		return styleWarn.Render(state)
 	case "running":
 		return styleBadge.Render(state)

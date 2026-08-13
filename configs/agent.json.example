@@ -108,7 +108,6 @@
     }
   },
   "chat": {
-    "roots": [],
     "workspace": {
       "default": "client_cwd",
       "allow": [],

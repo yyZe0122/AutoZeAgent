@@ -24,10 +24,6 @@ func buildChatTimeline(
 		// Status footer when task is mid-flight.
 		if task != nil {
 			switch task.State {
-			case gatewayclient.TaskStatePlanning, gatewayclient.TaskStateWaitingApproval, gatewayclient.TaskStateApproved:
-				items = append(items, timelineItem{
-					Kind: tlSystem, At: task.UpdatedAt, Title: "legacy: " + task.State, State: task.State,
-				})
 			case gatewayclient.TaskStateRunning:
 				items = append(items, timelineItem{
 					Kind: tlSystem, At: task.UpdatedAt, Title: "running", State: task.State,

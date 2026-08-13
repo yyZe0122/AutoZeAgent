@@ -111,10 +111,6 @@ func buildTimeline(task *gatewayclient.Task, plan *gatewayclient.Plan, runs []ga
 	})
 
 	switch task.State {
-	case gatewayclient.TaskStatePlanning, gatewayclient.TaskStateWaitingApproval, gatewayclient.TaskStateApproved:
-		items = append(items, timelineItem{
-			Kind: tlSystem, At: task.UpdatedAt, Title: "legacy state: " + task.State, State: task.State,
-		})
 	case gatewayclient.TaskStateRunning:
 		items = append(items, timelineItem{
 			Kind: tlSystem, At: task.UpdatedAt, Title: "running", State: task.State,

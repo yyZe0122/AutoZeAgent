@@ -75,16 +75,12 @@ type MCPServer struct {
 const (
 	PermissionModePreauth = "preauth"
 	PermissionModeAsk     = "ask"
-	PermissionModeAuto    = "auto"
 )
 
 // ChatConfig is the optional session chat workspace section of agent.json.
-// Tab agent (build) vs plan (read-only) selects tools; this block sets roots,
-// agent write ceiling, and optional packing/loop limits (ADR-041).
+// Tab agent (build) vs plan (read-only) selects tools; this block sets
+// workspace ceiling, agent write ceiling, and optional packing/loop limits (ADR-041).
 type ChatConfig struct {
-	// Roots are absolute workspace paths for default chat tool grants (legacy; still valid).
-	// Empty with no workspace.allow → client_cwd / daemon fallback (ADR-046).
-	Roots []string `json:"roots,omitempty"`
 	// Workspace controls default session root and path ceiling (ADR-046).
 	Workspace *ChatWorkspaceConfig `json:"workspace,omitempty"`
 	// AllowWrite is a ceiling for agent (build) mode write tools.
@@ -305,19 +301,13 @@ func (c ChatConfig) MemoryCuratorTimeoutMS() int {
 }
 
 // PermissionModeOrDefault returns chat.permission.mode or preauth.
-// Unknown / auto currently resolve to preauth until interactive auto is defined.
 func (c ChatConfig) PermissionModeOrDefault() string {
 	if c.Permission == nil {
 		return PermissionModePreauth
 	}
 	switch strings.ToLower(strings.TrimSpace(c.Permission.Mode)) {
-	case "", PermissionModePreauth:
-		return PermissionModePreauth
 	case PermissionModeAsk:
 		return PermissionModeAsk
-	case PermissionModeAuto:
-		// Reserved: fail closed like preauth for now.
-		return PermissionModePreauth
 	default:
 		return PermissionModePreauth
 	}

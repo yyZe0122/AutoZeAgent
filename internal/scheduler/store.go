@@ -312,7 +312,7 @@ func (s *Store) Acknowledge(ctx context.Context, request schedulerapi.Acknowledg
 	if request.RunID == "" || request.LeaseID == "" {
 		return false, errors.New("run_id and lease_id are required")
 	}
-	allowed := map[string]bool{"task_created": true, "waiting_approval": true, "completed": true, "failed": true, "timed_out": true, "cancelled": true}
+	allowed := map[string]bool{"task_created": true, "completed": true, "failed": true, "timed_out": true, "cancelled": true}
 	if !allowed[request.Status] {
 		return false, errors.New("invalid run status")
 	}
@@ -329,7 +329,7 @@ func (s *Store) Acknowledge(ctx context.Context, request schedulerapi.Acknowledg
 	}
 	finished := ""
 	terminal := request.Status == "completed" || request.Status == "failed" || request.Status == "timed_out" || request.Status == "cancelled"
-	coreOwned := request.Status == "task_created" || request.Status == "waiting_approval"
+	coreOwned := request.Status == "task_created"
 	if coreOwned && request.CoreTaskID == "" {
 		return false, errors.New("core_task_id is required after Core accepts a task")
 	}

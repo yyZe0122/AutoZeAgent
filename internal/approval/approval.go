@@ -91,7 +91,7 @@ func NewRepository(db *sql.DB) (*Repository, error) {
 
 // RecordSystemApproval records an approved decision for a plan that is already
 // PlanApproved (session-chat workspace preauthorization). It does not change
-// plan or task state and does not require waiting_approval.
+// plan or task state.
 func (r *Repository) RecordSystemApproval(ctx context.Context, input DecisionInput) (Approval, error) {
 	if ctx == nil {
 		return Approval{}, errors.New("approval context is required")

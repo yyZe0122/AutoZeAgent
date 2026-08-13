@@ -155,11 +155,3 @@ func runTaskAction(action string, args []string) error {
 	}
 	return writeJSON(updated)
 }
-
-func runApprovalShow(args []string) error {
-	return errors.New("interactive plan approval was removed; use Tab plan for read-only chat or ymz run --execution-mode plan")
-}
-
-func runApprovalDecide(args []string) error {
-	return errors.New("interactive plan approval was removed; use Tab plan for read-only chat or ymz run --execution-mode plan")
-}

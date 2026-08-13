@@ -38,7 +38,7 @@ Unit 使用 `Restart=on-failure`、专用用户、`RuntimeDirectory`、`StateDir
 
 ## Provider 与密钥
 
-Provider 配置放在系统配置目录的 `agent.json`，密钥使用 `{env:NAME}` 或 `{file:path}` 引用。Unit 当前可选读取 `/etc/yunmengze/planner.env` 作为环境变量来源；该文件名为兼容保留，不代表独立 Planner 进程。
+Provider 配置放在系统配置目录的 `agent.json`，密钥使用 `{env:NAME}` 或 `{file:path}` 引用。Unit 可选读取 `/etc/yunmengze/env`（`EnvironmentFile=-`：文件不存在不失败）。
 
 ## 验证与日志
 

@@ -52,11 +52,6 @@ const (
 	TaskStateCompleted = string(kernel.TaskCompleted)
 	TaskStateFailed    = string(kernel.TaskFailed)
 	TaskStateCancelled = string(kernel.TaskCancelled)
-
-	// Legacy strings for old core.db rows (display only).
-	TaskStatePlanning        = string(kernel.TaskPlanning)
-	TaskStateWaitingApproval = string(kernel.TaskWaitingApproval)
-	TaskStateApproved        = string(kernel.TaskApproved)
 )
 
 // Task execution mode (permission posture: agent=build write, plan=read-only chat).

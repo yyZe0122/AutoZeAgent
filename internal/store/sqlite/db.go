@@ -23,8 +23,8 @@ const (
 	migrationTable           = "schema_migrations"
 )
 
-// DB is the Core database handle. It deliberately exposes database/sql only to
-// other internal packages; optional modules communicate through public APIs.
+// DB is the Core database handle. It exposes database/sql only to other
+// internal packages.
 type DB struct {
 	path string
 	sql  *sql.DB

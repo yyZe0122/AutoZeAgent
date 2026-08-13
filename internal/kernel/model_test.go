@@ -89,22 +89,14 @@ func TestTaskCreatedToRunningForAgentChat(t *testing.T) {
 	}
 }
 
-func TestTaskRejectsLegacyPlannerTransitions(t *testing.T) {
+func TestTaskRejectsUnknownStateTransition(t *testing.T) {
 	t.Parallel()
-	task, err := NewTask("task-legacy", "session-1", "No", "Planner", testTime)
+	task, err := NewTask("task-1", "session-1", "No", "Planner", testTime)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := task.Transition(TaskPlanning, testTime); !errors.Is(err, ErrInvalidTransition) {
+	if err := task.Transition(TaskState("planning"), testTime); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("created→planning: %v", err)
-	}
-	// Loaded legacy state may only cancel.
-	task.State = TaskWaitingApproval
-	if err := task.Transition(TaskApproved, testTime); !errors.Is(err, ErrInvalidTransition) {
-		t.Fatalf("waiting_approval→approved: %v", err)
-	}
-	if err := task.Cancel(testTime); err != nil {
-		t.Fatalf("cancel legacy: %v", err)
 	}
 }
 
@@ -151,7 +143,7 @@ func TestSessionPlanStepAndRunStateMachines(t *testing.T) {
 	if err := plan.AddStep(step, testTime); err != nil {
 		t.Fatalf("AddStep() error = %v", err)
 	}
-	if err := plan.Transition(PlanWaitingApproval, testTime); !errors.Is(err, ErrInvalidTransition) {
+	if err := plan.Transition(PlanState("waiting_approval"), testTime); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("draft→waiting_approval should be illegal: %v", err)
 	}
 	if err := plan.Transition(PlanApproved, testTime); err != nil {

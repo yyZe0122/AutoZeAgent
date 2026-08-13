@@ -29,7 +29,7 @@ func (c ChatConfig) WorkspaceAllowAll() bool {
 	return c.Workspace != nil && c.Workspace.AllowAll
 }
 
-// configuredRoots merges chat.roots and chat.workspace.allow (absolute paths only).
+// configuredRoots returns chat.workspace.allow (absolute paths only).
 func (c ChatConfig) configuredRoots() []string {
 	seen := map[string]struct{}{}
 	var out []string
@@ -43,9 +43,6 @@ func (c ChatConfig) configuredRoots() []string {
 		}
 		seen[root] = struct{}{}
 		out = append(out, root)
-	}
-	for _, root := range c.Roots {
-		add(root)
 	}
 	if c.Workspace != nil {
 		for _, root := range c.Workspace.Allow {
@@ -98,15 +95,8 @@ func (c ChatConfig) ResolveSessionWorkspace(clientWorkspace, daemonFallback stri
 			return def
 		}
 	}
-	// Legacy: fixed roots only → first root; else client then daemon.
-	if roots := c.configuredRoots(); len(roots) == 1 && clientWorkspace == "" {
-		return roots[0]
-	}
 	if clientWorkspace != "" {
 		return clientWorkspace
-	}
-	if roots := c.configuredRoots(); len(roots) > 0 {
-		return roots[0]
 	}
 	return daemonFallback
 }
@@ -183,15 +173,6 @@ func pathUnder(root, path string) bool {
 }
 
 func (c ChatConfig) validate() error {
-	for i, root := range c.Roots {
-		root = strings.TrimSpace(root)
-		if root == "" {
-			continue
-		}
-		if !filepath.IsAbs(root) {
-			return fmt.Errorf("chat.roots[%d] must be an absolute path", i)
-		}
-	}
 	if c.Workspace != nil {
 		def := strings.TrimSpace(c.Workspace.Default)
 		if def != "" && !strings.EqualFold(def, WorkspaceDefaultClientCWD) &&
@@ -213,8 +194,8 @@ func (c ChatConfig) validate() error {
 	}
 	if c.Permission != nil {
 		mode := strings.ToLower(strings.TrimSpace(c.Permission.Mode))
-		if mode != "" && mode != PermissionModePreauth && mode != PermissionModeAsk && mode != PermissionModeAuto {
-			return fmt.Errorf("chat.permission.mode must be preauth, ask, or auto")
+		if mode != "" && mode != PermissionModePreauth && mode != PermissionModeAsk {
+			return fmt.Errorf("chat.permission.mode must be preauth or ask")
 		}
 	}
 	if c.Memory != nil {

@@ -147,7 +147,7 @@ type APIConfig struct {
 	ChatCommands ChatCommandsProvider
 	// SessionCompact is optional; when set, exposes POST /v1/sessions/{id}/compact.
 	SessionCompact SessionCompactor
-	// ToolPermissions is optional; when set, exposes GET/POST /v1/permissions (ADR-043).
+	// ToolPermissions is optional; when set, exposes GET /v1/permissions and POST /v1/permissions/{id}/decide (ADR-043).
 	ToolPermissions ToolPermissionService
 	// MemoryControl is optional; when set, exposes POST /v1/memory/actions (refresh/forget/promote).
 	MemoryControl MemoryControlService

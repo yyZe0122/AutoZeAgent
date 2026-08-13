@@ -146,7 +146,7 @@ func (s *Service) SuggestHabit(ctx context.Context, req Request) HabitHint {
 			continue
 		}
 		switch p.Decision {
-		case DecisionAllowSimilar, DecisionAllowSession:
+		case DecisionAllowSimilar:
 			return HabitHint{Decision: DecisionAllowSimilar, Reason: "prior allow_similar on " + req.ToolName}
 		case DecisionAllowOnce:
 			return HabitHint{Decision: DecisionAllowOnce, Reason: "prior allow_once on " + req.ToolName}
@@ -183,7 +183,7 @@ type DecideOptions struct {
 	TrustPath string
 }
 
-// Decide applies allow_once | allow_session | allow_similar | allow_permanent | deny.
+// Decide applies allow_once | allow_similar | allow_permanent | deny.
 func (s *Service) Decide(ctx context.Context, permissionID, decision, actor string) (Request, error) {
 	return s.DecideWithOptions(ctx, permissionID, decision, actor, DecideOptions{})
 }
@@ -198,10 +198,6 @@ func (s *Service) DecideWithOptions(ctx context.Context, permissionID, decision,
 	actor = strings.TrimSpace(actor)
 	if actor == "" {
 		actor = "user"
-	}
-	// allow_session kept as alias of allow_similar for backward compatibility.
-	if decision == DecisionAllowSession {
-		decision = DecisionAllowSimilar
 	}
 	switch decision {
 	case DecisionAllowOnce, DecisionAllowSimilar, DecisionAllowPermanent, DecisionDeny:
@@ -246,11 +242,7 @@ func (s *Service) DecideWithOptions(ctx context.Context, permissionID, decision,
 	// IssueGrant requires exact CapabilityScope present in the plan (ADR-011).
 	// ask-mode plans embed once + session variants for high-risk tools.
 	// similar/permanent use non-once (session) plan scopes.
-	scopeDecision := decision
-	if decision == DecisionAllowSimilar || decision == DecisionAllowPermanent {
-		scopeDecision = DecisionAllowSession
-	}
-	scope, err := findPlanScope(plan, kernel.StepID(req.StepID), req.Capability, req.ToolName, scopeDecision)
+	scope, err := findPlanScope(plan, kernel.StepID(req.StepID), req.Capability, req.ToolName, decision)
 	if err != nil {
 		return Request{}, err
 	}

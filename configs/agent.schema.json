@@ -104,11 +104,6 @@
       "additionalProperties": false,
       "description": "Session chat workspace. Tab agent=build (write) vs plan=read-only. allow_write is agent ceiling only.",
       "properties": {
-        "roots": {
-          "type": "array",
-          "items": {"type": "string", "minLength": 1},
-          "description": "Legacy absolute roots (merged into workspace ceiling). Prefer chat.workspace."
-        },
         "workspace": {
           "type": "object",
           "additionalProperties": false,
@@ -178,9 +173,9 @@
           "properties": {
             "mode": {
               "type": "string",
-              "enum": ["preauth", "ask", "auto"],
+              "enum": ["preauth", "ask"],
               "default": "preauth",
-              "description": "preauth = deny without grant (default); ask = interactive tool-call queue; auto reserved."
+              "description": "preauth = deny without grant (default); ask = interactive tool-call queue."
             }
           }
         },

@@ -349,7 +349,7 @@ func TestStartChatSkipsPlannerShape(t *testing.T) {
 	if result.RunID == "" || result.PlanID == "" {
 		t.Fatalf("result = %#v", result)
 	}
-	// Immediately after StartChat: never planning / waiting_approval.
+	// Immediately after StartChat: running or already completed.
 	mid, err := repo.GetTask(ctx, task.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -761,7 +761,7 @@ func TestStartChatPlanModeReadOnlyGrants(t *testing.T) {
 	if strings.Contains(req.Messages[0].Content, "build mode") {
 		t.Fatal("plan mode used agent build prompt")
 	}
-	// Never planning / waiting_approval.
+	// Chat task stays on the live state machine.
 	got, err := repo.GetTask(ctx, task.ID)
 	if err != nil {
 		t.Fatal(err)

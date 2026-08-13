@@ -78,18 +78,6 @@ func run(args []string) error {
 		default:
 			return errors.New("use ymz job create|list|status|pause|resume|cancel ...")
 		}
-	case "approval":
-		if len(rest) < 1 {
-			return errors.New("use ymz approval show|decide ...")
-		}
-		switch rest[0] {
-		case "show":
-			return runApprovalShow(rest[1:])
-		case "decide":
-			return runApprovalDecide(rest[1:])
-		default:
-			return errors.New("use ymz approval show|decide ...")
-		}
 	case "db":
 		if len(rest) < 1 || rest[0] != "check" {
 			return errors.New("use ymz db check [--mode user|system]")
@@ -134,14 +122,13 @@ func printUsage() {
 	fmt.Println("  ymz config validate [--mode user|system]")
 	fmt.Println("  ymz config import-opencode [path] [--mode user|system] [--dry-run] [--output path]")
 	fmt.Println("  ymz health [--mode user|system]")
-	fmt.Println("  ymz logs [--mode user|system] [--tail 200] [--level error] [--component agent] [--run run-id]")
-	fmt.Println("  ymz run [--mode user|system] \"task objective\"")
+	fmt.Println("  ymz logs [--mode user|system] [--tail 200] [--level error] [--component agent] [--run run-id] [--session session-id] [--task task-id]")
+	fmt.Println("  ymz run [--mode user|system] [--execution-mode agent|plan] \"task objective\"")
 
 	fmt.Println("  ymz task status <task-id> [--mode user|system]")
 	fmt.Println("  ymz task pause|resume|cancel <task-id> [--reason <text>] [--mode user|system]")
 	fmt.Println("  ymz job create ...  (secondary; prefer TUI /cron)")
 	fmt.Println("  ymz job list|status|pause|resume|cancel ...")
-	fmt.Println("  ymz approval show|decide ...  (removed; use Tab plan or run --execution-mode plan)")
 	fmt.Println("  ymz db check [--mode user|system]")
 	fmt.Println("  ymz help")
 }

@@ -1,5 +1,4 @@
-// Package kernel contains the mandatory agent state machine. It does not
-// depend on optional modules such as Memory, Skills, Scheduler, or Evolution.
+// Package kernel contains the Session/Task/Plan/Run state machines.
 package kernel
 
 import (
@@ -50,10 +49,10 @@ type Session struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	// Workspace is the absolute client launch directory for this session (ADR-046).
-	// Empty until set from task submit or left unset for legacy sessions.
+	// Empty until set from task submit.
 	Workspace string
 	// PreferredModel is an optional session model preference (provider/model).
-	// O4: chat runs resolve prefer→main via modelresolve; does not rewrite global config.
+	// O4: chat runs resolve job pin → prefer → main via modelresolve; does not rewrite global config.
 	PreferredModel string
 }
 
@@ -86,14 +85,6 @@ const (
 	TaskCancelled TaskState = "cancelled"
 )
 
-// Legacy task states may still appear in old core.db rows (read-only display).
-// New code must not transition into them.
-const (
-	TaskPlanning        TaskState = "planning"
-	TaskWaitingApproval TaskState = "waiting_approval"
-	TaskApproved        TaskState = "approved"
-)
-
 var taskTransitions = map[TaskState]map[TaskState]struct{}{
 	TaskCreated: {
 		TaskRunning:   {},
@@ -107,16 +98,6 @@ var taskTransitions = map[TaskState]map[TaskState]struct{}{
 	},
 	TaskPaused: {
 		TaskRunning:   {},
-		TaskCancelled: {},
-	},
-	// Legacy states: only allow cancel (or no forward transitions).
-	TaskPlanning: {
-		TaskCancelled: {},
-	},
-	TaskWaitingApproval: {
-		TaskCancelled: {},
-	},
-	TaskApproved: {
 		TaskCancelled: {},
 	},
 	TaskFailed: {
@@ -216,9 +197,6 @@ const (
 	PlanDraft      PlanState = "draft"
 	PlanApproved   PlanState = "approved"
 	PlanSuperseded PlanState = "superseded"
-	// Legacy plan states (old rows only; no new transitions into them).
-	PlanWaitingApproval PlanState = "waiting_approval"
-	PlanRejected        PlanState = "rejected"
 )
 
 var planTransitions = map[PlanState]map[PlanState]struct{}{
@@ -227,12 +205,6 @@ var planTransitions = map[PlanState]map[PlanState]struct{}{
 		PlanSuperseded: {},
 	},
 	PlanApproved: {
-		PlanSuperseded: {},
-	},
-	PlanWaitingApproval: {
-		PlanSuperseded: {},
-	},
-	PlanRejected: {
 		PlanSuperseded: {},
 	},
 }

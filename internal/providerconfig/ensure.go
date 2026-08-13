@@ -35,19 +35,15 @@ func findConfigPath(configDir string) (string, error) {
 
 // EnsureResult describes how provider config was made available under configDir.
 type EnsureResult struct {
-	Path     string // active config path under configDir (may be empty only on error)
-	Created  bool   // wrote the default template
-	Migrated bool   // copied from a project/legacy path
-	Source   string // migration source path when Migrated
+	Path    string // active config path under configDir (may be empty only on error)
+	Created bool   // wrote the default template
 }
 
 // EnsureConfig prepares configDir for provider loading:
 //  1. MkdirAll configDir
 //  2. If ConfigDir already has a config file, use it
-//  3. Else copy the first existing file from migrateFromDirs (each dir checked for
-//     agent.local.json then agent.json) into ConfigDir as LocalFilename
-//  4. Else write a default template (env-based keys, no secrets) as Filename
-func EnsureConfig(configDir string, migrateFromDirs ...string) (EnsureResult, error) {
+//  3. Else write a default template (env-based keys, no secrets) as Filename
+func EnsureConfig(configDir string) (EnsureResult, error) {
 	configDir = strings.TrimSpace(configDir)
 	if configDir == "" {
 		return EnsureResult{}, errors.New("config directory is required")
@@ -72,69 +68,11 @@ func EnsureConfig(configDir string, migrateFromDirs ...string) (EnsureResult, er
 	if existing != "" {
 		return EnsureResult{Path: existing}, nil
 	}
-	for _, dir := range migrateFromDirs {
-		dir = strings.TrimSpace(dir)
-		if dir == "" {
-			continue
-		}
-		for _, name := range []string{LocalFilename, Filename} {
-			src := filepath.Join(dir, name)
-			info, statErr := os.Stat(src)
-			if errors.Is(statErr, os.ErrNotExist) {
-				continue
-			}
-			if statErr != nil {
-				return EnsureResult{}, fmt.Errorf("inspect migrate source %s: %w", src, statErr)
-			}
-			if !info.Mode().IsRegular() {
-				continue
-			}
-			dst := filepath.Join(configDir, LocalFilename)
-			if err := copyFile(src, dst, 0o600); err != nil {
-				return EnsureResult{}, fmt.Errorf("migrate provider config %s → %s: %w", src, dst, err)
-			}
-			return EnsureResult{Path: dst, Migrated: true, Source: src}, nil
-		}
-	}
 	dst := filepath.Join(configDir, Filename)
 	if err := os.WriteFile(dst, []byte(defaultConfigTemplate), 0o600); err != nil {
 		return EnsureResult{}, fmt.Errorf("write default provider config %s: %w", dst, err)
 	}
 	return EnsureResult{Path: dst, Created: true}, nil
-}
-
-func copyFile(src, dst string, mode os.FileMode) error {
-	raw, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(dst), ".yunmengze-config-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(tmpName)
-		}
-	}()
-	if _, err := tmp.Write(raw); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(mode); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpName, dst); err != nil {
-		return err
-	}
-	cleanup = false
-	return nil
 }
 
 // EnsureAgentsFile writes ConfigDir/AGENTS.md when missing. Existing files are left untouched.

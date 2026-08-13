@@ -53,7 +53,6 @@ func (c *Client) ListPermissions(ctx context.Context, sessionID string, limit in
 }
 
 // DecidePermission applies allow_once | allow_similar | allow_permanent | deny.
-// allow_session is accepted as an alias of allow_similar.
 func (c *Client) DecidePermission(ctx context.Context, permissionID, decision string) (Permission, error) {
 	return c.DecidePermissionConfirm(ctx, permissionID, decision, false)
 }

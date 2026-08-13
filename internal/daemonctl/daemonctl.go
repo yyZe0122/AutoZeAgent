@@ -195,13 +195,7 @@ func startDetached(mode paths.Mode, layout paths.Layout) error {
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.Dir = layout.DataDir
-	// Client cwd is passed so first-run EnsureConfig can migrate project-local provider config
-	// even though the daemon process itself runs with DataDir as working directory.
-	env := os.Environ()
-	if cwd, err := os.Getwd(); err == nil && strings.TrimSpace(cwd) != "" {
-		env = append(env, "YMZ_CLIENT_CWD="+cwd)
-	}
-	cmd.Env = env
+	cmd.Env = os.Environ()
 	configureDetached(cmd)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start ymzd: %w", err)

@@ -44,7 +44,7 @@ func (c *Client) GetSession(ctx context.Context, id SessionID) (Session, error) 
 	return session, nil
 }
 
-// SetSessionPreferredModel stores a session model preference (O4; chat run prefer→main; no global switch).
+// SetSessionPreferredModel stores a session model preference (O4; chat run job pin → prefer → main; no global switch).
 // Empty model clears the preference.
 func (c *Client) SetSessionPreferredModel(ctx context.Context, id SessionID, model string) (Session, error) {
 	var session Session

@@ -1,6 +1,6 @@
 // Package chatsession runs multi-turn Session chat for both Tab modes.
 // Agent (build): workspace read+write grants. Plan: read-only grants.
-// No Planner / waiting_approval / plan-step worker path.
+// Dual-track chat: agent (write) and plan (read-only). No Planner / plan-step worker.
 package chatsession
 
 import (
@@ -431,4 +431,4 @@ func (s *Service) StartChat(ctx context.Context, request StartRequest) (StartRes
 }
 
 // ensureChatWorkspaceAuth creates (or reuses) an already-approved synthetic plan
-// and system approval. Task path is created → running only — never planning.
+// and system approval. Task path is created → running only.
