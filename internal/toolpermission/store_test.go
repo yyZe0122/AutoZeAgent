@@ -46,6 +46,91 @@ func TestStoreInsertListMark(t *testing.T) {
 	}
 }
 
+func TestPathRelated(t *testing.T) {
+	if pathRelated("/tmp/foo", "/tmp/foobar") {
+		t.Fatal("prefix without separator must not match")
+	}
+	if !pathRelated("/tmp/ws", "/tmp/ws/a.go") {
+		t.Fatal("directory prefix should match")
+	}
+	if !pathRelated("/tmp/ws/a.go", "/tmp/ws") {
+		t.Fatal("reverse directory prefix should match")
+	}
+	if !pathRelated("/tmp/ws", "/tmp/ws") {
+		t.Fatal("equal paths should match")
+	}
+	if !pathRelated("", "") {
+		t.Fatal("both empty should match")
+	}
+	if pathRelated("/tmp/ws", "") || pathRelated("", "/tmp/ws") {
+		t.Fatal("one empty must not match")
+	}
+}
+
+func TestSuggestHabit(t *testing.T) {
+	ctx := context.Background()
+	database, err := storesqlite.Open(ctx, t.TempDir()+"/core.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	store, err := NewStore(database.SQL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
+	stamp := now.Format(time.RFC3339Nano)
+	insert := func(id, session, path, decision, state string) {
+		t.Helper()
+		if err := store.Insert(ctx, Request{
+			ID: id, SessionID: session, TaskID: "t1", RunID: "r1",
+			PlanID: "p1", PlanHash: "h", StepID: "st1",
+			ToolCallID: id, ToolName: "process_exec", Capability: "process_exec",
+			Path: path, State: StatePending, CreatedAt: stamp,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.MarkDecided(ctx, id, decision, state, "", "user", stamp); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insert("perm-sim", "s1", "/tmp/ws", DecisionAllowSimilar, StateAllowedSession)
+	insert("perm-deny", "s1", "/tmp/other", DecisionDeny, StateDenied)
+	insert("perm-other-sess", "s2", "/tmp/ws", DecisionAllowOnce, StateAllowedOnce)
+
+	svc := &Service{store: store}
+	hint := svc.SuggestHabit(ctx, Request{
+		SessionID: "s1", ToolName: "process_exec", Capability: "process_exec", Path: "/tmp/ws/a.go",
+	})
+	if hint.Decision != DecisionAllowSimilar || hint.Reason == "" {
+		t.Fatalf("similar hint = %+v", hint)
+	}
+	hint = svc.SuggestHabit(ctx, Request{
+		SessionID: "s1", ToolName: "process_exec", Capability: "process_exec", Path: "/tmp/other/x",
+	})
+	if hint.Decision != "" || hint.Reason == "" {
+		t.Fatalf("deny hint should have reason only: %+v", hint)
+	}
+	hint = svc.SuggestHabit(ctx, Request{
+		SessionID: "s1", ToolName: "process_exec", Capability: "process_exec", Path: "",
+	})
+	if hint.Decision != "" || hint.Reason != "" {
+		t.Fatalf("empty path must not match prior with path: %+v", hint)
+	}
+	hint = svc.SuggestHabit(ctx, Request{
+		SessionID: "s1", ToolName: "process_exec", Capability: "process_exec", Path: "/tmp/wsother",
+	})
+	if hint.Decision != "" {
+		t.Fatalf("foobar-style prefix must not match: %+v", hint)
+	}
+	hint = svc.SuggestHabit(ctx, Request{
+		SessionID: "s3", ToolName: "process_exec", Capability: "process_exec", Path: "/tmp/ws/a.go",
+	})
+	if hint.Decision != "" {
+		t.Fatalf("other session must not leak: %+v", hint)
+	}
+}
+
 func TestWaiterNotify(t *testing.T) {
 	w := NewWaiter()
 	w.Register("p1")

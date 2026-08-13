@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -123,6 +124,55 @@ func (s *Service) Store() *Store {
 // ListPending returns pending permission requests.
 func (s *Service) ListPending(ctx context.Context, sessionID string, limit int) ([]Request, error) {
 	return s.store.ListPending(ctx, sessionID, limit)
+}
+
+// HabitHint is a read-only suggestion from prior decides (H4). Never auto-applied.
+type HabitHint struct {
+	Decision string
+	Reason   string
+}
+
+// SuggestHabit returns once/similar (or deny-reason only) from prior decides.
+func (s *Service) SuggestHabit(ctx context.Context, req Request) HabitHint {
+	if s == nil || s.store == nil {
+		return HabitHint{}
+	}
+	priors, err := s.store.ListRecentDecisions(ctx, req.ToolName, req.Capability, req.SessionID, 8)
+	if err != nil || len(priors) == 0 {
+		return HabitHint{}
+	}
+	for _, p := range priors {
+		if !pathRelated(req.Path, p.Path) {
+			continue
+		}
+		switch p.Decision {
+		case DecisionAllowSimilar, DecisionAllowSession:
+			return HabitHint{Decision: DecisionAllowSimilar, Reason: "prior allow_similar on " + req.ToolName}
+		case DecisionAllowOnce:
+			return HabitHint{Decision: DecisionAllowOnce, Reason: "prior allow_once on " + req.ToolName}
+		case DecisionDeny:
+			return HabitHint{Reason: "prior deny on " + req.ToolName}
+		}
+	}
+	return HabitHint{}
+}
+
+func pathRelated(a, b string) bool {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	if a == "" && b == "" {
+		return true
+	}
+	if a == "" || b == "" {
+		return false
+	}
+	a = filepath.Clean(a)
+	b = filepath.Clean(b)
+	if a == b {
+		return true
+	}
+	sep := string(filepath.Separator)
+	return strings.HasPrefix(a, b+sep) || strings.HasPrefix(b, a+sep)
 }
 
 // DecideOptions controls permanent confirm and trust persistence (ADR-046).

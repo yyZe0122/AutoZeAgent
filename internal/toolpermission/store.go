@@ -232,6 +232,48 @@ func scanRequest(row scannable) (Request, error) {
 	return r, nil
 }
 
+// RecentDecision is a prior decide used for habit hints (H4).
+type RecentDecision struct {
+	Decision string
+	Path     string
+}
+
+// ListRecentDecisions returns latest decided rows for tool+capability.
+// Non-empty sessionID limits the query to that session.
+func (s *Store) ListRecentDecisions(ctx context.Context, toolName, capability, sessionID string, limit int) ([]RecentDecision, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("toolpermission store is nil")
+	}
+	if limit <= 0 || limit > 20 {
+		limit = 8
+	}
+	query := `
+		SELECT COALESCE(decision, ''), COALESCE(path, '')
+		FROM tool_permission_requests
+		WHERE tool_name = ? AND capability = ? AND state != ? AND COALESCE(decision, '') != ''`
+	args := []any{strings.TrimSpace(toolName), strings.TrimSpace(capability), StatePending}
+	if sid := strings.TrimSpace(sessionID); sid != "" {
+		query += ` AND session_id = ?`
+		args = append(args, sid)
+	}
+	query += ` ORDER BY COALESCE(decided_at, created_at) DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []RecentDecision
+	for rows.Next() {
+		var d RecentDecision
+		if err := rows.Scan(&d.Decision, &d.Path); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
 func nullStr(s string) any {
 	if strings.TrimSpace(s) == "" {
 		return nil

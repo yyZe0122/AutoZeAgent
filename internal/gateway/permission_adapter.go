@@ -22,7 +22,11 @@ func (a ToolPermissionAdapter) ListPending(ctx context.Context, sessionID string
 	}
 	out := make([]ToolPermissionView, 0, len(items))
 	for _, r := range items {
-		out = append(out, viewFromRequest(r))
+		view := viewFromRequest(r)
+		hint := a.Service.SuggestHabit(ctx, r)
+		view.SuggestedDecision = hint.Decision
+		view.SuggestedReason = hint.Reason
+		out = append(out, view)
 	}
 	return out, nil
 }
