@@ -10,16 +10,17 @@ import (
 
 // MemoryEntry is a local memory fact (ADR-044).
 type MemoryEntry struct {
-	ID        string   `json:"entry_id"`
-	SessionID string   `json:"session_id,omitempty"`
-	Content   string   `json:"content"`
-	Source    string   `json:"source"`
-	Tags      []string `json:"tags,omitempty"`
-	Kind      string   `json:"kind,omitempty"`
-	Priority  int      `json:"priority,omitempty"`
-	ExpiresAt string   `json:"expires_at,omitempty"`
-	CreatedAt string   `json:"created_at"`
-	UpdatedAt string   `json:"updated_at,omitempty"`
+	ID         string   `json:"entry_id"`
+	SessionID  string   `json:"session_id,omitempty"`
+	Content    string   `json:"content"`
+	Source     string   `json:"source"`
+	Tags       []string `json:"tags,omitempty"`
+	Kind       string   `json:"kind,omitempty"`
+	Priority   int      `json:"priority,omitempty"`
+	ExpiresAt  string   `json:"expires_at,omitempty"`
+	CreatedAt  string   `json:"created_at"`
+	UpdatedAt  string   `json:"updated_at,omitempty"`
+	ArchivedAt string   `json:"archived_at,omitempty"`
 }
 
 type memoryListResponse struct {
@@ -28,6 +29,11 @@ type memoryListResponse struct {
 
 // ListMemory returns memory entries (optional session/query/kind filters).
 func (c *Client) ListMemory(ctx context.Context, sessionID, query, kind string, limit int) ([]MemoryEntry, error) {
+	return c.ListMemoryFilter(ctx, sessionID, query, kind, limit, false)
+}
+
+// ListMemoryFilter is ListMemory with optional archived-only rows.
+func (c *Client) ListMemoryFilter(ctx context.Context, sessionID, query, kind string, limit int, includeArchived bool) ([]MemoryEntry, error) {
 	path := "/v1/memory"
 	q := url.Values{}
 	if s := strings.TrimSpace(sessionID); s != "" {
@@ -38,6 +44,9 @@ func (c *Client) ListMemory(ctx context.Context, sessionID, query, kind string, 
 	}
 	if s := strings.TrimSpace(kind); s != "" {
 		q.Set("kind", s)
+	}
+	if includeArchived {
+		q.Set("include_archived", "true")
 	}
 	if limit > 0 {
 		q.Set("limit", fmt.Sprintf("%d", limit))

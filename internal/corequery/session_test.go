@@ -182,6 +182,51 @@ func TestIsInternalStepPrompt(t *testing.T) {
 	}
 }
 
+func TestListMemoryExcludesArchivedByDefault(t *testing.T) {
+	ctx := context.Background()
+	db, err := coresqlite.Open(ctx, t.TempDir()+"/core.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+	past := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano)
+	sqlDB := db.SQL()
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO memory_entries(entry_id,session_id,content,source,tags_json,created_at,kind,priority,expires_at,updated_at,archived_at)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+			[]any{"mem-live", "s1", "live fact", "user", "[]", stamp, "session", 0, "", stamp, ""}},
+		{`INSERT INTO memory_entries(entry_id,session_id,content,source,tags_json,created_at,kind,priority,expires_at,updated_at,archived_at)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+			[]any{"mem-arch", "s1", "old fact", "user", "[]", stamp, "session", 0, past, stamp, past}},
+	} {
+		if _, err := sqlDB.ExecContext(ctx, q.sql, q.args...); err != nil {
+			t.Fatalf("%s: %v", q.sql, err)
+		}
+	}
+	store, err := New(sqlDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	live, err := store.ListMemory(ctx, MemoryListOptions{Page: Page{Limit: 10}, SessionID: "s1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(live) != 1 || live[0].ID != "mem-live" {
+		t.Fatalf("live = %+v", live)
+	}
+	arch, err := store.ListMemory(ctx, MemoryListOptions{Page: Page{Limit: 10}, SessionID: "s1", IncludeArchived: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(arch) != 1 || arch[0].ID != "mem-arch" || arch[0].ArchivedAt == "" {
+		t.Fatalf("archived = %+v", arch)
+	}
+}
+
 func TestListSessionsEmpty(t *testing.T) {
 	ctx := context.Background()
 	db, err := coresqlite.Open(ctx, t.TempDir()+"/core.db")

@@ -236,6 +236,7 @@ func run(args []string) error {
 		}
 		memoryManager, err = memory.New(memory.Config{
 			Store: memoryStore, MaxInjectRunes: chatCfg.MemoryMaxInjectRunes(),
+			DefaultTTL: chatCfg.MemoryDefaultTTL(),
 		})
 		if err != nil {
 			return err

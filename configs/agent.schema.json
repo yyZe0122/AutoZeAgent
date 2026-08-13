@@ -212,6 +212,10 @@
               "default": true,
               "description": "Enable transcript FTS session_search tool."
             },
+            "default_ttl": {
+              "type": "string",
+              "description": "Go duration applied to session/detail writes that omit expires_at (e.g. 168h). Empty or omit = no automatic expiry. Global curated never receives this TTL."
+            },
             "curator": {
               "type": "object",
               "additionalProperties": false,

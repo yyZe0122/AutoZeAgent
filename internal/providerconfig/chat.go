@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/yyZe0122/yunmengze-agent/internal/injectscan"
@@ -223,6 +224,12 @@ func (c ChatConfig) validate() error {
 		mode := strings.ToLower(strings.TrimSpace(c.Memory.InjectMode))
 		if mode != "" && mode != "session_start" {
 			return fmt.Errorf("chat.memory.inject_mode must be session_start (or omit)")
+		}
+		if ttl := strings.TrimSpace(c.Memory.DefaultTTL); ttl != "" {
+			d, err := time.ParseDuration(ttl)
+			if err != nil || d <= 0 || d > 8760*time.Hour {
+				return fmt.Errorf("chat.memory.default_ttl must be a positive Go duration up to 8760h (or omit)")
+			}
 		}
 		if c.Memory.Curator != nil {
 			if c.Memory.Curator.MaxFacts != 0 && (c.Memory.Curator.MaxFacts < 1 || c.Memory.Curator.MaxFacts > 8) {

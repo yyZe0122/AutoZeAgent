@@ -152,6 +152,10 @@ func (f *fakeGateway) ListMemory(context.Context, string, string, string, int) (
 	return nil, nil
 }
 
+func (f *fakeGateway) ListMemoryFilter(context.Context, string, string, string, int, bool) ([]gatewayclient.MemoryEntry, error) {
+	return nil, nil
+}
+
 func (f *fakeGateway) RefreshMemory(context.Context, string) error { return nil }
 
 func (f *fakeGateway) ForgetMemory(context.Context, string) error { return nil }

@@ -19,6 +19,7 @@ import (
 type Manager struct {
 	store          *Store
 	maxInjectRunes int
+	defaultTTL     time.Duration
 	now            func() time.Time
 	mu             sync.Mutex
 	closed         bool
@@ -30,6 +31,7 @@ type Manager struct {
 type Config struct {
 	Store          *Store
 	MaxInjectRunes int
+	DefaultTTL     time.Duration
 	Now            func() time.Time
 }
 
@@ -45,12 +47,13 @@ func New(config Config) (*Manager, error) {
 		config.Now = func() time.Time { return time.Now().UTC() }
 	}
 	return &Manager{
-		store: config.Store, maxInjectRunes: config.MaxInjectRunes, now: config.Now,
+		store: config.Store, maxInjectRunes: config.MaxInjectRunes,
+		defaultTTL: config.DefaultTTL, now: config.Now,
 		snapshots: make(map[string]string),
 	}, nil
 }
 
-// Initialize opens lifecycle; purges expired entries.
+// Initialize opens lifecycle; soft-archives expired entries (no hard delete).
 func (m *Manager) Initialize(ctx context.Context) error {
 	if m == nil {
 		return nil
@@ -58,16 +61,34 @@ func (m *Manager) Initialize(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.closed = false
-	if m.store != nil {
-		if n, err := m.store.PurgeExpired(ctx, m.now().UTC().Format(time.RFC3339Nano)); err != nil {
-			slog.Warn("memory purge expired failed",
-				"component", "memory", "operation", "initialize", "result", "warning", "error", err)
-		} else if n > 0 {
-			slog.Info("memory purged expired",
-				"component", "memory", "operation", "initialize", "result", "succeeded", "count", n)
-		}
-	}
+	m.maintainLocked(ctx, "initialize")
 	return nil
+}
+
+// Maintain soft-archives expired entries. Safe to call after each turn.
+func (m *Manager) Maintain(ctx context.Context) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return
+	}
+	m.maintainLocked(ctx, "maintain")
+}
+
+func (m *Manager) maintainLocked(ctx context.Context, operation string) {
+	if m.store == nil {
+		return
+	}
+	if n, err := m.store.ArchiveExpired(ctx, m.now().UTC().Format(time.RFC3339Nano)); err != nil {
+		slog.Warn("memory archive expired failed",
+			"component", "memory", "operation", operation, "result", "warning", "error", err)
+	} else if n > 0 {
+		slog.Info("memory archived expired",
+			"component", "memory", "operation", operation, "result", "succeeded", "count", n)
+	}
 }
 
 // Shutdown marks closed (store uses shared core.db — do not close DB).
@@ -187,12 +208,17 @@ func (m *Manager) RememberKind(ctx context.Context, sessionID, content, source s
 			kind = KindSession
 		}
 	}
-	now := m.now().UTC().Format(time.RFC3339Nano)
-	id := "mem-" + shortID(sessionID, content, now)
+	now := m.now().UTC()
+	nowRFC := now.Format(time.RFC3339Nano)
+	expiresAt = strings.TrimSpace(expiresAt)
+	if expiresAt == "" && m.defaultTTL > 0 && kind != KindCurated && sessionID != "" {
+		expiresAt = now.Add(m.defaultTTL).Format(time.RFC3339Nano)
+	}
+	id := "mem-" + shortID(sessionID, content, nowRFC)
 	return m.store.Insert(ctx, Entry{
 		ID: id, SessionID: sessionID, Content: content, Source: source,
-		Tags: tags, Kind: kind, Priority: priority, ExpiresAt: strings.TrimSpace(expiresAt),
-		CreatedAt: now, UpdatedAt: now,
+		Tags: tags, Kind: kind, Priority: priority, ExpiresAt: expiresAt,
+		CreatedAt: nowRFC, UpdatedAt: nowRFC,
 	})
 }
 
@@ -255,7 +281,7 @@ func (m *Manager) Promote(ctx context.Context, entryID string) (Entry, error) {
 	out := Entry{
 		ID: newID, SessionID: "", Content: e.Content, Source: SourcePromote,
 		Tags: append([]string{}, e.Tags...), Kind: KindCurated,
-		Priority: e.Priority + 1, ExpiresAt: e.ExpiresAt,
+		Priority:  e.Priority + 1,
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if out.Tags == nil {

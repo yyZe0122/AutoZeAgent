@@ -1,13 +1,13 @@
 # YunmengZe Agent 当前状态
 
-更新：2026-08-12（TUI 气泡化 + Phase 1/2 · 基线 **v0.2.4**）
+更新：2026-08-13（H5-lite memory 软归档 · 基线 **v0.2.4**）
 
 **本文件是唯一活着的优化/backlog 文档。** 只写未完成与暂缓项；已落地细节见 ADR（`docs/architecture/`）、changelog 与 git。
 
 ## 现状
 
 生产形态稳定：`ymzd` + CLI·TUI（`ymz`）+ `core.db`。设计知识库：`docs/architecture/`。  
-当前发布线：**v0.2.4**（v0.2.0 改名；v0.2.3 model 选择；v0.2.4 = O1–O4 + H7 + H1-lite + TUI Phase 2 气泡/SSE）。
+当前发布线：**v0.2.4**（v0.2.0 改名；v0.2.3 model 选择；v0.2.4 = O1–O4 + H7 + H1-lite + TUI Phase 2 气泡/SSE）。**未发版：** H5-lite memory 软归档。
 
 | 对标 | 契约重叠（粗） | 说明 |
 | --- | --- | --- |
@@ -15,12 +15,12 @@
 | OpenCode 产品手感 | ~75–85% | + skill-as-slash；`chat.commands`；session prefer 已 run-level 解析（O4） |
 | OpenCode API/SDK | ~10–15% 路径类比 | 本地 `/v1/*` + Go `gatewayclient`；**不追**全量 OC OpenAPI |
 | Crush TUI | 契约 ~92% | T1–T7 + C1–C4/UX-A + 气泡卡/glamour/zone；无新 list 引擎 |
-| Hermes 分层记忆 | 架构 ~85% | + H6-min；**H1-lite curator**（turn 后 aux → entries；冻结块仍手动 refresh） |
+| Hermes 分层记忆 | 架构 ~90% | + H6-min；**H1-lite curator**；**H5-lite** `default_ttl` + 过期软归档（冻结块仍手动 refresh） |
 | Hermes 自进化 | ~5–15% | 仅 promote / pre-compress / curator 提案；无 skill 自改 / 习惯学习 |
 | Hermes 消息网关 | ~0% | 仅本机 UDS/loopback；**暂不上**飞书/微信（本机编码/定时为主） |
 
 **产品焦点：** 本机编码 + 简单任务 + 定时任务。  
-**下一优先（非必须）：** H5 purge 增强；H2/M* **仅**在上消息通道前再做。C4 skill 变更轨 / H6 完整化 / O5–O6 **暂缓**。
+**下一优先（非必须）：** 无强需求则先收敛。H2/M* **仅**在上消息通道前再做。H3 / H4 / H5-skill / C4 skill 变更轨 / H6 完整化 / O5–O6 **暂缓**。
 
 ## 原则（不变）
 
@@ -57,13 +57,13 @@
 
 ### 改名（R）— **已完成**
 
-对外 **YunmengZe Agent**；可执行 `ymz` / `ymzd`；配置根 `~/.yunmengze`；module `github.com/yyZe0122/yunmengze-agent`；破坏性里程碑 **v0.2.0**，当前 **v0.2.3**。
+对外 **YunmengZe Agent**；可执行 `ymz` / `ymzd`；配置根 `~/.yunmengze`；module `github.com/yyZe0122/yunmengze-agent`；破坏性里程碑 **v0.2.0**，已发 **v0.2.4**。
 
 | ID | Phase | 状态 |
 | --- | --- | --- |
 | **R0–R4** | 命名冻结 · 路径常量 · cmd · module · 打包文档 | **已落地** |
 | **R5** | GitHub + 包仓改名 / remote / cask·scoop | **已完成** |
-| **R6** | v0.2.0 改名发版 | **已完成**（后续 v0.2.1–v0.2.3） |
+| **R6** | v0.2.0 改名发版 | **已完成**（后续 v0.2.1–v0.2.4） |
 
 历史 changelog v0.1.x 可保留旧名作史料。**不做**旧 CLI/路径长期兼容。
 
@@ -76,6 +76,7 @@
 | **O3** | skill-as-slash + `chat.commands` 模板 slash；import OC `command` | **已落地** |
 | **O4** | session prefer + run-level resolve（prefer→main）；`modelresolve` | **已落地**（ADR-045） |
 | **H6-min** | `injectscan`：memory 写入 + skill body + inject 路径 fail-closed | **已落地**（规则可再收紧） |
+| **H5-lite** | memory `default_ttl` + 过期软归档 | **已落地**（未发版；skill archive 仍暂缓） |
 
 ---
 
@@ -86,8 +87,8 @@
 ```text
 Phase 1：O1–O4 已落地 ──► O5–O6（仅有外部 OC 客户端需求时）
 Phase 2：C1–C4 + UX-A/B 已落地（TUI 气泡 / expand / permission SSE / journey memory）
-H7 ✅ · H1-lite ✅ · H6-min ✅
-H2 / H3–H5 / M* ── 无消息通道计划则暂缓
+H7 ✅ · H1-lite ✅ · H6-min ✅ · H5-lite（memory）✅
+H2 / H3 / H4 / H5-skill / M* ── 无消息通道计划则暂缓
 ```
 
 ### Phase 1 — OpenCode 体验兼容（不追全量 API）
@@ -120,7 +121,7 @@ H2 / H3–H5 / M* ── 无消息通道计划则暂缓
 | **H2** | write_approval | messaging/cron 来源的 memory/skill 写入先 stage | **暂缓**（无消息通道时不必） |
 | **H3** | Skill 自改进草稿 | 工具写 ConfigDir/project `SKILL.md` 草稿 | 永不扩 grant；可选人工 apply + backup |
 | **H4** | 工具习惯学习 | 从 permission decide 沉淀 **建议**（once→similar 提示） | **非**自动 permanent；无 yolo |
-| **H5** | Curator 维护 | 过期 memory purge；未用 agent-skill archive | 确定性优先；不自动硬删 |
+| **H5** | Curator 维护 | 过期 memory 软归档；未用 agent-skill archive | **H5-lite（memory）已落地**：`default_ttl` + `archived_at`；启动/turn 后标归档，不自动硬删。**H5-skill 暂缓**（无 last-used） |
 | **H6** | 注入扫描 | memory/skill 进 system 前扫注入/不可见 Unicode | **H6-min 已落地**；完整化非必须 |
 | **H7** | Job model pin | 创建时钉 model ref；空/失效 → skip+告警 | **已落地**（`jobs.model_ref` + `modelresolve` 严格解析） |
 

@@ -50,6 +50,7 @@ type Gateway interface {
 	DecidePermissionConfirm(ctx context.Context, permissionID, decision string, confirm bool) (gatewayclient.Permission, error)
 
 	ListMemory(ctx context.Context, sessionID, query, kind string, limit int) ([]gatewayclient.MemoryEntry, error)
+	ListMemoryFilter(ctx context.Context, sessionID, query, kind string, limit int, includeArchived bool) ([]gatewayclient.MemoryEntry, error)
 	RefreshMemory(ctx context.Context, sessionID string) error
 	ForgetMemory(ctx context.Context, entryID string) error
 	PromoteMemory(ctx context.Context, entryID string) (gatewayclient.MemoryEntry, error)

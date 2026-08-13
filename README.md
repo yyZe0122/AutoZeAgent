@@ -47,7 +47,7 @@ core.db  single SQLite source of truth
 | **Multi-provider** | Nested catalog per supplier; select `providerId/modelId…` (OpenCode-style) |
 | **Hot-reload** | Main provider stack (~0.5s) while daemon runs — [ADR-048](docs/architecture/048-provider-config-hot-reload.md) |
 | **OpenCode import** | `ymz config import-opencode` → `agent.local.json` (MCP local+remote, `chat.commands`, compaction; warn+drop plugins/LSP) |
-| **Memory · cron · MCP** | In-process memory (+ inject scan), chat-native jobs, stdio/remote MCP via Broker |
+| **Memory · cron · MCP** | In-process memory (+ inject scan, optional `default_ttl`, expired soft-archive), chat-native jobs, stdio/remote MCP via Broker |
 | **Slash templates** | `chat.commands` → `/<cmd> [args]` expands `$ARGUMENTS` (instruction only; no grants) |
 | **Session model** | `/model prefer` stores preference; chat runs resolve **prefer → main** (global `/model` unchanged) |
 
@@ -229,7 +229,7 @@ Chat transcript uses **rounded bubbles** (user / assistant / thinking / tool), n
 | `/model` | Switch **global** main (`/model provider/model`); `/model prefer [ref]` session prefer (applied on next chat run) |
 | `/skills` · `/<skill-id>` | Multi-select skills, or skill-as-slash (instruction only) |
 | `/<cmd> [args]` | `chat.commands` template slash (`$ARGUMENTS`); priority: built-in → commands → skill |
-| `/compact` · `/perm` · `/memory` | Context, tool permission, facts |
+| `/compact` · `/perm` · `/memory` | Context, tool permission, facts (`/memory archived` lists expired) |
 | `/expand` · `/journey` | Expand/collapse folded blocks; prepend session memory timeline (read-only) |
 | `/cron` | Jobs on focused session |
 | `/status` · `/retry` · `/stop` | Health · resubmit · cancel |
@@ -295,6 +295,6 @@ Details: [`SECURITY.md`](SECURITY.md), [threat model ADR-008](docs/architecture/
 
 ## Status
 
-Alpha. Production shape is the three-piece stack above. UX backlog T1–T7 and logging L1 are landed — optional tails in [`docs/optimization/current.md`](docs/optimization/current.md).
+Alpha. Production shape is the three-piece stack above. TUI Phase 2, OpenCode O1–O4, H7 / H1-lite / H5-lite memory are landed — remaining tails in [`docs/optimization/current.md`](docs/optimization/current.md).
 
 Release checklist: [`docs/release.md`](docs/release.md).

@@ -54,11 +54,12 @@ type TranscriptOptions struct {
 
 // MemoryListOptions filters memory_entries for read APIs (ADR-044).
 type MemoryListOptions struct {
-	Page          Page
-	SessionID     string
-	Query         string
-	Kind          string
-	IncludeGlobal bool
+	Page            Page
+	SessionID       string
+	Query           string
+	Kind            string
+	IncludeGlobal   bool
+	IncludeArchived bool
 }
 
 func validateListOptions(page Page, sort SortDirection) error {

@@ -161,6 +161,7 @@ func (s *Service) executeChat(
 		}
 		// H1-lite: async LLM curator (does not touch frozen system block).
 		s.runMemoryCurator(bg, string(task.SessionID), userText, result.Content)
+		s.memory.Maintain(bg)
 	}
 }
 

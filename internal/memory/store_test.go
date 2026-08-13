@@ -143,3 +143,81 @@ func TestManagerSystemPromptAndPreCompress(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestDefaultTTLAndSoftArchive(t *testing.T) {
+	ctx := context.Background()
+	database, err := storesqlite.Open(ctx, t.TempDir()+"/core.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	store, err := NewStore(database.SQL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
+	clock := now
+	mgr, err := New(Config{
+		Store: store, DefaultTTL: time.Hour,
+		Now: func() time.Time { return clock },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.Remember(ctx, "s1", "session fact with ttl", SourceUser, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.RememberKind(ctx, "", "global curated no ttl", SourceUser, nil, KindCurated, 10, ""); err != nil {
+		t.Fatal(err)
+	}
+	list, err := store.ListRecent(ctx, "s1", true, true, 10, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var session, curated Entry
+	for _, e := range list {
+		switch e.Content {
+		case "session fact with ttl":
+			session = e
+		case "global curated no ttl":
+			curated = e
+		}
+	}
+	if session.ID == "" || session.ExpiresAt != now.Add(time.Hour).Format(time.RFC3339Nano) {
+		t.Fatalf("session ttl = %+v", session)
+	}
+	if curated.ID == "" || curated.ExpiresAt != "" {
+		t.Fatalf("curated should have no ttl: %+v", curated)
+	}
+	if !strings.Contains(mgr.SystemPromptBlock(ctx, "s1"), "session fact with ttl") {
+		t.Fatal("expected session fact in inject")
+	}
+
+	clock = now.Add(2 * time.Hour)
+	if err := mgr.Initialize(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.Get(ctx, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ArchivedAt == "" {
+		t.Fatalf("expected soft archive, got %+v", got)
+	}
+	block := mgr.SystemPromptBlock(ctx, "s1")
+	if strings.Contains(block, "session fact with ttl") {
+		t.Fatalf("archived fact still injected: %q", block)
+	}
+	if !strings.Contains(block, "global curated no ttl") {
+		t.Fatalf("curated missing from inject: %q", block)
+	}
+	active, err := mgr.List(ctx, "s1", true, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range active {
+		if e.ID == session.ID {
+			t.Fatalf("archived entry still in default list: %+v", e)
+		}
+	}
+}

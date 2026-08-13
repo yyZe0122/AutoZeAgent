@@ -3,6 +3,7 @@ package providerconfig
 
 import (
 	"strings"
+	"time"
 )
 
 const (
@@ -137,6 +138,9 @@ type ChatMemoryConfig struct {
 	InjectMode string `json:"inject_mode,omitempty"`
 	// SessionSearch enables transcript FTS tool (default true).
 	SessionSearch *bool `json:"session_search,omitempty"`
+	// DefaultTTL is a Go duration applied when session/detail writes omit expires_at.
+	// Empty = no automatic expiry. Global curated never receives this TTL.
+	DefaultTTL string `json:"default_ttl,omitempty"`
 	// Curator is optional post-turn LLM fact extraction (H1-lite).
 	Curator *ChatMemoryCuratorConfig `json:"curator,omitempty"`
 }
@@ -228,6 +232,22 @@ func (c ChatConfig) MemorySessionSearchEnabled() bool {
 		return true
 	}
 	return *c.Memory.SessionSearch
+}
+
+// MemoryDefaultTTL returns chat.memory.default_ttl or 0 (no automatic expiry).
+func (c ChatConfig) MemoryDefaultTTL() time.Duration {
+	if c.Memory == nil {
+		return 0
+	}
+	raw := strings.TrimSpace(c.Memory.DefaultTTL)
+	if raw == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return 0
+	}
+	return d
 }
 
 // MemoryCuratorEnabled reports whether post-turn LLM curator is on (default true when memory on).

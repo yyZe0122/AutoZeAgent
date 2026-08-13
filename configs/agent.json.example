@@ -125,6 +125,7 @@
     "memory": {
       "enabled": true,
       "max_inject_runes": 2000,
+      "default_ttl": "",
       "session_search": true,
       "curator": { "enabled": true, "max_facts": 3, "timeout_ms": 15000 }
     },

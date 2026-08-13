@@ -3,6 +3,7 @@ package providerconfig
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestValidateChatCommands(t *testing.T) {
@@ -49,6 +50,25 @@ func TestExpandChatCommandTemplate(t *testing.T) {
 	}
 	if got := ExpandChatCommandTemplate("only $0", "z"); got != "only z" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestValidateMemoryDefaultTTL(t *testing.T) {
+	t.Parallel()
+	if err := (ChatConfig{Memory: &ChatMemoryConfig{DefaultTTL: "168h"}}).validate(); err != nil {
+		t.Fatal(err)
+	}
+	if d := (ChatConfig{Memory: &ChatMemoryConfig{DefaultTTL: "168h"}}).MemoryDefaultTTL(); d != 168*time.Hour {
+		t.Fatalf("ttl = %s", d)
+	}
+	if (ChatConfig{}).MemoryDefaultTTL() != 0 {
+		t.Fatal("omit should be zero")
+	}
+	if err := (ChatConfig{Memory: &ChatMemoryConfig{DefaultTTL: "nope"}}).validate(); err == nil {
+		t.Fatal("want invalid duration")
+	}
+	if err := (ChatConfig{Memory: &ChatMemoryConfig{DefaultTTL: "0s"}}).validate(); err == nil {
+		t.Fatal("want non-positive duration")
 	}
 }
 

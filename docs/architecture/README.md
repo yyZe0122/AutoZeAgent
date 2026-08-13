@@ -82,7 +82,7 @@ Provider wire formats: [`docs/provider-protocols.md`](../provider-protocols.md).
 | 041 | Context packing / pressure | Token budget pack, compaction triggers, anti-thrash, `/compact` |
 | 042 | Chat-native jobs | Timed session chat submit; lease from 017; TUI `/cron` primary |
 | 043 | Tool-call permission interaction | `chat.permission.mode`; pending → TUI decide → scoped grant; SSE `permission.*` |
-| 044 | In-process memory boundary | Layered L0–L3 memory; freeze inject; FTS; `/memory` `/journey`; injectscan (H6-min); H1-lite curator; no Module Runtime |
+| 044 | In-process memory boundary | Layered L0–L3 memory; freeze inject; FTS; `/memory` `/memory archived` `/journey`; injectscan (H6-min); H1-lite curator; H5-lite `default_ttl` + soft-archive; no Module Runtime |
 | 045 | Model roles | Optional `models.subagent` / `models.compact`; O4 session prefer + H7 job pin resolve |
 | 046 | Session workspace + permission tiers | Client cwd session root; once/similar/permanent/deny |
 | 047 | Structured logging / debug chain | slog JSON stage boundaries; `ymz logs`; tests vs real-machine |

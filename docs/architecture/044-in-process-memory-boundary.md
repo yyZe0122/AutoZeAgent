@@ -2,7 +2,7 @@
 
 - 状态：Accepted（产品化进行中）
 - 日期：2026-08-06
-- 更新：2026-08-12（TUI `/journey` 只读时间线）
+- 更新：2026-08-13（H5-lite：default_ttl + 过期软归档）
 
 ## 背景
 
@@ -15,7 +15,7 @@ Hermes 的正确分工是：**策展记忆**（总进 system 的短事实）与 
 ### 形态（分层）
 
 ```text
-TUI /memory · /refresh-memory
+TUI /memory · /memory archived · /refresh-memory
         │
         ▼
 GET /v1/memory (只读) ── corequery
@@ -29,7 +29,7 @@ chatsession ──► internal/memory.Manager (in-process)
         │
         └─ tools via Broker only (memory_* / session_search)
                     │
-              core.db (单库；migration 019+020)
+              core.db (单库；migration 019+020+022)
 ```
 
 - **不是** 独立进程、多 `memory.db`、Gateway 业务写、`/v1/modules`。
@@ -62,11 +62,12 @@ chatsession ──► internal/memory.Manager (in-process)
 
 | 钩子 | 调用点 | 作用 |
 | --- | --- | --- |
-| `Initialize` / `Shutdown` | daemon | 打开/关闭标记；可选 purge 过期 |
+| `Initialize` / `Shutdown` | daemon | 打开/关闭标记；启动时软归档过期条目 |
 | `FrozenSystemBlock` | `executeChat` 首次/刷新后 | L0+L1 有界注入 |
 | `SyncTurn` | turn 成功后 | remember/prefer 类 → L1（或配置） |
 | `CurateTurn`（H1-lite） | turn 成功后 async | aux（`models.compact` 或 main）提案 → L1 `source=curator`；**不**改冻结块 |
 | `OnPreCompress` | pack 摘要前 | head 短事实 → 默认 L2 detail |
+| `Maintain`（H5-lite） | 启动 + 每 turn 成功后 | 过期条目标 `archived_at`；**不**硬删 |
 | tools | Broker | search / write / promote / forget；session_search |
 
 ### LLM Curator（H1-lite）
@@ -77,7 +78,7 @@ chatsession ──► internal/memory.Manager (in-process)
 - **不** `InvalidateSnapshot`；注入仍冻结至 `/refresh-memory` 或新 session。
 - 配置：`chat.memory.curator`（`enabled` 默认 true；`max_facts` 默认 3；`timeout_ms` 默认 15000）。
 
-### 存储（migration 019 + 020）
+### 存储（migration 019 + 020 + 022）
 
 `memory_entries`：
 
@@ -90,7 +91,8 @@ chatsession ──► internal/memory.Manager (in-process)
 | `tags_json` | 标签 |
 | `kind` | `curated` \| `session` \| `detail`（默认 session；global 默认 curated） |
 | `priority` | int，越大越优先注入（默认 0） |
-| `expires_at` | 可空 RFC3339Nano；过期不注入、可 purge |
+| `expires_at` | 可空 RFC3339Nano；过期不注入、可软归档 |
+| `archived_at` | 可空 RFC3339Nano；非空 = 已归档；默认 list/inject 排除 |
 | `created_at` / `updated_at` | UTC RFC3339Nano |
 
 - FTS5：`memory_entries_fts`（content 检索）。
@@ -110,8 +112,8 @@ chatsession ──► internal/memory.Manager (in-process)
 ### 可见性（只读）
 
 - `corequery.ListMemory` / `SearchMemory`
-- `GET /v1/memory?session_id=&q=&kind=&limit=`
-- TUI `/memory`（list/search/forget 经只读 + 窄写服务或工具等价路径）
+- `GET /v1/memory?session_id=&q=&kind=&limit=&include_archived=`（`include_archived=true` 只返回归档行）
+- TUI `/memory`（list/search/forget 经只读 + 窄写服务或工具等价路径）；`/memory archived` 只看归档行
 - TUI `/journey`：只读 `ListMemory` 结果前缀到会话 timeline（journey 行；skill 变更轨未做）
 - **Gateway 不持业务写 `*sql.DB`**；forget/promote 写路径：工具或 daemon 内 `memory.Manager` 经专用 service（非 Gateway 内嵌 SQL 写）
 
@@ -122,8 +124,6 @@ chatsession ──► internal/memory.Manager (in-process)
   "enabled": true,
   "max_inject_runes": 2000,
   "inject_mode": "session_start",
-  "default_kind": "session",
-  "promote_enabled": true,
   "default_ttl": "",
   "session_search": true,
   "curator": {
@@ -135,6 +135,8 @@ chatsession ──► internal/memory.Manager (in-process)
 ```
 
 - `inject_mode`: 仅 `session_start`（冻结）；刷新靠 `/refresh-memory`。
+- `default_ttl`: Go duration（如 `"168h"`）；空 = 不自动过期。仅套到 **session/detail** 且未显式 `expires_at` 的写入；**global curated 永不自动过期**；promote 到 curated 会清 TTL。
+- 过期维护：启动 + 每成功 turn 将 `expires_at <= now` 标 `archived_at`。**不**自动 `DELETE`；硬删只走 `/memory forget` / `memory_write remove`。
 - `curator.enabled=false` 可关 H1-lite 以省 token。
 - 省略整块 → 启用 + 上表默认。
 

@@ -605,6 +605,12 @@ func (m model) memoryCmd(arg string) tea.Cmd {
 				return commandDoneMsg{err: err}
 			}
 			return commandDoneMsg{status: fmt.Sprintf("promoted → %s (global curated)", e.ID)}
+		case "archived":
+			entries, err := m.gateway.ListMemoryFilter(ctx, sessionID, "", "", 32, true)
+			if err != nil {
+				return commandDoneMsg{err: err}
+			}
+			return commandDoneMsg{status: formatMemoryList(entries)}
 		default:
 			// Treat remainder as search query.
 			entries, err := m.gateway.ListMemory(ctx, sessionID, arg, "", 32)
@@ -639,6 +645,9 @@ func formatMemoryList(entries []gatewayclient.MemoryEntry) string {
 		kind := e.Kind
 		if kind == "" {
 			kind = "?"
+		}
+		if strings.TrimSpace(e.ArchivedAt) != "" {
+			kind += "/archived"
 		}
 		content := strings.ReplaceAll(e.Content, "\n", " ")
 		if len([]rune(content)) > 80 {

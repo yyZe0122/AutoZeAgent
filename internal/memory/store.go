@@ -26,20 +26,28 @@ const (
 	DefaultMaxInjectRunes = 2_000
 	DefaultListLimit      = 32
 	DefaultDetailLimit    = 200
+
+	entrySelectCols = `entry_id, session_id, content, source, tags_json, created_at,
+		       COALESCE(kind, 'session'), COALESCE(priority, 0),
+		       COALESCE(expires_at, ''), COALESCE(updated_at, ''), COALESCE(archived_at, '')`
+	entrySelectPrefixed = `e.entry_id, e.session_id, e.content, e.source, e.tags_json, e.created_at,
+		       COALESCE(e.kind, 'session'), COALESCE(e.priority, 0),
+		       COALESCE(e.expires_at, ''), COALESCE(e.updated_at, ''), COALESCE(e.archived_at, '')`
 )
 
 // Entry is one durable memory fact.
 type Entry struct {
-	ID        string   `json:"entry_id"`
-	SessionID string   `json:"session_id,omitempty"` // empty = user/global
-	Content   string   `json:"content"`
-	Source    string   `json:"source"`
-	Tags      []string `json:"tags,omitempty"`
-	Kind      string   `json:"kind,omitempty"`
-	Priority  int      `json:"priority,omitempty"`
-	ExpiresAt string   `json:"expires_at,omitempty"`
-	CreatedAt string   `json:"created_at"`
-	UpdatedAt string   `json:"updated_at,omitempty"`
+	ID         string   `json:"entry_id"`
+	SessionID  string   `json:"session_id,omitempty"` // empty = user/global
+	Content    string   `json:"content"`
+	Source     string   `json:"source"`
+	Tags       []string `json:"tags,omitempty"`
+	Kind       string   `json:"kind,omitempty"`
+	Priority   int      `json:"priority,omitempty"`
+	ExpiresAt  string   `json:"expires_at,omitempty"`
+	CreatedAt  string   `json:"created_at"`
+	UpdatedAt  string   `json:"updated_at,omitempty"`
+	ArchivedAt string   `json:"archived_at,omitempty"`
 }
 
 // Store persists memory_entries and FTS on core.db.
@@ -75,10 +83,10 @@ func (s *Store) Insert(ctx context.Context, e Entry) error {
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO memory_entries (
 			entry_id, session_id, content, source, tags_json, created_at,
-			kind, priority, expires_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			kind, priority, expires_at, updated_at, archived_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.ID, e.SessionID, e.Content, e.Source, string(tagsJSON), e.CreatedAt,
-		e.Kind, e.Priority, e.ExpiresAt, e.UpdatedAt,
+		e.Kind, e.Priority, e.ExpiresAt, e.UpdatedAt, e.ArchivedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("insert memory entry: %w", err)
@@ -115,9 +123,9 @@ func (s *Store) UpdateContent(ctx context.Context, e Entry) error {
 	res, err := tx.ExecContext(ctx, `
 		UPDATE memory_entries
 		SET content = ?, source = ?, tags_json = ?, kind = ?, priority = ?,
-		    expires_at = ?, updated_at = ?
+		    expires_at = ?, updated_at = ?, archived_at = ?
 		WHERE entry_id = ?`,
-		e.Content, e.Source, string(tagsJSON), e.Kind, e.Priority, e.ExpiresAt, e.UpdatedAt, e.ID,
+		e.Content, e.Source, string(tagsJSON), e.Kind, e.Priority, e.ExpiresAt, e.UpdatedAt, e.ArchivedAt, e.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update memory entry: %w", err)
@@ -163,9 +171,7 @@ func (s *Store) Get(ctx context.Context, entryID string) (Entry, error) {
 		return Entry{}, errors.New("entry id is required")
 	}
 	row := s.db.QueryRowContext(ctx, `
-		SELECT entry_id, session_id, content, source, tags_json, created_at,
-		       COALESCE(kind, 'session'), COALESCE(priority, 0),
-		       COALESCE(expires_at, ''), COALESCE(updated_at, '')
+		SELECT `+entrySelectCols+`
 		FROM memory_entries WHERE entry_id = ?`, entryID)
 	return scanEntry(row)
 }
@@ -183,16 +189,14 @@ func (s *Store) ListRecent(ctx context.Context, sessionID string, includeGlobal,
 	)
 	// ORDER: priority DESC, then created_at DESC
 	baseSelect := `
-		SELECT entry_id, session_id, content, source, tags_json, created_at,
-		       COALESCE(kind, 'session'), COALESCE(priority, 0),
-		       COALESCE(expires_at, ''), COALESCE(updated_at, '')
+		SELECT ` + entrySelectCols + `
 		FROM memory_entries WHERE `
 	scopeSQL, scopeArgs := scopeClause(sessionID, includeGlobal)
 	kindSQL := ""
 	if !includeDetail {
 		kindSQL = ` AND COALESCE(kind, 'session') != 'detail'`
 	}
-	expSQL, expArgs := expireClause(nowRFC)
+	expSQL, expArgs := activeClause(nowRFC)
 	args := append(scopeArgs, expArgs...)
 	args = append(args, limit)
 	q := baseSelect + scopeSQL + kindSQL + expSQL +
@@ -235,15 +239,13 @@ func (s *Store) searchFTS(ctx context.Context, sessionID, query string, includeD
 	if !includeDetail {
 		kindSQL = ` AND COALESCE(e.kind, 'session') != 'detail'`
 	}
-	expSQL, expArgs := expireClausePrefixed(nowRFC, "e.")
+	expSQL, expArgs := activeClausePrefixed(nowRFC, "e.")
 	scopeSQL := `(e.session_id = ? OR e.session_id = '')`
 	args := []any{ftsQuery, sessionID}
 	args = append(args, expArgs...)
 	args = append(args, limit)
 	q := `
-		SELECT e.entry_id, e.session_id, e.content, e.source, e.tags_json, e.created_at,
-		       COALESCE(e.kind, 'session'), COALESCE(e.priority, 0),
-		       COALESCE(e.expires_at, ''), COALESCE(e.updated_at, '')
+		SELECT ` + entrySelectPrefixed + `
 		FROM memory_entries_fts f
 		JOIN memory_entries e ON e.entry_id = f.entry_id
 		WHERE memory_entries_fts MATCH ? AND ` + scopeSQL + kindSQL + expSQL + `
@@ -264,14 +266,12 @@ func (s *Store) searchLike(ctx context.Context, sessionID, query string, include
 	if !includeDetail {
 		kindSQL = ` AND COALESCE(kind, 'session') != 'detail'`
 	}
-	expSQL, expArgs := expireClause(nowRFC)
+	expSQL, expArgs := activeClause(nowRFC)
 	args := []any{sessionID, pattern}
 	args = append(args, expArgs...)
 	args = append(args, limit)
 	q := `
-		SELECT entry_id, session_id, content, source, tags_json, created_at,
-		       COALESCE(kind, 'session'), COALESCE(priority, 0),
-		       COALESCE(expires_at, ''), COALESCE(updated_at, '')
+		SELECT ` + entrySelectCols + `
 		FROM memory_entries
 		WHERE (session_id = ? OR session_id = '') AND content LIKE ? ESCAPE '\'` + kindSQL + expSQL + `
 		ORDER BY priority DESC, created_at DESC LIMIT ?`
@@ -288,45 +288,22 @@ func (s *Store) ListInjectCandidates(ctx context.Context, sessionID string, limi
 	return s.ListRecent(ctx, sessionID, true, false, limit, nowRFC)
 }
 
-// PurgeExpired deletes entries with expires_at <= nowRFC (non-empty expires).
-func (s *Store) PurgeExpired(ctx context.Context, nowRFC string) (int64, error) {
+// ArchiveExpired marks due entries archived (does not delete rows or FTS).
+func (s *Store) ArchiveExpired(ctx context.Context, nowRFC string) (int64, error) {
 	nowRFC = strings.TrimSpace(nowRFC)
 	if nowRFC == "" {
 		return 0, nil
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE memory_entries
+		SET archived_at = ?, updated_at = ?
+		WHERE archived_at = '' AND expires_at != '' AND expires_at <= ?`,
+		nowRFC, nowRFC, nowRFC)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("archive expired memory: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
-	rows, err := tx.QueryContext(ctx, `
-		SELECT entry_id FROM memory_entries
-		WHERE expires_at != '' AND expires_at <= ?`, nowRFC)
-	if err != nil {
-		return 0, err
-	}
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return 0, err
-		}
-		ids = append(ids, id)
-	}
-	rows.Close()
-	for _, id := range ids {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM memory_entries WHERE entry_id = ?`, id); err != nil {
-			return 0, err
-		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM memory_entries_fts WHERE entry_id = ?`, id); err != nil && !isMissingTable(err) {
-			return 0, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	return int64(len(ids)), nil
+	n, _ := res.RowsAffected()
+	return n, nil
 }
 
 // FindBySubstring finds session-scoped entry whose content contains oldText (for replace/remove).
@@ -340,20 +317,16 @@ func (s *Store) FindBySubstring(ctx context.Context, sessionID, oldText string, 
 	var err error
 	if globalOnly {
 		rows, err = s.db.QueryContext(ctx, `
-			SELECT entry_id, session_id, content, source, tags_json, created_at,
-			       COALESCE(kind, 'session'), COALESCE(priority, 0),
-			       COALESCE(expires_at, ''), COALESCE(updated_at, '')
+			SELECT `+entrySelectCols+`
 			FROM memory_entries
-			WHERE session_id = '' AND content LIKE ? ESCAPE '\'
+			WHERE session_id = '' AND archived_at = '' AND content LIKE ? ESCAPE '\'
 			ORDER BY created_at DESC LIMIT 20`, pattern)
 	} else {
 		sessionID = strings.TrimSpace(sessionID)
 		rows, err = s.db.QueryContext(ctx, `
-			SELECT entry_id, session_id, content, source, tags_json, created_at,
-			       COALESCE(kind, 'session'), COALESCE(priority, 0),
-			       COALESCE(expires_at, ''), COALESCE(updated_at, '')
+			SELECT `+entrySelectCols+`
 			FROM memory_entries
-			WHERE (session_id = ? OR session_id = '') AND content LIKE ? ESCAPE '\'
+			WHERE (session_id = ? OR session_id = '') AND archived_at = '' AND content LIKE ? ESCAPE '\'
 			ORDER BY created_at DESC LIMIT 20`, sessionID, pattern)
 	}
 	if err != nil {
@@ -544,6 +517,7 @@ func normalizeEntry(e Entry) Entry {
 	if e.ExpiresAt == "" {
 		e.ExpiresAt = ""
 	}
+	e.ArchivedAt = strings.TrimSpace(e.ArchivedAt)
 	return e
 }
 
@@ -557,20 +531,20 @@ func scopeClause(sessionID string, includeGlobal bool) (string, []any) {
 	return `session_id = ?`, []any{sessionID}
 }
 
-func expireClause(nowRFC string) (string, []any) {
+func activeClause(nowRFC string) (string, []any) {
 	nowRFC = strings.TrimSpace(nowRFC)
 	if nowRFC == "" {
-		return "", nil
+		return ` AND archived_at = ''`, nil
 	}
-	return ` AND (expires_at = '' OR expires_at > ?)`, []any{nowRFC}
+	return ` AND archived_at = '' AND (expires_at = '' OR expires_at > ?)`, []any{nowRFC}
 }
 
-func expireClausePrefixed(nowRFC, prefix string) (string, []any) {
+func activeClausePrefixed(nowRFC, prefix string) (string, []any) {
 	nowRFC = strings.TrimSpace(nowRFC)
 	if nowRFC == "" {
-		return "", nil
+		return ` AND ` + prefix + `archived_at = ''`, nil
 	}
-	return ` AND (` + prefix + `expires_at = '' OR ` + prefix + `expires_at > ?)`, []any{nowRFC}
+	return ` AND ` + prefix + `archived_at = '' AND (` + prefix + `expires_at = '' OR ` + prefix + `expires_at > ?)`, []any{nowRFC}
 }
 
 type scannable interface {
@@ -582,7 +556,7 @@ func scanEntry(row scannable) (Entry, error) {
 	var tagsJSON string
 	if err := row.Scan(
 		&e.ID, &e.SessionID, &e.Content, &e.Source, &tagsJSON, &e.CreatedAt,
-		&e.Kind, &e.Priority, &e.ExpiresAt, &e.UpdatedAt,
+		&e.Kind, &e.Priority, &e.ExpiresAt, &e.UpdatedAt, &e.ArchivedAt,
 	); err != nil {
 		return Entry{}, err
 	}

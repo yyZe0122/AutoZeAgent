@@ -6,20 +6,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // MemoryEntry is a read projection of memory_entries (ADR-044).
 type MemoryEntry struct {
-	ID        string   `json:"entry_id"`
-	SessionID string   `json:"session_id,omitempty"`
-	Content   string   `json:"content"`
-	Source    string   `json:"source"`
-	Tags      []string `json:"tags,omitempty"`
-	Kind      string   `json:"kind,omitempty"`
-	Priority  int      `json:"priority,omitempty"`
-	ExpiresAt string   `json:"expires_at,omitempty"`
-	CreatedAt string   `json:"created_at"`
-	UpdatedAt string   `json:"updated_at,omitempty"`
+	ID         string   `json:"entry_id"`
+	SessionID  string   `json:"session_id,omitempty"`
+	Content    string   `json:"content"`
+	Source     string   `json:"source"`
+	Tags       []string `json:"tags,omitempty"`
+	Kind       string   `json:"kind,omitempty"`
+	Priority   int      `json:"priority,omitempty"`
+	ExpiresAt  string   `json:"expires_at,omitempty"`
+	CreatedAt  string   `json:"created_at"`
+	UpdatedAt  string   `json:"updated_at,omitempty"`
+	ArchivedAt string   `json:"archived_at,omitempty"`
 }
 
 // ListMemory returns memory entries (newest/priority first). Optional query uses LIKE.
@@ -38,7 +40,7 @@ func (s *Store) ListMemory(ctx context.Context, options MemoryListOptions) ([]Me
 	base := `
 		SELECT entry_id, session_id, content, source, tags_json, created_at,
 		       COALESCE(kind, 'session'), COALESCE(priority, 0),
-		       COALESCE(expires_at, ''), COALESCE(updated_at, '')
+		       COALESCE(expires_at, ''), COALESCE(updated_at, ''), COALESCE(archived_at, '')
 		FROM memory_entries WHERE 1=1`
 	var args []any
 	if sessionID == "" && !options.IncludeGlobal {
@@ -52,6 +54,12 @@ func (s *Store) ListMemory(ctx context.Context, options MemoryListOptions) ([]Me
 	} else {
 		base += ` AND session_id = ?`
 		args = append(args, sessionID)
+	}
+	if options.IncludeArchived {
+		base += ` AND COALESCE(archived_at, '') != ''`
+	} else {
+		base += ` AND COALESCE(archived_at, '') = '' AND (expires_at = '' OR expires_at > ?)`
+		args = append(args, time.Now().UTC().Format(time.RFC3339Nano))
 	}
 	if kind != "" {
 		base += ` AND COALESCE(kind, 'session') = ?`
@@ -79,7 +87,7 @@ func scanMemoryEntries(rows *sql.Rows) ([]MemoryEntry, error) {
 		var tagsJSON string
 		if err := rows.Scan(
 			&e.ID, &e.SessionID, &e.Content, &e.Source, &tagsJSON, &e.CreatedAt,
-			&e.Kind, &e.Priority, &e.ExpiresAt, &e.UpdatedAt,
+			&e.Kind, &e.Priority, &e.ExpiresAt, &e.UpdatedAt, &e.ArchivedAt,
 		); err != nil {
 			return nil, err
 		}

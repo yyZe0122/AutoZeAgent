@@ -29,7 +29,7 @@ var slashCommands = []slashCommand{
 	{Name: "/perm", Desc: "tool permission queue", Help: "/perm open; keys 1–4 once|similar|permanent|deny; /perm <decision> <id>"},
 	{Name: "/expand", Desc: "expand/collapse folded blocks", Help: "/expand [all|none|last]  or keys e (last) · E (all) · c (collapse)"},
 	{Name: "/journey", Desc: "memory timeline for session", Help: "/journey  list recent memory entries as a read-only timeline"},
-	{Name: "/memory", Desc: "list/search local memory", Help: "/memory [q…]  list facts; /memory forget|promote <id>; /memory refresh"},
+	{Name: "/memory", Desc: "list/search local memory", Help: "/memory [q…]  list facts; /memory archived; /memory forget|promote <id>; /memory refresh"},
 	{Name: "/refresh-memory", Desc: "rebuild frozen memory inject", Help: "/refresh-memory  invalidate session memory snapshot (next turn reinjects)"},
 	{Name: "/status", Desc: "health summary", Help: "/status  health + model + task + context + pending perms"},
 	{Name: "/help", Desc: "command list", Help: "/help  command list"},

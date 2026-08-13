@@ -35,12 +35,17 @@ func (a *API) handleMemory(w http.ResponseWriter, r *http.Request) {
 	if raw := strings.TrimSpace(r.URL.Query().Get("include_global")); raw != "" {
 		includeGlobal = raw == "1" || strings.EqualFold(raw, "true")
 	}
+	includeArchived := false
+	if raw := strings.TrimSpace(r.URL.Query().Get("include_archived")); raw != "" {
+		includeArchived = raw == "1" || strings.EqualFold(raw, "true")
+	}
 	items, err := a.queries.ListMemory(r.Context(), corequery.MemoryListOptions{
-		Page:          corequery.Page{Limit: limit, Offset: offset},
-		SessionID:     sessionID,
-		Query:         strings.TrimSpace(r.URL.Query().Get("q")),
-		Kind:          strings.TrimSpace(r.URL.Query().Get("kind")),
-		IncludeGlobal: includeGlobal,
+		Page:            corequery.Page{Limit: limit, Offset: offset},
+		SessionID:       sessionID,
+		Query:           strings.TrimSpace(r.URL.Query().Get("q")),
+		Kind:            strings.TrimSpace(r.URL.Query().Get("kind")),
+		IncludeGlobal:   includeGlobal,
+		IncludeArchived: includeArchived,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
