@@ -18,14 +18,6 @@ func (m model) View() string {
 
 	header := m.renderHeader()
 	chat := m.viewport.View()
-	if m.showSessionRail() {
-		rail := m.renderSessionRail(m.viewport.Height)
-		chat = lipgloss.JoinHorizontal(lipgloss.Top,
-			lipgloss.NewStyle().Width(sessionRailWidth).MaxHeight(m.viewport.Height).Render(rail),
-			lipgloss.NewStyle().Foreground(colorBorder).Render("│"),
-			lipgloss.NewStyle().Width(m.viewport.Width).MaxHeight(m.viewport.Height).Render(chat),
-		)
-	}
 	if m.showContextPanel() {
 		ctx := m.renderMetricsPanel(m.viewport.Height)
 		chat = lipgloss.JoinHorizontal(lipgloss.Top,

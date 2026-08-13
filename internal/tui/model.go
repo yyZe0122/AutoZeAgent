@@ -46,8 +46,6 @@ const (
 	historyLimit      = 50
 	contextBreakWidth = 100
 	contextPanelWidth = 26
-	sessionRailBreak  = 120
-	sessionRailWidth  = 22
 	overlayMaxLines   = 10
 	helpOverlayMax    = 14
 	// timeline body defaults (fold large run results).

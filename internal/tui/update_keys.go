@@ -365,9 +365,6 @@ func (m *model) layout() {
 		h = 5
 	}
 	w := m.width - 1
-	if m.showSessionRail() {
-		w -= sessionRailWidth + 1
-	}
 	if m.showContextPanel() {
 		w -= contextPanelWidth + 1
 	}
@@ -381,10 +378,6 @@ func (m *model) layout() {
 
 func (m *model) showContextPanel() bool {
 	return m.width >= contextBreakWidth
-}
-
-func (m *model) showSessionRail() bool {
-	return m.width >= sessionRailBreak
 }
 
 func (m *model) needsRunPoll() bool {

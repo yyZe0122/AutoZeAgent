@@ -50,32 +50,3 @@ func renderEmptySession(m *model) string {
 func renderAgentView(m *model) string {
 	return renderSessionView(m)
 }
-
-func (m model) renderSessionRail(height int) string {
-	var b strings.Builder
-	b.WriteString(styleMetricsTitle.Render("sessions") + "\n")
-	if len(m.sessions) == 0 {
-		b.WriteString(styleMuted.Render("  none yet"))
-		return b.String()
-	}
-	limit := min(len(m.sessions), max(4, height-1))
-	inner := sessionRailWidth - 2
-	if inner < 8 {
-		inner = 8
-	}
-	for i := 0; i < limit; i++ {
-		s := m.sessions[i]
-		title := s.Title
-		if title == "" {
-			title = string(s.ID)
-		}
-		mark := "  "
-		lineStyle := styleDim
-		if s.ID == m.sessionID {
-			mark = styleCompSel.Render("▸ ")
-			lineStyle = styleTitle
-		}
-		b.WriteString(mark + lineStyle.Render(truncate(title, inner)) + "\n")
-	}
-	return strings.TrimRight(b.String(), "\n")
-}
