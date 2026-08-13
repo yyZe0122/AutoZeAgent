@@ -8,8 +8,7 @@ import (
 )
 
 // ExecutorConfig controls the broker-owned process runner. The concrete runner
-// remains inside the tools package so planners and optional modules cannot
-// import or invoke it directly.
+// stays in tools/internal/executor (unimportable outside tools).
 type ExecutorConfig struct {
 	MaxOutputBytes int
 	AllowedEnv     []string
