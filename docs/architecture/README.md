@@ -36,6 +36,7 @@ Do **not** restore deleted pieces: Module Runtime/Supervisor, out-of-process Mem
 | 15 | [046](046-session-workspace-and-permission-tiers.md) | Session workspace + permission tiers |
 | 16 | [047](047-structured-logging-and-debug-chain.md) | Structured logs + real-machine debug chain |
 | 17 | [048](048-provider-config-hot-reload.md) | Provider config watch + main-stack hot-reload |
+| 18 | [050](050-in-process-self-improvement.md) | In-process skill draft / habit hint / skill usage (H3/H4/H5-skill) |
 
 Also: O3 `chat.commands` (ADR-038 / provider-protocols); O4 run resolve (`internal/modelresolve`, ADR-045).
 
@@ -74,19 +75,20 @@ Provider wire formats: [`docs/provider-protocols.md`](../provider-protocols.md).
 | 033 | Target platform behavior | |
 | 034 | File-based skills | Replaces 016 |
 | 035 | Standard protocol tool boundary | |
-| 036 | Task skill snapshot | Explicit `skill_ids`; chatsession injects snapshot |
+| 036 | Task skill snapshot | Explicit `skill_ids` preload; model `skills_list`/`skill_view`; chatsession injects explicit snapshot |
 | 037 | CLI / daemon lifecycle | |
-| 038 | Session chat boundary | Dual-track agent/plan; optional `chat.tools` |
+| 038 | Session chat boundary | Dual-track agent/plan; optional `chat.tools`; `AGENTS.md` inject |
 | 039 | Logical child runs | `parent_run_id` + `task` tool (sync) |
 | 040 | MCP via Tool Broker | stdio + remote Streamable HTTP / legacy SSE; no Module Runtime |
 | 041 | Context packing / pressure | Token budget pack, compaction triggers, anti-thrash, `/compact` |
 | 042 | Chat-native jobs | Timed session chat submit; lease from 017; TUI `/cron` primary |
 | 043 | Tool-call permission interaction | `chat.permission.mode`; pending → TUI decide → scoped grant; SSE `permission.*` |
-| 044 | In-process memory boundary | Layered L0–L3 memory; freeze inject; FTS; `/memory` `/memory archived` `/journey`; injectscan (H6-min); H1-lite curator; H5-lite `default_ttl` + soft-archive; no Module Runtime |
+| 044 | In-process memory boundary | Layered L0–L3 memory; freeze inject; FTS; `/memory` `/memory archived` `/journey`; injectscan (H6); H1-lite curator; H5-lite `default_ttl` + soft-archive; no Module Runtime |
 | 045 | Model roles | Optional `models.subagent` / `models.compact`; O4 session prefer + H7 job pin resolve |
 | 046 | Session workspace + permission tiers | Client cwd session root; once/similar/permanent/deny |
 | 047 | Structured logging / debug chain | slog JSON stage boundaries; `ymz logs`; tests vs real-machine |
 | 048 | Provider config hot-reload | Main stack only; no late-bind chat |
+| 050 | In-process self-improvement | H3 skill draft+apply; H4 habit hint; H5-skill last-used/archive; ≠ Evolution |
 
 Missing numbers (002, 005, 014–015, 019–021, 025, …) are **historical gaps**, not missing files to recreate.
 

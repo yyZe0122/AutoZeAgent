@@ -10,6 +10,16 @@ This page is the **only** release runbook. Follow the default path; do not inven
 
 **Scheme A:** only **root** may commit / tag / push / upload on this machine.
 
+### Batch commits before push (required)
+
+Do **not** squash a multi-feature dirty tree into one `release:` commit via `--commit-paths all`.
+
+1. Split the working tree into **feature-sized commits** (one concern each: e.g. injectscan, live MD, permission hints, skill list/view, skill draft/archive, AGENTS inject, docs).
+2. Each commit must compile and keep tests green (`make check` at least once before the first push).
+3. **Push those commits**, then publish.
+
+`--commit-paths all` is only for a leftover that is already one logical change (typically `docs/changelog/vX.Y.Z.md` after the feature commits are on `main`).
+
 ### Every release (copy-paste)
 
 ```bash
@@ -21,16 +31,16 @@ cd /home/yyze/projects/AutoZeAgent
 #   export GITHUB_TOKEN=...            # main repo Contents (+ Workflows if touching .github)
 #   export PACKAGE_GITHUB_TOKEN=...    # homebrew-tap + scoop-bucket Contents R/W
 
-# 1) Changelog MUST exist before publish (tag name == file name)
+# 1) Feature commits already on main (see above). Changelog MUST exist:
 #    docs/changelog/vX.Y.Z.md
 
-# 2) Dirty tree → commit everything safe + push + tag + local GoReleaser upload
-./scripts/publish-release.sh vX.Y.Z \
-  --commit-paths all --yes \
-  --message "release: vX.Y.Z"
+# 2) Clean main (or only changelog leftover) → tag + local GoReleaser upload
+./scripts/publish-release.sh vX.Y.Z --yes
 
-# Clean main already pushed, only tag + upload:
-# ./scripts/publish-release.sh vX.Y.Z
+# Changelog-only leftover (one commit), then tag + upload:
+# ./scripts/publish-release.sh vX.Y.Z \
+#   --commit-paths all --yes \
+#   --message "docs(changelog): vX.Y.Z"
 ```
 
 Replace `vX.Y.Z` with the real tag (e.g. `v0.2.2`). Script runs `make check`, creates annotated tag, pushes `main` + tag, then **local** `goreleaser release` (not GitHub Actions minutes).
@@ -39,11 +49,12 @@ Replace `vX.Y.Z` with the real tag (e.g. `v0.2.2`). Script runs `make check`, cr
 
 | Step | Action |
 | --- | --- |
-| 1 | Bump / write **`docs/changelog/vX.Y.Z.md`** (bilingual highlights, asset table, install). Missing file **fails** publish. |
-| 2 | No secrets in tree: no `agent.local.json`, `*.db`, `env` with real keys, `bin/`, tokens in docs. |
-| 3 | `make check` green (script runs it unless `--skip-check`). |
-| 4 | `gh auth login` or valid `GITHUB_TOKEN` + `PACKAGE_GITHUB_TOKEN`. |
-| 5 | Run `./scripts/publish-release.sh vX.Y.Z …` as **root**. |
+| 1 | **Batch-commit** the working tree by feature (not one mega `release:` dump). Push those commits. |
+| 2 | Bump / write **`docs/changelog/vX.Y.Z.md`** (bilingual highlights, asset table, install). Missing file **fails** publish. |
+| 3 | No secrets in tree: no `agent.local.json`, `*.db`, `env` with real keys, `bin/`, tokens in docs. |
+| 4 | `make check` green (script runs it unless `--skip-check`). |
+| 5 | `gh auth login` or valid `GITHUB_TOKEN` + `PACKAGE_GITHUB_TOKEN`. |
+| 6 | Run `./scripts/publish-release.sh vX.Y.Z` as **root** (clean tree). Use `--commit-paths all` only for changelog leftover. |
 
 ### After publish
 

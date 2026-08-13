@@ -1,32 +1,32 @@
 # YunmengZe Agent 当前状态
 
-更新：2026-08-13（H5-lite memory 软归档 · 基线 **v0.2.4**）
+更新：2026-08-13（Hermes `skills_list`/`skill_view` + MCP 优先 · 基线 **v0.2.4**）
 
 **本文件是唯一活着的优化/backlog 文档。** 只写未完成与暂缓项；已落地细节见 ADR（`docs/architecture/`）、changelog 与 git。
 
 ## 现状
 
 生产形态稳定：`ymzd` + CLI·TUI（`ymz`）+ `core.db`。设计知识库：`docs/architecture/`。  
-当前发布线：**v0.2.4**（v0.2.0 改名；v0.2.3 model 选择；v0.2.4 = O1–O4 + H7 + H1-lite + TUI Phase 2 气泡/SSE）。**未发版：** H5-lite memory 软归档。
+当前发布线：**v0.2.4**（v0.2.0 改名；v0.2.3 model 选择；v0.2.4 = O1–O4 + H7 + H1-lite + TUI Phase 2 气泡/SSE）。**未发版：** H5-lite + C4-skill / T8 + H3 / H4 / H5-skill / H6 + Hermes skill list/view + MCP 优先 + `AGENTS.md`。
 
 | 对标 | 契约重叠（粗） | 说明 |
 | --- | --- | --- |
 | OpenCode 配置/协议 | ~80–90% | + `import-opencode`；stdio + 远程 MCP（O2） |
-| OpenCode 产品手感 | ~75–85% | + skill-as-slash；`chat.commands`；session prefer 已 run-level 解析（O4） |
+| OpenCode 产品手感 | ~80–90% | + skill-as-slash；Hermes `skills_list`/`skill_view`；`chat.commands`；`AGENTS.md` 规则；session prefer（O4） |
 | OpenCode API/SDK | ~10–15% 路径类比 | 本地 `/v1/*` + Go `gatewayclient`；**不追**全量 OC OpenAPI |
-| Crush TUI | 契约 ~92% | T1–T7 + C1–C4/UX-A + 气泡卡/glamour/zone；无新 list 引擎 |
-| Hermes 分层记忆 | 架构 ~90% | + H6-min；**H1-lite curator**；**H5-lite** `default_ttl` + 过期软归档（冻结块仍手动 refresh） |
-| Hermes 自进化 | ~5–15% | 仅 promote / pre-compress / curator 提案；无 skill 自改 / 习惯学习 |
+| Crush TUI | 契约 ~95% | T1–T7 + C1–C4 + UX-A/B + T8 节流 live MD；无新 list 引擎 |
+| Hermes 分层记忆 | 架构 ~90% | + H6；**H1-lite curator**；**H5-lite** `default_ttl` + 过期软归档（冻结块仍手动 refresh） |
+| Hermes 自进化 | ~40% | H3 草稿+人工 apply；H4 习惯提示；H5-skill 软归档（ADR-050）；无自动 apply / yolo |
 | Hermes 消息网关 | ~0% | 仅本机 UDS/loopback；**暂不上**飞书/微信（本机编码/定时为主） |
 
 **产品焦点：** 本机编码 + 简单任务 + 定时任务。  
-**下一优先（非必须）：** 无强需求则先收敛。H2/M* **仅**在上消息通道前再做。H3 / H4 / H5-skill / C4 skill 变更轨 / H6 完整化 / O5–O6 **暂缓**。
+**下一优先：** 无强需求则先收敛（本波含 Hermes skill list/view + MCP 优先提示，未发版）。O5–O6 / H2 / M* **等用户再提**。
 
 ## 原则（不变）
 
 - 三件套：daemon + CLI·TUI + `core.db`。不恢复 Module Runtime、多 DB、交互 **Planner**（plan-step 整单审批轨）。
 - 工具副作用只经 Tool Broker；Policy → Approval → Capability Grant → containment → 限流 → Audit。
-- Skill 仅指令文本，不扩大授权；`skill_ids` 显式选择（ADR-036）。
+- Skill 仅指令文本，不扩大授权；`skill_ids` 仅显式预载（TUI/job）；模型经 `skills_list` → `skill_view` 按需加载（ADR-036）。用户规则：`<ConfigDir>/AGENTS.md` + 可选项目 `.yunmengze/AGENTS.md`。
 - plan 永远只读；高风险工具仅 agent + `chat.tools` allowlist 预授权（ADR-038）；**tool-call** 交互 permission 见 ADR-043（≠ Planner）。
 - 会话记忆为 in-process MemoryManager（ADR-044），非独立 Memory 进程。
 - **客户端分层（ADR-018/022）：** 业务用例只在 daemon；Gateway 仅 HTTP 适配；CLI 与 TUI 经 `gatewayclient` 并列，TUI **不** exec CLI、**不** import tools/providers/agent。
@@ -42,10 +42,10 @@
 | ID | 项 | 状态 |
 | --- | --- | --- |
 | **T1–T7** | debounce / perm modal+grace / follow·freeze / loop+cancel / child usage / tool 分型 / 描述同址 | **已落地** |
-| **T8** | Permission SSE + live 前缀缓存 + 完成态 glamour | **已落地**（streaming 仍 plain；见 Phase 2） |
+| **T8** | Permission SSE + live 前缀缓存 + 完成态 glamour + 节流 live MD | **已落地**（未闭合围栏仍 plain） |
 
 表现层只在 `internal/tui` 增量；不引入更重 list/viewport 依赖。  
-**允许** Charm 生态小型本地库（纯 Go 进二进制）：`glamour`（完成态 MD）、`bubblezone`（鼠标 expand）、`bubbles/spinner`；**禁止** Crush lazy list / Ultraviolet。
+**允许** Charm 生态小型本地库（纯 Go 进二进制）：`glamour`（完成态 + 节流 live MD）、`bubblezone`（鼠标 expand）、`bubbles/spinner`；**禁止** Crush lazy list / Ultraviolet。
 
 ### 日志（L）· 分发（D）
 
@@ -75,8 +75,8 @@
 | **O2** | MCP remote：Streamable HTTP + legacy SSE；`type`/`url`/`headers` | **已落地**（`internal/mcp` Dial；ADR-040） |
 | **O3** | skill-as-slash + `chat.commands` 模板 slash；import OC `command` | **已落地** |
 | **O4** | session prefer + run-level resolve（prefer→main）；`modelresolve` | **已落地**（ADR-045） |
-| **H6-min** | `injectscan`：memory 写入 + skill body + inject 路径 fail-closed | **已落地**（规则可再收紧） |
-| **H5-lite** | memory `default_ttl` + 过期软归档 | **已落地**（未发版；skill archive 仍暂缓） |
+| **H6-min** | `injectscan`：memory 写入 + skill body + inject 路径 fail-closed | **已落地**（H6 完整化已并入） |
+| **H5-lite** | memory `default_ttl` + 过期软归档 | **已落地**（未发版） |
 
 ---
 
@@ -85,10 +85,10 @@
 依赖顺序：
 
 ```text
-Phase 1：O1–O4 已落地 ──► O5–O6（仅有外部 OC 客户端需求时）
-Phase 2：C1–C4 + UX-A/B 已落地（TUI 气泡 / expand / permission SSE / journey memory）
-H7 ✅ · H1-lite ✅ · H6-min ✅ · H5-lite（memory）✅
-H2 / H3 / H4 / H5-skill / M* ── 无消息通道计划则暂缓
+Phase 1：O1–O4 ✅ ──► O5–O6（用户再提）
+Phase 2：C1–C4 + UX-A/B ✅ · T8 live MD ✅
+Phase 3：H7 ✅ · H1-lite ✅ · H6 ✅ · H5-lite（memory）✅ · H3 ✅ · H4 ✅ · H5-skill ✅
+H2 / O5–O6 / M* ── 用户再提
 ```
 
 ### Phase 1 — OpenCode 体验兼容（不追全量 API）
@@ -109,7 +109,8 @@ H2 / H3 / H4 / H5-skill / M* ── 无消息通道计划则暂缓
 | **C1** | Permission SSE | poll → SSE | **已落地**：`permission.pending` / `permission.decided` 经 events store；TUI `applySSE` 触发 perm poll；decide 仍 `DecidePermission*` only |
 | **C2** | live 前缀缓存 | streaming 卡顿时 | **已落地**：finished prefix cache + live tail re-render（plain blocks；非 glamour MD） |
 | **C3** | 工具结果折叠增强 | 长输出可读 | **已落地**：thinking 框 + tail 窗；tool 卡片折叠；`/expand` · `e`/`E`/`c` |
-| **C4** | journey 只读时间线 | memory 变更 | **已落地（memory）**：TUI `/journey` 只读 ListMemory 前缀行；skill 变更轨未做 |
+| **C4** | journey 只读时间线 | memory + skill | **已落地**：`/journey` 叠 memory + `skill_events`；`/journey skills` / `/journey memory` |
+| **T8** | live markdown | streaming reply 节流 glamour | **已落地**：防抖 ~200ms 或 +80 rune；未闭合围栏仍 plain；thinking/tool 仍 plain |
 | **UX-A** | 信息架构 | thinking/reply/tool 分区 + 终态 | **已落地**：`contentBlock`；done 横幅；activity `thinking|writing|tool|idle` |
 | **UX-B** | 气泡化 + 小库 | 圆角消息卡 / MD / 点击 | **已落地**：lipgloss 气泡；`glamour` 完成态 MD；`bubblezone` 点击 expand；`spinner` busy |
 
@@ -118,14 +119,14 @@ H2 / H3 / H4 / H5-skill / M* ── 无消息通道计划则暂缓
 | ID | 项 | 目标 | 约束 / 验收 |
 | --- | --- | --- | --- |
 | **H1** | LLM Memory Curator | turn 后 aux（`models.compact`/main）→ `memory_entries` | **H1-lite 已落地**（`CurateTurn`；不改冻结块；`chat.memory.curator`） |
-| **H2** | write_approval | messaging/cron 来源的 memory/skill 写入先 stage | **暂缓**（无消息通道时不必） |
-| **H3** | Skill 自改进草稿 | 工具写 ConfigDir/project `SKILL.md` 草稿 | 永不扩 grant；可选人工 apply + backup |
-| **H4** | 工具习惯学习 | 从 permission decide 沉淀 **建议**（once→similar 提示） | **非**自动 permanent；无 yolo |
-| **H5** | Curator 维护 | 过期 memory 软归档；未用 agent-skill archive | **H5-lite（memory）已落地**：`default_ttl` + `archived_at`；启动/turn 后标归档，不自动硬删。**H5-skill 暂缓**（无 last-used） |
-| **H6** | 注入扫描 | memory/skill 进 system 前扫注入/不可见 Unicode | **H6-min 已落地**；完整化非必须 |
+| **H2** | write_approval | messaging/cron 来源的 memory/skill 写入先 stage | **等用户再提**（跟 M*） |
+| **H3** | Skill 自改进草稿 | 工具写 ConfigDir/project `SKILL.md.draft` | **已落地**（ADR-050）：永不扩 grant；人工 apply + backup |
+| **H4** | 工具习惯学习 | pending 只读 suggested once/similar | **已落地**：**非**自动 permanent；无 yolo；路径目录前缀 + 同会话 |
+| **H5** | Curator 维护 | 过期 memory 软归档；未用 agent-skill archive | **H5-lite（memory）已落地**。**H5-skill 已落地**：`last_used` + `unused_ttl` 软归档（无 last-used 不自动归档；归档写 `skill_events`） |
+| **H6** | 注入扫描 | memory/skill/draft 进 system 前扫 | **已落地**（更多 bidi/零宽/越狱标记） |
 | **H7** | Job model pin | 创建时钉 model ref；空/失效 → skip+告警 | **已落地**（`jobs.model_ref` + `modelresolve` 严格解析） |
 
-需新 ADR 时：`050-in-process-self-improvement`（≠ 独立 Evolution 进程）。
+ADR：[050](../architecture/050-in-process-self-improvement.md)（≠ 独立 Evolution 进程）。
 
 ### Phase 4 — 消息通道（飞书 / 企微 / 微信）
 
@@ -155,8 +156,7 @@ H2 / H3 / H4 / H5-skill / M* ── 无消息通道计划则暂缓
 | CJK FTS 扩展 | unicode61/trigram + LIKE 兜底；专用 C 扩展另议 |
 | 更多 model roles | vision 等：有工具后再加 |
 | 大文件同包再拆 | `kernel/repository`、`tools/fs`+`broker`、`tui/cmds`+`update`；`main.go` 仅摩擦大时再抽 `wire.go` |
-| **T8 live markdown** | 完成态 glamour 已接；streaming 仍 plain（故意） |
-| **O5–O6** | 仅有真实外部 OC 客户端绑定时 |
+| **O5–O6** | 仅有真实外部 OC 客户端绑定时（用户再提） |
 
 ```text
 用例（daemon services）     → 已统一
@@ -171,7 +171,7 @@ H2 / H3 / H4 / H5-skill / M* ── 无消息通道计划则暂缓
 | --- | --- |
 | 全量 OpenCode API/SDK 兼容 | ~162 路径 + 生成 SDK；与三件套冲突；只用 O5 子集或体验兼容 |
 | 新 viewport/list 引擎 | 不引入 Crush-style lazy list / Ultraviolet（气泡 = lipgloss 自绘） |
-| streaming 全量 glamour | 完成态 only；live 用 plain + C2 前缀缓存 |
+| streaming 每 token 全量 glamour | 禁止；T8 必须节流 + 未闭合围栏 plain + 失败回退 C2 |
 | Crush 三档 permission | 保持 once/similar/permanent/deny 四档 |
 | 沙箱 phase-2+ | namespace / bubblewrap / seccomp |
 | LSP | 另案 |

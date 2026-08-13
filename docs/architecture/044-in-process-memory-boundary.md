@@ -114,7 +114,7 @@ chatsession ──► internal/memory.Manager (in-process)
 - `corequery.ListMemory` / `SearchMemory`
 - `GET /v1/memory?session_id=&q=&kind=&limit=&include_archived=`（`include_archived=true` 只返回归档行）
 - TUI `/memory`（list/search/forget 经只读 + 窄写服务或工具等价路径）；`/memory archived` 只看归档行
-- TUI `/journey`：只读 `ListMemory` 结果前缀到会话 timeline（journey 行；skill 变更轨未做）
+- TUI `/journey`：只读 `ListMemory` 前缀 + skill 事件轨（C4；见 ADR-050）
 - **Gateway 不持业务写 `*sql.DB`**；forget/promote 写路径：工具或 daemon 内 `memory.Manager` 经专用 service（非 Gateway 内嵌 SQL 写）
 
 ### 配置 `chat.memory`

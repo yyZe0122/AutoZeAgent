@@ -2,7 +2,7 @@
 
 - 状态：Accepted（已实现）
 - 日期：2026-08-06
-- 更新：2026-08-12（permission 事件进 Event Store / SSE；TUI 仍 DecidePermission*）
+- 更新：2026-08-13（H4：pending 只读 suggested_decision；不自动 decide）
 
 ## 背景
 
@@ -62,6 +62,7 @@ agent loop → Broker.Execute
   - `GET /v1/permissions?session_id=&limit=`
   - `POST /v1/permissions/{id}/decide` body：`{ "decision": "allow_once"|"allow_similar"|"allow_permanent"|"deny", "actor": "…", "confirm": false }`
 - TUI：`/perm` 列表；`/perm once|similar|permanent|deny <id-prefix>`（`allow_session` 仍接受为 similar 别名）；热键 1–4
+- H4：List pending 可带只读 `suggested_decision` / `suggested_reason`（once/similar 或 deny 提示）；**不**自动 decide、**不**建议 permanent。路径：双方皆空才只比 tool+capability；一侧空不匹配；非空须 `filepath.Clean` 后相等或带分隔符的目录前缀（`/tmp/foo` 不匹配 `/tmp/foobar`）。有 `session_id` 时只查同会话。
 - ask 模式：chat plan **嵌入** process/git 的 once + session CapabilityScope，**不**预发这些 grant（`issueChatGrants` 跳过）
 
 ### 事件 / SSE（C1）

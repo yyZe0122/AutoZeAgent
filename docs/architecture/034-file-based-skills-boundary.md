@@ -16,10 +16,11 @@ Crush 的实现证明了更小的可行边界：以目录中的 `SKILL.md` 为�
 
 当前简单 Skill 以 `<root>/<skill-id>/SKILL.md` 为唯一事实源，不使用独立 `skills.db`，也不启动独立 Skills 进程。Core 内的文件型目录能力只负责：
 
-1. **Discover**：从已配置根目录发现 `SKILL.md`，解析 `name` 和 `description` 元数据；
+1. **Discover**：从已配置根目录发现 `SKILL.md`，解析 `name`、`description` 与可选 `triggers`；
 2. **Catalog / Select**：返回稳定目录，并按显式 ID 选择有效 Skill；
-3. **Read**：只允许读取发现后仍位于对应根目录内的 Skill，正文按需加载；
-4. **Context**：以确定顺序生成有字节上限的上下文，超出预算时整体失败，不静默截断。
+3. **Read / ListLinked / ReadLinked**：只允许读取发现后仍位于对应根目录内的 Skill 正文或相对附件；
+4. **Context**：以确定顺序生成有字节上限的上下文（仅显式预载），超出预算时整体失败，不静默截断。
+5. **Match**：确定性关键字打分，供 `skills_list.query` 标 suggested；不驱动快照注入。
 
 根目录按低到高优先级提供，后面的根目录覆盖同 ID 的前项，因此项目来源可覆盖用户来源。发现结果必须稳定排序。目录或文件的符号链接越界、非法 frontmatter、未知 ID 和发现后的路径替换都 fail closed。
 
@@ -29,10 +30,11 @@ Skill 是指令内容，不是授权来源。frontmatter 和正文不能创建 A
 
 ### TUI 选择（skill-as-slash）
 
-- `/skills`：多选，挂到下次 submit 的 `skill_ids`（显式快照，ADR-036）。
+- `/skills`：多选，挂到下次 submit 的 `skill_ids`（显式快照，ADR-036）。其余由模型 `skills_list` → `skill_view`。
+- `/skills apply|reject <id>`：人工落地或丢弃 `SKILL.md.draft`（ADR-050）；`/skills archived` 列软归档。
 - `/<skill-id>`：切换该 skill；`/<skill-id> text`：确保选中后提交 text。
 - 斜杠优先级：内置（`/model`、`/help` 等）→ `chat.commands` → skill id。
-- 正文读取后经 `injectscan`（H6-min）fail-closed；脏 skill 不进 system 注入。
+- 正文与草稿经 `injectscan` fail-closed；脏 skill 不进 system 注入。
 
 ### MCP、LSP 与可执行工具
 
@@ -49,5 +51,5 @@ Skill 是指令内容，不是授权来源。frontmatter 和正文不能创建 A
 
 - 当前主链路不再为简单文件型 Skill 承担数据库、迁移、RPC 和子进程成本；
 - Skill 内容可直接由版本控制和文件权限管理，发现与读取行为可用普通文件测试验证；
-- 复杂候选生命周期、市场、评分、自动生成、自动演化与跨设备同步继续暂缓；
+- 进程内草稿/人工 apply、用量软归档见 [ADR-050](050-in-process-self-improvement.md)；复杂市场、自动演化与跨设备同步仍禁止；
 - 如果未来出现必须事务化维护、长期运行或独立数据所有权的真实用户故事，需要新的 ADR 和迁移方案，不能直接恢复旧边界。

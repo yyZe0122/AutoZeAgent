@@ -2,7 +2,7 @@
 
 - 状态：Accepted
 - 日期：2026-07-14
-- 更新：2026-08-12（TUI 主路径 slash / permission SSE 事件类型）
+- 更新：2026-08-13（skill apply/events；T8 live markdown 节流）
 
 ## 决策
 
@@ -12,7 +12,7 @@ Linux/macOS 在 RuntimeDir 使用受文件权限保护的 Unix Domain Socket；W
 
 当前 API 覆盖：
 
-- health 与 Skill Catalog；
+- health 与 Skill Catalog：`GET /v1/skills`（可选 `include_archived`；draft/last_used/archived 元数据）；`GET /v1/skills/events`；`POST /v1/skills/actions` apply|reject（ADR-050）；
 - 配置模型快照：`GET/PUT /v1/config/model`（无密钥；可选 `context_window`；PUT 热切换并回写配置顶层 `model`）；
 - 可选 MCP 状态：`GET /v1/config/mcp`（无密钥；见 ADR-040）；
 - Task 提交、查询及 pause/resume/cancel（`execution_mode=agent|plan`；双轨 chat 见 ADR-038）；
@@ -38,10 +38,10 @@ Gateway 不持有通用 `*sql.DB` 业务能力。只读查询进入 `internal/co
 ```text
 cmd/ymz          flag / daemon ensure / 子命令与 tui.Run 入口
 internal/tui             Bubble Tea UI；消费窄 `tui.Gateway`（由 gatewayclient 满足）；主 UX
-                         表现：lipgloss 气泡卡 + contentBlock；完成态 glamour；bubblezone 点击 expand；
-                         无新 list/viewport 引擎（见 docs/optimization/current.md）
+                          表现：lipgloss 气泡卡 + contentBlock；完成态 glamour；streaming reply 节流 live MD（T8）；
+                          bubblezone 点击 expand；无新 list/viewport 引擎（见 docs/optimization/current.md）
 internal/gatewayclient   共享 HTTP/SSE 外观 + transport（不 import gateway server）
 internal/gateway         服务端 only：路由 / handlers / LocalRunner
 ```
 
-TUI 与 CLI 不得 import `tools`、`providers`、`store/sqlite`、`agent`、`chatsession` 实现。主交互斜杠：`/cron`、`/compact`、`/perm`、`/expand`、`/journey`、`/skills`、`/<skill-id>`、`/<command>`（`chat.commands`）、`/model`（全局）/ `/model prefer`（会话偏好并在 run 时生效）。折叠快捷键：`e` / `E` / `c`（输入为空时）。CLI：`ymz config import-opencode`（离线写 ConfigDir，不经 Gateway）。可选尾巴见 `docs/optimization/current.md`。
+TUI 与 CLI 不得 import `tools`、`providers`、`store/sqlite`、`agent`、`chatsession` 实现。主交互斜杠：`/cron`、`/compact`、`/perm`、`/expand`、`/journey`（memory + skill 事件）、`/skills`（含 apply/reject/archived；显式预载快照）、`/<skill-id>`、`/<command>`（`chat.commands`）、`/model`（全局）/ `/model prefer`（会话偏好并在 run 时生效）。折叠快捷键：`e` / `E` / `c`（输入为空时）。用户规则：`<ConfigDir>/AGENTS.md` + 可选项目 `.yunmengze/AGENTS.md`。模型经 `skills_list` / `skill_view` 按需加载。CLI：`ymz config import-opencode`（离线写 ConfigDir，不经 Gateway）。可选尾巴见 `docs/optimization/current.md`。

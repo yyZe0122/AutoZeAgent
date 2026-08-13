@@ -19,7 +19,7 @@ Job payload 描述「何时、在哪个 session、以何种 mode 提交一条 ch
 | `session_id` | 已存在 session（create 时校验） |
 | `execution_mode` | `agent`（默认）或 `plan` |
 | `task_title` / `task_objective` | 每次 fire 的 chat 标题与用户文本 |
-| `skill_ids` | 可选；显式 ID，经 tasksubmission 快照（指令文本 only） |
+| `skill_ids` | 可选；仅显式 ID 经 tasksubmission 快照（指令文本 only）；其余由模型 `skills_list`/`skill_view` |
 | `model_ref` | **H7** 创建时钉死的 selection ref（`provider/model…`）；空则 daemon 写入当前 main |
 | interval / misfire / retry | 沿用 ADR-017；**不做** cron 表达式 |
 

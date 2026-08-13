@@ -47,7 +47,7 @@ core.db  single SQLite source of truth
 | **Multi-provider** | Nested catalog per supplier; select `providerId/modelId…` (OpenCode-style) |
 | **Hot-reload** | Main provider stack (~0.5s) while daemon runs — [ADR-048](docs/architecture/048-provider-config-hot-reload.md) |
 | **OpenCode import** | `ymz config import-opencode` → `agent.local.json` (MCP local+remote, `chat.commands`, compaction; warn+drop plugins/LSP) |
-| **Memory · cron · MCP** | In-process memory (+ inject scan, optional `default_ttl`, expired soft-archive), chat-native jobs, stdio/remote MCP via Broker |
+| **Memory · skills · cron · MCP** | In-process memory (`default_ttl` + expired soft-archive), skill drafts + Hermes `skills_list`/`skill_view` + unused archive ([ADR-050](docs/architecture/050-in-process-self-improvement.md)), `AGENTS.md` rules, chat-native jobs, stdio/remote MCP via Broker |
 | **Slash templates** | `chat.commands` → `/<cmd> [args]` expands `$ARGUMENTS` (instruction only; no grants) |
 | **Session model** | `/model prefer` stores preference; chat runs resolve **prefer → main** (global `/model` unchanged) |
 
@@ -190,6 +190,7 @@ Templates use two sample suppliers: **`deepseek1`** (official bare model ids) an
 - `maxTokens` = output cap; `contextWindow` = packing / UI pressure ([ADR-041](docs/architecture/041-context-packing-and-pressure.md)).  
 - Optional role map `models.subagent` / `models.compact` ([ADR-045](docs/architecture/045-model-roles.md)).  
 - Optional `chat` (workspace, tools, permission, memory, **commands**): full example [`configs/agent.json.example`](configs/agent.json.example) · wire formats [`docs/provider-protocols.md`](docs/provider-protocols.md).  
+- User rules: `~/.yunmengze/AGENTS.md` (seeded if missing; do not overwrite existing). Project `.yunmengze/AGENTS.md` is appended when present. Instruction only — no grants.  
 - Optional `mcp.servers`: stdio (`command`) or remote (`type`/`url`/`headers`) — [ADR-040](docs/architecture/040-mcp-tool-broker.md).
 
 ### Hot-reload
@@ -218,7 +219,7 @@ ymz stop            # shut down daemon
 
 ### TUI
 
-Chat transcript uses **rounded bubbles** (user / assistant / thinking / tool), not a log dump. Completed assistant replies with markdown markers render via **glamour** (streaming stays plain). Foldable blocks: `/expand` or keys **`e`** (last) · **`E`** (all) · **`c`** (collapse); click a folded card when mouse is supported.
+Chat transcript uses **rounded bubbles** (user / assistant / thinking / tool), not a log dump. Assistant replies with markdown markers render via **glamour** (streaming is throttled; unclosed fences stay plain). Foldable blocks: `/expand` or keys **`e`** (last) · **`E`** (all) · **`c`** (collapse); click a folded card when mouse is supported.
 
 | Input | Behavior |
 | --- | --- |
@@ -227,10 +228,10 @@ Chat transcript uses **rounded bubbles** (user / assistant / thinking / tool), n
 | `/help` | Slash list + keys |
 | `/new` · `/sessions` · `/tasks` | Session / task UX |
 | `/model` | Switch **global** main (`/model provider/model`); `/model prefer [ref]` session prefer (applied on next chat run) |
-| `/skills` · `/<skill-id>` | Multi-select skills, or skill-as-slash (instruction only) |
+| `/skills` · `/<skill-id>` | Multi-select preload, or skill-as-slash (instruction only). Model otherwise uses `skills_list` → `skill_view`. `/skills apply\|reject <id>` · `/skills archived` |
 | `/<cmd> [args]` | `chat.commands` template slash (`$ARGUMENTS`); priority: built-in → commands → skill |
-| `/compact` · `/perm` · `/memory` | Context, tool permission, facts (`/memory archived` lists expired) |
-| `/expand` · `/journey` | Expand/collapse folded blocks; prepend session memory timeline (read-only) |
+| `/compact` · `/perm` · `/memory` | Context, tool permission (H4 may hint prior once/similar), facts (`/memory archived`) |
+| `/expand` · `/journey` | Fold/expand; prepend memory and/or skill-event timeline (`/journey skills`) |
 | `/cron` | Jobs on focused session |
 | `/status` · `/retry` · `/stop` | Health · resubmit · cancel |
 | `/quit` | Exit TUI (daemon stays up) |
@@ -295,6 +296,6 @@ Details: [`SECURITY.md`](SECURITY.md), [threat model ADR-008](docs/architecture/
 
 ## Status
 
-Alpha. Production shape is the three-piece stack above. TUI Phase 2, OpenCode O1–O4, H7 / H1-lite / H5-lite memory are landed — remaining tails in [`docs/optimization/current.md`](docs/optimization/current.md).
+Alpha. Production shape is the three-piece stack above. TUI Phase 2, OpenCode O1–O4, H3–H7 / H5-skill, Hermes skill list/view, MCP-prefer prompts, and `AGENTS.md` rules are landed (unreleased after v0.2.4). Remaining tails (O5–O6 / H2 / M*) in [`docs/optimization/current.md`](docs/optimization/current.md).
 
 Release checklist: [`docs/release.md`](docs/release.md).
