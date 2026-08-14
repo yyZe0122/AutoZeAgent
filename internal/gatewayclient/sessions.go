@@ -92,3 +92,23 @@ func (c *Client) CompactSession(ctx context.Context, id SessionID, focus string)
 	}
 	return result, nil
 }
+
+// RewindResult is the response from POST /v1/sessions/{id}/rewind.
+type RewindResult struct {
+	SessionID  string `json:"session_id"`
+	RevisionID string `json:"revision_id"`
+	Path       string `json:"path"`
+}
+
+func (c *Client) RewindSession(ctx context.Context, id SessionID, revisionID string) (RewindResult, error) {
+	var result RewindResult
+	body := map[string]string{}
+	if r := strings.TrimSpace(revisionID); r != "" {
+		body["revision_id"] = r
+	}
+	path := "/v1/sessions/" + url.PathEscape(string(id)) + "/rewind"
+	if err := c.inner.DoJSON(ctx, http.MethodPost, path, body, &result); err != nil {
+		return RewindResult{}, fmt.Errorf("rewind session: %w", err)
+	}
+	return result, nil
+}

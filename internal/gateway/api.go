@@ -126,6 +126,23 @@ func (f SessionCompactFunc) ForceCompact(ctx context.Context, sessionID kernel.S
 	return f(ctx, sessionID, focus)
 }
 
+// SessionRewinder restores the last (or specified) agent file edit.
+type SessionRewinder interface {
+	RewindEdit(ctx context.Context, sessionID kernel.SessionID, revisionID string) (SessionRewindResult, error)
+}
+
+type SessionRewindResult struct {
+	SessionID  string `json:"session_id"`
+	RevisionID string `json:"revision_id"`
+	Path       string `json:"path"`
+}
+
+type SessionRewindFunc func(ctx context.Context, sessionID kernel.SessionID, revisionID string) (SessionRewindResult, error)
+
+func (f SessionRewindFunc) RewindEdit(ctx context.Context, sessionID kernel.SessionID, revisionID string) (SessionRewindResult, error) {
+	return f(ctx, sessionID, revisionID)
+}
+
 type APIConfig struct {
 	Queries         QueryService
 	TaskSubmissions TaskSubmitter
@@ -147,6 +164,8 @@ type APIConfig struct {
 	ChatCommands ChatCommandsProvider
 	// SessionCompact is optional; when set, exposes POST /v1/sessions/{id}/compact.
 	SessionCompact SessionCompactor
+	// SessionRewind is optional; when set, exposes POST /v1/sessions/{id}/rewind (QG).
+	SessionRewind SessionRewinder
 	// ToolPermissions is optional; when set, exposes GET /v1/permissions and POST /v1/permissions/{id}/decide (ADR-043).
 	ToolPermissions ToolPermissionService
 	// MemoryControl is optional; when set, exposes POST /v1/memory/actions (refresh/forget/promote).
@@ -226,6 +245,7 @@ type API struct {
 	mcp              MCPStatusProvider
 	chatCommands     ChatCommandsProvider
 	sessionCompact   SessionCompactor
+	sessionRewind    SessionRewinder
 	toolPermissions  ToolPermissionService
 	memoryControl    MemoryControlService
 	skillControl     SkillControlService
@@ -252,8 +272,9 @@ func NewAPI(config APIConfig) (*API, error) {
 		modelConfig: config.ModelConfig, modelSwitcher: config.ModelSwitcher, modelConfigError: strings.TrimSpace(config.ModelConfigError),
 		modelStream: config.ModelStream,
 		mcp:         config.MCP, chatCommands: config.ChatCommands,
-		sessionCompact: config.SessionCompact, toolPermissions: config.ToolPermissions,
-		memoryControl: config.MemoryControl, skillControl: config.SkillControl, sessionPrefs: config.SessionPrefs,
+		sessionCompact: config.SessionCompact, sessionRewind: config.SessionRewind,
+		toolPermissions: config.ToolPermissions,
+		memoryControl:   config.MemoryControl, skillControl: config.SkillControl, sessionPrefs: config.SessionPrefs,
 	}, nil
 }
 
@@ -317,6 +338,8 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.handleSessionContext(w, r)
 	case strings.HasSuffix(r.URL.Path, "/compact") && strings.HasPrefix(r.URL.Path, "/v1/sessions/"):
 		a.handleSessionCompact(w, r)
+	case strings.HasSuffix(r.URL.Path, "/rewind") && strings.HasPrefix(r.URL.Path, "/v1/sessions/"):
+		a.handleSessionRewind(w, r)
 	case strings.HasPrefix(r.URL.Path, "/v1/sessions/"):
 		a.handleSession(w, r)
 	case r.URL.Path == "/v1/tasks":

@@ -145,6 +145,16 @@ func wireGatewayAPI(
 			}, nil
 		})
 	}
+	var sessionRewind gateway.SessionRewinder
+	if chat.chatService != nil {
+		sessionRewind = gateway.SessionRewindFunc(func(ctx context.Context, sessionID kernel.SessionID, revisionID string) (gateway.SessionRewindResult, error) {
+			r, err := chat.chatService.RewindEdit(ctx, sessionID, revisionID)
+			if err != nil {
+				return gateway.SessionRewindResult{}, err
+			}
+			return gateway.SessionRewindResult{SessionID: r.SessionID, RevisionID: r.RevisionID, Path: r.Path}, nil
+		})
+	}
 	var memoryControl gateway.MemoryControlService
 	if chat.chatService != nil && chat.memoryManager != nil {
 		memoryControl = memoryControlAdapter{chat: chat.chatService}
@@ -155,6 +165,7 @@ func wireGatewayAPI(
 		Core: core, Events: stores.eventStore, Skills: skillCatalog, ModelConfig: modelConfig, ModelSwitcher: modelSwitcher,
 		ModelConfigError: modelConfigError,
 		ModelStream:      chat.modelHub, MCP: mcpStatus, ChatCommands: chatCommandsProvider, SessionCompact: sessionCompact,
+		SessionRewind: sessionRewind,
 		ToolPermissions: gateway.ToolPermissionAdapter{
 			Service:   chat.permService,
 			TrustPath: toolpermission.DefaultTrustPath(layout.ConfigDir),

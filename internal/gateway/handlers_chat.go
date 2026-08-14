@@ -437,6 +437,51 @@ func (a *API) handleSessionCompact(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (a *API) handleSessionRewind(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if a.sessionRewind == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "session rewind is unavailable")
+		return
+	}
+	basePath := strings.TrimSuffix(r.URL.Path, "/rewind")
+	id, ok := pathID(w, basePath, "/v1/sessions/")
+	if !ok {
+		return
+	}
+	var request struct {
+		RevisionID string `json:"revision_id"`
+	}
+	if r.Body != nil {
+		raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 16<<10))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+			return
+		}
+		if len(strings.TrimSpace(string(raw))) > 0 {
+			if err := json.Unmarshal(raw, &request); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_request", "invalid JSON request")
+				return
+			}
+		}
+	}
+	result, err := a.sessionRewind.RewindEdit(r.Context(), kernel.SessionID(id), request.RevisionID)
+	if err != nil {
+		if writeApplicationError(w, err) {
+			return
+		}
+		msg := err.Error()
+		if strings.Contains(msg, "changed since") || strings.Contains(msg, "no edit") {
+			writeError(w, http.StatusConflict, "conflict", msg)
+			return
+		}
+		writeInternal(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (a *API) handleTaskAction(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
