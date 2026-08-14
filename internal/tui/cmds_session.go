@@ -10,13 +10,27 @@ import (
 	"github.com/yyZe0122/yunmengze-agent/internal/gatewayclient"
 )
 
-// freshSessionCmd clears the current session focus then submits a new task
-// (daemon creates a new session via EnsureSession).
-func (m model) freshSessionCmd(objective string) tea.Cmd {
-	// Capture with empty session so Submit does not reuse.
-	mm := m
-	mm.sessionID = ""
-	return mm.newTaskCmd(objective)
+// leaveSessionCmd unfocuses to the ready page. A running turn is cancelled first.
+func (m model) leaveSessionCmd() tea.Cmd {
+	task := m.task
+	poll := m.needsRunPoll()
+	return func() tea.Msg {
+		done := commandDoneMsg{clearTask: true, status: "new session"}
+		if task == nil || task.ID == "" || task.ID == "…" || !poll {
+			return done
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+		defer cancel()
+		current, err := m.gateway.GetTask(ctx, task.ID)
+		if err != nil {
+			done.err = err
+			return done
+		}
+		if _, err := m.gateway.ControlTask(ctx, current.ID, gatewayclient.TaskActionCancel, current.Version, "new"); err != nil {
+			done.err = err
+		}
+		return done
+	}
 }
 
 func (m model) tasksCmd(arg string) tea.Cmd {
@@ -85,7 +99,7 @@ func (m model) newTaskCmd(objective string) tea.Cmd {
 	skillIDs := append([]string(nil), m.selectedSkillIDs...)
 	return func() tea.Msg {
 		if objective == "" {
-			return commandDoneMsg{err: fmt.Errorf("usage: /new <objective>")}
+			return commandDoneMsg{err: fmt.Errorf("empty message")}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 		defer cancel()

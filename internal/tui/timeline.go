@@ -328,9 +328,9 @@ func renderTimelineItem(item timelineItem, exp expandState, opts renderOpts) str
 	}
 	switch item.Kind {
 	case tlUser:
-		return renderLeftBar(text, colorBubbleUser, w, item.Key)
+		return renderLeftBar(text, colorBubbleUser, w)
 	case tlRun:
-		return renderPlainBlock(text, styleTLReply, w, item.Key)
+		return renderPlainBlock(text, styleTLReply, w)
 	case tlTool:
 		title := item.Title
 		if title == "" {
@@ -338,7 +338,7 @@ func renderTimelineItem(item timelineItem, exp expandState, opts renderOpts) str
 		}
 		return styleTLTool.Render(blockTitleTool(title, text))
 	}
-	return renderPlainBlock(text, styleTLBody, w, item.Key)
+	return renderPlainBlock(text, styleTLBody, w)
 }
 
 func itemChrome(item timelineItem) (prefix string, titleStyle lipgloss.Style) {
@@ -383,15 +383,15 @@ func renderBlock(bl contentBlock, exp expandState, opts renderOpts, parent timel
 		if folded || text == "" {
 			line := styleTLThinking.Render(title)
 			if folded {
-				line += "  " + styleDim.Render(fmt.Sprintf("%d lines collapsed · press e or click", lines))
+				line += "  " + styleDim.Render(fmt.Sprintf("%d lines collapsed · press e", lines))
 			}
-			return zoneMark(bl.Key, line)
+			return line
 		}
 		body := styleTLThinking.Render(title) + "\n" + styleDim.Render(wrapBody(text, max(12, w-2)))
-		return renderLeftBar(body, colorBubbleThinking, w, bl.Key)
+		return renderLeftBar(body, colorBubbleThinking, w)
 
 	case blockToolCall:
-		return zoneMark(bl.Key, styleTLTool.Render(blockTitleTool(bl.ToolName, bl.Text)))
+		return styleTLTool.Render(blockTitleTool(bl.ToolName, bl.Text))
 
 	case blockToolResult:
 		text := bl.Text
@@ -409,7 +409,7 @@ func renderBlock(bl contentBlock, exp expandState, opts renderOpts, parent timel
 			if preview != "" {
 				line += "\n" + styleDim.Render("  "+truncate(preview, 80))
 			}
-			return zoneMark(bl.Key, line)
+			return line
 		}
 		if !open && needsFold(text, toolResultMaxLines, toolResultMaxChars) {
 			n := lineCount(text)
@@ -418,38 +418,38 @@ func renderBlock(bl contentBlock, exp expandState, opts renderOpts, parent timel
 			if preview != "" {
 				line += "\n" + styleDim.Render("  "+truncate(preview, 80))
 			}
-			return zoneMark(bl.Key, line)
+			return line
 		}
 		body := text
 		if !open {
 			body = foldHead(text, toolResultMaxLines, toolResultMaxChars)
 		}
 		head := styleTLTool.Render("· " + label)
-		return zoneMark(bl.Key, head+"\n"+styleDim.Render(wrapBody(body, max(12, w-2))))
+		return head + "\n" + styleDim.Render(wrapBody(body, max(12, w-2)))
 
 	case blockReply:
 		text := bl.Text
 		if !open && needsFold(text, timelineBodyMaxLines, timelineBodyMaxChars) {
 			text = foldHead(text, timelineBodyMaxLines, timelineBodyMaxChars)
-			return renderPlainBlock(text, styleTLReply, w, bl.Key)
+			return renderPlainBlock(text, styleTLReply, w)
 		}
 		if text != "" {
 			if bl.Live {
 				if opts.Stream == nil {
-					return renderPlainBlock(text, styleTLReply, w, bl.Key)
+					return renderPlainBlock(text, styleTLReply, w)
 				}
-				return renderPlainBlock(opts.Stream.render(text, w, opts.Theme), styleTLReply, w, bl.Key)
+				return renderPlainBlock(opts.Stream.render(text, w, opts.Theme), styleTLReply, w)
 			}
-			return renderPlainBlock(renderMarkdown(text, w, opts.Theme), styleTLReply, w, bl.Key)
+			return renderPlainBlock(renderMarkdown(text, w, opts.Theme), styleTLReply, w)
 		}
-		return renderPlainBlock(text, styleTLReply, w, bl.Key)
+		return renderPlainBlock(text, styleTLReply, w)
 
 	default:
 		text := bl.Text
 		if !open {
 			text = foldHead(text, timelineBodyMaxLines, timelineBodyMaxChars)
 		}
-		return renderPlainBlock(text, styleDim, w, bl.Key)
+		return renderPlainBlock(text, styleDim, w)
 	}
 }
 

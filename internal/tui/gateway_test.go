@@ -23,6 +23,9 @@ type fakeGateway struct {
 	model            gatewayclient.ModelConfig
 	sessionPreferred string
 	sessionExists    bool
+	controlCalls     []gatewayclient.TaskAction
+	controlErr       error
+	permissions      []gatewayclient.Permission
 }
 
 func (f *fakeGateway) StreamEvents(context.Context, uint64, func(eventapi.Envelope) error) error {
@@ -137,8 +140,18 @@ func (f *fakeGateway) SubmitTask(context.Context, gatewayclient.TaskSubmissionRe
 	return gatewayclient.TaskSubmissionResponse{}, errors.New("not implemented")
 }
 
-func (f *fakeGateway) ControlTask(context.Context, gatewayclient.TaskID, gatewayclient.TaskAction, uint64, string) (gatewayclient.Task, error) {
-	return gatewayclient.Task{}, errors.New("not implemented")
+func (f *fakeGateway) ControlTask(_ context.Context, id gatewayclient.TaskID, action gatewayclient.TaskAction, _ uint64, _ string) (gatewayclient.Task, error) {
+	f.controlCalls = append(f.controlCalls, action)
+	if f.controlErr != nil {
+		return gatewayclient.Task{}, f.controlErr
+	}
+	for i := range f.tasks {
+		if f.tasks[i].ID == id {
+			f.tasks[i].State = gatewayclient.TaskStateCancelled
+			return f.tasks[i], nil
+		}
+	}
+	return gatewayclient.Task{ID: id, State: gatewayclient.TaskStateCancelled}, nil
 }
 
 func (f *fakeGateway) GetPlan(context.Context, gatewayclient.PlanID) (gatewayclient.Plan, error) {
@@ -162,7 +175,7 @@ func (f *fakeGateway) ListJobs(context.Context, bool) ([]schedulerapi.Job, error
 }
 
 func (f *fakeGateway) ListPermissions(context.Context, string, int) ([]gatewayclient.Permission, error) {
-	return nil, nil
+	return f.permissions, nil
 }
 
 func (f *fakeGateway) DecidePermission(context.Context, string, string) (gatewayclient.Permission, error) {

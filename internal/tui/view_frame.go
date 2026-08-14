@@ -11,18 +11,16 @@ func (m model) View() string {
 	if m.quitting {
 		return ""
 	}
-	width := m.width
-	if width < 40 {
-		width = 80
-	}
+	width := m.innerWidth()
 
 	header := m.renderHeader()
 	chat := m.viewport.View()
 	if m.showContextPanel() {
 		ctx := m.renderMetricsPanel(m.viewport.Height)
+		divider := lipgloss.NewStyle().Foreground(colorBorder).Render(" │ ")
 		chat = lipgloss.JoinHorizontal(lipgloss.Top,
 			chat,
-			lipgloss.NewStyle().Foreground(colorBorder).Render("│"),
+			divider,
 			lipgloss.NewStyle().Width(contextPanelWidth).MaxHeight(m.viewport.Height).Render(ctx),
 		)
 	}
@@ -36,17 +34,22 @@ func (m model) View() string {
 	}
 	if m.completer.visible {
 		if c := m.completer.render(6); c != "" {
-			floatParts = append(floatParts, stylePickerBox.Width(max(40, width-2)).Render(c))
+			floatParts = append(floatParts, stylePickerBox.Width(max(8, width-2)).Render(c))
 		}
 	}
 
 	footer := m.renderFooter()
 	inputBox := m.renderInputBox(width)
 
-	parts := []string{header, chat}
+	parts := []string{header, "", chat}
 	parts = append(parts, floatParts...)
-	parts = append(parts, footer, inputBox)
-	return zoneScan(lipgloss.JoinVertical(lipgloss.Left, parts...))
+	parts = append(parts, "", footer, inputBox)
+	frame := lipgloss.JoinVertical(lipgloss.Left, parts...)
+	box := lipgloss.NewStyle().Padding(framePadY, framePadX)
+	if m.width > 0 {
+		box = box.MaxWidth(m.width)
+	}
+	return box.Render(frame)
 }
 
 func (m model) renderHeader() string {
@@ -58,7 +61,7 @@ func (m model) renderHeader() string {
 	if m.task != nil {
 		parts = append(parts, styleDim.Render(shortID(string(m.task.ID))), stateBadge(m.task.State))
 	}
-	return strings.Join(parts, "  ·  ")
+	return truncate(strings.Join(parts, "  ·  "), m.innerWidth())
 }
 
 func (m model) renderInputBox(width int) string {
@@ -74,8 +77,8 @@ func (m model) renderInputBox(width int) string {
 	if m.busy || m.runActivity() == activityActive {
 		busy = " " + styleWarn.Render(m.spinner.View())
 	}
-	innerW := max(20, width-2)
-	m.input.Width = max(10, innerW-4)
+	innerW := max(1, width-2)
+	m.input.Width = max(1, innerW-4)
 	m.input.PlaceholderStyle = styleMuted
 	if strings.HasPrefix(strings.TrimSpace(m.input.Value()), "/") {
 		m.input.TextStyle = styleKeyword
@@ -86,19 +89,19 @@ func (m model) renderInputBox(width int) string {
 	if strings.HasPrefix(strings.TrimSpace(m.input.Value()), "/") {
 		prompt = styleKeyword.Render("› ")
 	}
-	line := prompt + m.input.View() + busy
-	rule := lipgloss.NewStyle().Foreground(modeColor).Render(strings.Repeat("─", max(8, width)))
+	line := truncate(prompt+m.input.View()+busy, width)
+	rule := lipgloss.NewStyle().Foreground(modeColor).Render(strings.Repeat("─", max(1, width)))
 	meta := modeStyle.Render(modeLabel)
 	if m.sessionID == "" && m.task == nil && len(m.messages) == 0 {
 		meta += "  " + styleMuted.Render("Tab mode · type to start")
 	}
-	return rule + "\n" + line + "\n" + meta
+	return rule + "\n" + line + "\n" + truncate(meta, width)
 }
 
 func (m model) renderContextStrip() string {
-	width := m.width - 2
-	if width < 20 {
-		width = 40
+	width := m.innerWidth()
+	if width < 1 {
+		width = 1
 	}
 	parts := []string{}
 	modelName := m.modelName
@@ -149,9 +152,9 @@ func (m model) renderContextStrip() string {
 }
 
 func (m model) renderFooter() string {
-	width := m.width - 2
-	if width < 20 {
-		width = 40
+	width := m.innerWidth()
+	if width < 1 {
+		width = 1
 	}
 	if m.errMsg != "" {
 		return styleError.Render(truncate(m.errMsg, width))
@@ -275,7 +278,7 @@ func (m model) renderHelpOverlay(width int) string {
 		lines = append(lines[:helpOverlayMax], styleMuted.Render("… Esc to close"))
 		text = strings.Join(lines, "\n")
 	}
-	boxW := max(40, width-2)
+	boxW := max(8, width-2)
 	return styleHelpBox.Width(boxW).Render(text)
 }
 

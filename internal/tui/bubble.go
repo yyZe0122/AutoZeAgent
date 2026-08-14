@@ -23,8 +23,8 @@ func bubbleWidth(termW int) int {
 		termW = 80
 	}
 	w := termW - 2
-	if w < 36 {
-		w = 36
+	if w < 8 {
+		w = 8
 	}
 	return w
 }
@@ -75,7 +75,7 @@ func wrapLine(line string, width int) []string {
 	return lines
 }
 
-func renderBubbleCard(title, body string, border lipgloss.Color, titleStyle, bodyStyle lipgloss.Style, width int, zoneID string) string {
+func renderBubbleCard(title, body string, border lipgloss.Color, titleStyle, bodyStyle lipgloss.Style, width int) string {
 	innerW := width - 4
 	if innerW < 12 {
 		innerW = 12
@@ -98,14 +98,10 @@ func renderBubbleCard(title, body string, border lipgloss.Color, titleStyle, bod
 	} else {
 		content = head
 	}
-	card := cardStyle(border, width).Render(content)
-	if zoneID != "" {
-		card = zoneMark(zoneID, card)
-	}
-	return card
+	return cardStyle(border, width).Render(content)
 }
 
-func renderLeftBar(body string, bar lipgloss.Color, width int, zoneID string) string {
+func renderLeftBar(body string, bar lipgloss.Color, width int) string {
 	innerW := width - 2
 	if innerW < 12 {
 		innerW = 12
@@ -116,20 +112,16 @@ func renderLeftBar(body string, bar lipgloss.Color, width int, zoneID string) st
 	} else {
 		content = wrapBody(body, innerW)
 	}
-	out := lipgloss.NewStyle().
+	return lipgloss.NewStyle().
 		BorderLeft(true).
 		BorderStyle(lipgloss.Border{Left: "│"}).
 		BorderForeground(bar).
 		PaddingLeft(1).
 		Width(width).
 		Render(content)
-	if zoneID != "" {
-		out = zoneMark(zoneID, out)
-	}
-	return out
 }
 
-func renderPlainBlock(body string, bodyStyle lipgloss.Style, width int, zoneID string) string {
+func renderPlainBlock(body string, bodyStyle lipgloss.Style, width int) string {
 	innerW := width
 	if innerW < 12 {
 		innerW = 12
@@ -146,9 +138,6 @@ func renderPlainBlock(body string, bodyStyle lipgloss.Style, width int, zoneID s
 			b.WriteString(bodyStyle.Render(ln))
 		}
 		content = b.String()
-	}
-	if zoneID != "" {
-		content = zoneMark(zoneID, content)
 	}
 	return content
 }

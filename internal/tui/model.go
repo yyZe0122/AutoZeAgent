@@ -8,6 +8,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/yyZe0122/yunmengze-agent/internal/gatewayclient"
 	"github.com/yyZe0122/yunmengze-agent/internal/modelstream"
@@ -49,6 +51,9 @@ const (
 	contextPanelWidth   = 26
 	overlayMaxLines     = 10
 	helpOverlayMax      = 14
+	framePadY           = 1
+	framePadX           = 2
+	moduleGap           = 1
 	// timeline body defaults (fold large run results).
 	timelineBodyMaxLines = 12
 	timelineBodyMaxChars = 2400
@@ -71,7 +76,7 @@ type model struct {
 	width  int
 	height int
 	theme  ThemeName
-	// draftMode is the Tab-selected mode for the next /new submission.
+	// draftMode is the Tab-selected mode for the next task submission.
 	draftMode execMode
 
 	input     textinput.Model
@@ -333,9 +338,11 @@ func max(a, b int) int {
 }
 
 func truncate(s string, n int) string {
-	runes := []rune(s)
-	if len(runes) <= n {
+	if n < 1 {
+		return ""
+	}
+	if lipgloss.Width(s) <= n {
 		return s
 	}
-	return string(runes[:n]) + "…"
+	return ansi.TruncateWc(s, n, "…")
 }

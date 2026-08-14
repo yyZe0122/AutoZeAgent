@@ -71,7 +71,7 @@ func TestContextWindowFromModelConfig(t *testing.T) {
 	t.Parallel()
 	applyTheme(themeByName(ThemeNight))
 
-	m := model{contextWindow: 65536, modelName: "p/m", cwd: "/tmp"}
+	m := model{width: 80, contextWindow: 65536, modelName: "p/m", cwd: "/tmp"}
 	n, ok := m.metrics().ContextWindow()
 	if !ok || n != 65536 {
 		t.Fatalf("ContextWindow = %d ok=%v", n, ok)

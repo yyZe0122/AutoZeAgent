@@ -233,7 +233,6 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.pushHistory(line)
 		m.helpOpen = false
 		m.busy = true
-		// Optimistic local feedback for plain-text → /new submissions.
 		if cmd, ok := m.optimisticNew(line); ok {
 			m.layout()
 			m.syncViewport(true)
@@ -256,30 +255,18 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // optimisticNew paints a local user message before Submit returns.
 func (m *model) optimisticNew(line string) (tea.Cmd, bool) {
-	name, arg := parseSlash(line)
-	objective := line
-	freshSession := false
+	name, _ := parseSlash(line)
 	if name != "" {
-		if name != "/new" {
-			return nil, false
-		}
-		objective = strings.TrimSpace(arg)
-		if objective == "" {
-			return nil, false
-		}
-		freshSession = true
+		return nil, false
+	}
+	objective := strings.TrimSpace(line)
+	if objective == "" {
+		return nil, false
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	execMode := string(m.draftMode)
 	if execMode == "" {
 		execMode = gatewayclient.ExecutionModeAgent
-	}
-	if freshSession {
-		m.sessionID = ""
-		m.messages = nil
-		m.plan = nil
-		m.planID = ""
-		m.runs = nil
 	}
 	// Both agent (build) and plan (read-only) are chat turns.
 	m.task = &gatewayclient.Task{
@@ -370,20 +357,28 @@ func (m *model) layout() {
 	if m.helpOpen {
 		footer += helpOverlayMax + 2
 	}
-	h := m.height - header - footer
+	h := m.height - framePadY*2 - header - footer - moduleGap*2
 	if h < 5 {
 		h = 5
 	}
-	w := m.width - 1
+	w := m.width - framePadX*2 - 1
 	if m.showContextPanel() {
-		w -= contextPanelWidth + 1
+		w -= contextPanelWidth + 3
 	}
-	if w < 20 {
-		w = 20
+	if w < 1 {
+		w = 1
 	}
 	m.viewport.Width = w
 	m.viewport.Height = h
-	m.input.Width = max(10, m.width-8)
+	m.input.Width = max(10, m.innerWidth()-6)
+}
+
+func (m model) innerWidth() int {
+	w := m.width - framePadX*2
+	if w < 1 {
+		return 1
+	}
+	return w
 }
 
 func (m *model) showContextPanel() bool {

@@ -41,7 +41,6 @@ func Run(config Config) error {
 	m := newModel(config.Mode, gw)
 	program := tea.NewProgram(m,
 		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(),
 		tea.WithContext(ctx),
 	)
 

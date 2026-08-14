@@ -12,12 +12,7 @@ import (
 func (m model) handleLineCmd(line string) tea.Cmd {
 	name, arg := parseSlash(line)
 	if name == "" {
-		// Plain text: continue current session when focused, else start a new one.
-		if m.sessionID != "" && m.sessionID != "…" {
-			return m.newTaskCmd(strings.TrimSpace(line))
-		}
-		name = "/new"
-		arg = strings.TrimSpace(line)
+		return m.newTaskCmd(strings.TrimSpace(line))
 	}
 	switch name {
 	case "/quit":
@@ -49,8 +44,12 @@ func (m model) handleLineCmd(line string) tea.Cmd {
 	case "/refresh-memory":
 		return m.refreshMemoryCmd()
 	case "/new":
-		// Explicit /new always opens a fresh session (clear focus first).
-		return m.freshSessionCmd(arg)
+		if strings.TrimSpace(arg) != "" {
+			return func() tea.Msg {
+				return commandDoneMsg{err: fmt.Errorf("usage: /new")}
+			}
+		}
+		return m.leaveSessionCmd()
 	case "/pause", "/resume", "/cancel":
 		action, _ := gatewayclient.ParseTaskAction(name)
 		return m.taskActionCmd(action, arg)

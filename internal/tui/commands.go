@@ -11,7 +11,7 @@ type slashCommand struct {
 }
 
 var slashCommands = []slashCommand{
-	{Name: "/new", Desc: "new chat session", Help: "/new [message…]  start a fresh session"},
+	{Name: "/new", Desc: "leave session", Help: "/new  leave session (cancels a running turn)"},
 	{Name: "/sessions", Desc: "list chat sessions", Help: "/sessions  list sessions (open with Enter)"},
 	{Name: "/tasks", Desc: "list / focus tasks", Help: "/tasks [id-prefix]  list tasks or focus by id"},
 	{Name: "/back", Desc: "session list", Help: "/back  open session list"},
@@ -102,7 +102,7 @@ func helpText() string {
 	b.WriteString("\n")
 	b.WriteString(styleTitle.Render("Chat") + "\n")
 	b.WriteString("  Plain text continues the current session (or starts one).\n")
-	b.WriteString("  " + paintKeywords("/new always opens a fresh session. Tab sets agent|plan mode.") + "\n")
+	b.WriteString("  " + paintKeywords("/new") + " leaves to ready and cancels a running turn. Type to start a session. Tab sets agent|plan mode.\n")
 	b.WriteString("  " + paintKeywords("/skills preloads instruction skills for the next submit (explicit snapshot).") + "\n")
 	b.WriteString("  Other skills: model calls skills_list then skill_view. " + paintKeywords("/<skill-id>") + " toggles preload.\n")
 	b.WriteString("  chat.commands templates: " + paintKeywords("/<cmd>") + " [args] expand $ARGUMENTS and submit (instruction only).\n")

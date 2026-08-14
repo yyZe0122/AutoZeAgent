@@ -14,8 +14,10 @@ import (
 )
 
 func (m model) applyModelStream(env modelstream.Envelope) (tea.Model, tea.Cmd) {
-	// Ignore streams for other sessions when focused.
-	if m.sessionID != "" && env.SessionID != "" && gatewayclient.SessionID(env.SessionID) != m.sessionID {
+	if m.sessionID == "" || m.sessionID == "…" {
+		return m, nil
+	}
+	if env.SessionID != "" && gatewayclient.SessionID(env.SessionID) != m.sessionID {
 		return m, nil
 	}
 	if env.RunID != "" {
@@ -112,6 +114,9 @@ func dropLiveDraft(items []timelineItem) []timelineItem {
 }
 
 func (m model) applyPermPoll(msg permPollDoneMsg) (tea.Model, tea.Cmd) {
+	if m.sessionID == "" || m.sessionID == "…" {
+		return m, nil
+	}
 	if msg.err != nil {
 		return m, nil
 	}
@@ -141,6 +146,9 @@ func (m model) applyPermPoll(msg permPollDoneMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) shouldPollPermissions() bool {
+	if m.sessionID == "" || m.sessionID == "…" {
+		return false
+	}
 	if m.needsRunPoll() {
 		return true
 	}
@@ -154,6 +162,9 @@ func (m model) applySSE(envelope eventapi.Envelope) (tea.Model, tea.Cmd) {
 	typ := envelope.Type
 	// C1: permission.pending / permission.decided → refresh perm queue (still DecidePermission*).
 	if strings.HasPrefix(typ, "permission.") {
+		if m.sessionID == "" || m.sessionID == "…" {
+			return m, nil
+		}
 		autoOpen := !m.autoOpenedPermList && m.list == listNone && !m.completer.visible
 		return m, m.pollPermissionsCmd(autoOpen)
 	}

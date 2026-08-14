@@ -100,24 +100,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 
-	case tea.MouseMsg:
-		// Click foldable bubble zones to toggle expand (bubblezone).
-		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
-			for _, key := range collectExpandKeys(m.timeline) {
-				if zoneHit(msg, key) {
-					m.expand.toggle(key)
-					m.tlCache = timelineRenderCache{}
-					m.statusMsg = "expand toggled · e / E / c"
-					m.syncViewport(true)
-					return m, nil
-				}
-			}
-		}
-		var cmd tea.Cmd
-		m.viewport, cmd = m.viewport.Update(msg)
-		m.stickBottom = m.viewport.AtBottom()
-		return m, cmd
-
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)

@@ -280,7 +280,7 @@ func renderPickerOverlay(m *model, width int) string {
 			}
 		}
 	}
-	boxW := max(40, width-2)
+	boxW := max(8, width-2)
 	return stylePickerBox.Width(boxW).Render(b.String())
 }
 

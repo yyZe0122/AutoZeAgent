@@ -201,6 +201,16 @@ func (m model) applyCommand(msg commandDoneMsg) (tea.Model, tea.Cmd) {
 		m.taskContext = gatewayclient.TaskContext{}
 		m.contextOK = false
 		m.viewportContent = ""
+		m.refreshGen++
+		m.refreshing = false
+		m.pendingRefresh = false
+		m.dirty = false
+		m.permissions = nil
+		m.pendingPermCount = 0
+		m.autoOpenedPermList = false
+		if m.list == listPermissions {
+			m.closeList()
+		}
 	}
 	if msg.sessions != nil {
 		m.sessions = msg.sessions

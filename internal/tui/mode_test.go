@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/yyZe0122/yunmengze-agent/internal/gatewayclient"
 	"github.com/yyZe0122/yunmengze-agent/internal/platform/paths"
@@ -70,5 +71,89 @@ func TestPgUpWorksWhilePickerOpen(t *testing.T) {
 	mm := updated.(model)
 	if mm.viewport.YOffset >= before && before > 0 {
 		t.Fatalf("expected scroll up: before=%d after=%d", before, mm.viewport.YOffset)
+	}
+}
+
+func TestLayoutReservesFramePadding(t *testing.T) {
+	m := newModel(paths.ModeUser, &fakeGateway{})
+	m.width, m.height = 120, 40
+	m.layout()
+	if m.viewport.Width >= m.width {
+		t.Fatalf("viewport width %d not inset from %d", m.viewport.Width, m.width)
+	}
+	if m.viewport.Height >= m.height {
+		t.Fatalf("viewport height %d not inset from %d", m.viewport.Height, m.height)
+	}
+	wantW := m.width - framePadX*2 - 1 - contextPanelWidth - 3
+	if m.viewport.Width != wantW {
+		t.Fatalf("viewport width = %d want %d", m.viewport.Width, wantW)
+	}
+	wantH := m.height - framePadY*2 - 1 - 4 - moduleGap*2
+	if m.viewport.Height != wantH {
+		t.Fatalf("viewport height = %d want %d", m.viewport.Height, wantH)
+	}
+
+	m.syncViewport(true)
+	view := m.View()
+	lines := strings.Split(view, "\n")
+	if len(lines) < 3 {
+		t.Fatalf("view too short:\n%s", view)
+	}
+	if strings.TrimSpace(lines[0]) != "" {
+		t.Fatalf("expected top pad, first line = %q", lines[0])
+	}
+	if !strings.HasPrefix(lines[1], "  ") {
+		t.Fatalf("expected left pad, line = %q", lines[1])
+	}
+}
+
+func TestLayoutNarrowWindowDoesNotOverflow(t *testing.T) {
+	m := newModel(paths.ModeUser, &fakeGateway{})
+	m.width, m.height = 30, 20
+	m.layout()
+	if m.innerWidth() != m.width-framePadX*2 {
+		t.Fatalf("innerWidth = %d want %d", m.innerWidth(), m.width-framePadX*2)
+	}
+	m.syncViewport(true)
+	for i, line := range strings.Split(m.View(), "\n") {
+		if w := lipgloss.Width(line); w > m.width {
+			t.Fatalf("line %d width %d > %d: %q", i, w, m.width, line)
+		}
+	}
+
+	m.width, m.height = 18, 16
+	m.layout()
+	avail := m.innerWidth() - 1
+	if avail < 1 {
+		avail = 1
+	}
+	if m.viewport.Width > avail {
+		t.Fatalf("viewport width %d inflated past available %d", m.viewport.Width, avail)
+	}
+	m.syncViewport(true)
+	for i, line := range strings.Split(m.View(), "\n") {
+		if w := lipgloss.Width(line); w > m.width {
+			t.Fatalf("narrow line %d width %d > %d: %q", i, w, m.width, line)
+		}
+	}
+}
+
+func TestTruncateIsSingleLine(t *testing.T) {
+	got := truncate("abcdefghijklmnopqrstuvwxyz", 8)
+	if strings.Contains(got, "\n") {
+		t.Fatalf("truncate wrapped:\n%q", got)
+	}
+	if w := lipgloss.Width(got); w > 8 {
+		t.Fatalf("width %d > 8: %q", w, got)
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Fatalf("missing ellipsis: %q", got)
+	}
+	cjk := truncate("云梦泽编码循环上下文", 6)
+	if strings.Contains(cjk, "\n") {
+		t.Fatalf("cjk wrapped:\n%q", cjk)
+	}
+	if w := lipgloss.Width(cjk); w > 6 {
+		t.Fatalf("cjk width %d > 6: %q", w, cjk)
 	}
 }
