@@ -298,10 +298,140 @@ func TestForceCompactWritesSummary(t *testing.T) {
 	}
 }
 
+func TestLastHistoryIDMapsHeadCut(t *testing.T) {
+	full := []providerapi.Message{
+		{Role: providerapi.RoleUser, Content: "u1"},
+		{Role: providerapi.RoleAssistant, Content: "a1"},
+		{Role: providerapi.RoleUser, Content: "u2"},
+		{Role: providerapi.RoleAssistant, Content: "a2"},
+	}
+	ids := []string{"id1", "id2", "id3", "id4"}
+	head := full[:2]
+	if got := lastHistoryID(ids, head, full); got != "id2" {
+		t.Fatalf("through=%q want id2", got)
+	}
+}
+
+func TestAssembleKeepsTailWhenThroughMissing(t *testing.T) {
+	ctx := context.Background()
+	database, err := storesqlite.Open(ctx, t.TempDir()+"/core.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	db := database.SQL()
+	repo, err := kernel.NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvals, err := approval.NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := contextpack.NewStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.InsertCompaction(ctx, contextpack.Compaction{
+		ID: "c-old", SessionID: "session-through-miss",
+		Summary:          "[Prior session context — compacted]\nkeep middle",
+		ThroughMessageID: "gone-id", Model: "main-model",
+		CreatedAt: time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC).Format(time.RFC3339Nano),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	history := []providerapi.Message{
+		{Role: providerapi.RoleUser, Content: "middle-path=/src/keep.go"},
+		{Role: providerapi.RoleAssistant, Content: "middle-ok"},
+		{Role: providerapi.RoleUser, Content: "recent"},
+		{Role: providerapi.RoleAssistant, Content: "recent-ok"},
+		{Role: providerapi.RoleUser, Content: "tail-u"},
+		{Role: providerapi.RoleAssistant, Content: "tail-a"},
+	}
+	ids := []string{"a", "b", "c", "d", "e", "f"}
+	svc, err := New(Config{
+		DB: db, Repository: repo, Approvals: approvals, Agent: &fakeAgent{done: make(chan struct{})},
+		Transcript: &fixedTranscript{}, WorkspaceRoots: []string{t.TempDir()},
+		ContextWindow: 128_000, Context: store, MainModel: "main-model",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := svc.assembleContextView(ctx, "session-through-miss", nil, history, ids, "now", 128_000, 2048, "main-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := ""
+	for _, m := range view.Messages() {
+		joined += m.Content
+	}
+	if !strings.Contains(joined, "middle-path=/src/keep.go") {
+		t.Fatalf("through miss dropped middle tail: %q", joined)
+	}
+}
+
+func TestForceCompactWritesModelAndThrough(t *testing.T) {
+	ctx := context.Background()
+	database, err := storesqlite.Open(ctx, t.TempDir()+"/core.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	db := database.SQL()
+	repo, err := kernel.NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvals, err := approval.NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := contextpack.NewStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tl := &fixedTranscript{msgs: []corequery.TranscriptMessage{
+		{ID: "1", Role: "user", Content: "hello"},
+		{ID: "2", Role: "assistant", Content: "hi"},
+		{ID: "3", Role: "user", Content: "more context " + strings.Repeat("x", 200)},
+		{ID: "4", Role: "assistant", Content: "ok"},
+		{ID: "5", Role: "user", Content: "third"},
+		{ID: "6", Role: "assistant", Content: "done"},
+	}}
+	enabled := true
+	svc, err := New(Config{
+		DB: db, Repository: repo, Approvals: approvals, Agent: &fakeAgent{done: make(chan struct{})},
+		Transcript: tl, WorkspaceRoots: []string{t.TempDir()},
+		ContextWindow: 4_096, Context: store, Compactor: &trackingCompactor{},
+		CompactionEnabled: &enabled, MainModel: "wired-main",
+		Now: func() time.Time { return time.Date(2026, 8, 14, 13, 0, 0, 0, time.UTC) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ForceCompact(ctx, "session-force-model", ""); err != nil {
+		t.Fatal(err)
+	}
+	c, err := store.LatestCompaction(ctx, "session-force-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Model != "wired-main" {
+		t.Fatalf("model=%q", c.Model)
+	}
+	if c.ThroughMessageID == "" {
+		t.Fatal("through_message_id empty")
+	}
+}
+
 type fixedTranscript struct {
 	msgs []corequery.TranscriptMessage
 }
 
 func (f *fixedTranscript) SessionTranscript(context.Context, kernel.SessionID, corequery.TranscriptOptions) ([]corequery.TranscriptMessage, error) {
+	return f.msgs, nil
+}
+
+func (f *fixedTranscript) SessionTranscriptTail(context.Context, kernel.SessionID, int) ([]corequery.TranscriptMessage, error) {
 	return f.msgs, nil
 }

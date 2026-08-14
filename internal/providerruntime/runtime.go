@@ -30,9 +30,11 @@ type MainEndpoint interface {
 	SetContextWindow(n int64)
 }
 
-// ContextWindow applies packing window updates (chat service).
+// ContextWindow applies packing window / output-cap updates (chat service).
 type ContextWindow interface {
 	SetContextWindow(n int64)
+	SetMaxOutputTokens(n int64)
+	SetMainModel(model string)
 }
 
 // SnapshotSink updates GET /v1/config/model after reload or switch.
@@ -205,7 +207,7 @@ func (r *Runtime) ReloadFromDisk() error {
 	if selected == "" {
 		selected = configured.ProviderID + "/" + configured.ModelID
 	}
-	if err := r.applyMainLocked(provider, configured.ModelID, configured.ContextWindow); err != nil {
+	if err := r.applyMainLocked(provider, configured.ModelID, configured.ContextWindow, configured.MaxTokens); err != nil {
 		return err
 	}
 	r.provider = provider
@@ -259,7 +261,7 @@ func (r *Runtime) SelectModel(_ context.Context, ref string) (gateway.ModelConfi
 		r.suppressUntil = time.Time{}
 		return gateway.ModelConfig{}, err
 	}
-	if err := r.applyMainLocked(provider, resolved.ModelID, resolved.ContextWindow); err != nil {
+	if err := r.applyMainLocked(provider, resolved.ModelID, resolved.ContextWindow, resolved.MaxTokens); err != nil {
 		return gateway.ModelConfig{}, err
 	}
 	r.provider = provider
@@ -296,7 +298,7 @@ func (r *Runtime) Snapshot() (gateway.ModelConfig, string) {
 	return cfg, loadErr
 }
 
-func (r *Runtime) applyMainLocked(provider providerapi.Provider, model string, contextWindow int64) error {
+func (r *Runtime) applyMainLocked(provider providerapi.Provider, model string, contextWindow, maxTokens int64) error {
 	if r.agent != nil {
 		if err := r.agent.SetProvider(provider); err != nil {
 			return err
@@ -308,6 +310,8 @@ func (r *Runtime) applyMainLocked(provider providerapi.Provider, model string, c
 	}
 	if r.chat != nil {
 		r.chat.SetContextWindow(contextWindow)
+		r.chat.SetMaxOutputTokens(maxTokens)
+		r.chat.SetMainModel(model)
 	}
 	return nil
 }

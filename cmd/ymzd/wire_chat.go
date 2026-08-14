@@ -10,12 +10,14 @@ import (
 	"github.com/yyZe0122/yunmengze-agent/internal/chatsession"
 	"github.com/yyZe0122/yunmengze-agent/internal/contextpack"
 	"github.com/yyZe0122/yunmengze-agent/internal/corequery"
+	"github.com/yyZe0122/yunmengze-agent/internal/editrev"
 	"github.com/yyZe0122/yunmengze-agent/internal/memory"
 	"github.com/yyZe0122/yunmengze-agent/internal/modelresolve"
 	"github.com/yyZe0122/yunmengze-agent/internal/modelstream"
 	"github.com/yyZe0122/yunmengze-agent/internal/platform/paths"
 	"github.com/yyZe0122/yunmengze-agent/internal/providerconfig"
 	"github.com/yyZe0122/yunmengze-agent/internal/providerruntime"
+	"github.com/yyZe0122/yunmengze-agent/internal/sessiontodo"
 	"github.com/yyZe0122/yunmengze-agent/internal/toolpermission"
 )
 
@@ -26,6 +28,7 @@ type chatStack struct {
 	contextStore    *contextpack.Store
 	calibrator      *contextpack.Calibrator
 	contextWindow   int64
+	maxOutputTokens int64
 	chatCfg         providerconfig.ChatConfig
 	permService     *toolpermission.Service
 	memoryManager   *memory.Manager
@@ -69,6 +72,7 @@ func wireChat(
 	if providerRuntime != nil && providerRuntime.SelectedRef() != "" {
 		if resolved, resolveErr := providerconfig.ResolveModel(layout.ConfigDir, providerRuntime.SelectedRef()); resolveErr == nil && resolved != nil {
 			out.contextWindow = resolved.ContextWindow
+			out.maxOutputTokens = resolved.MaxTokens
 		}
 	}
 
@@ -110,6 +114,20 @@ func wireChat(
 		stack.memTools.SetBackend(memoryManager)
 	}
 
+	todoStore, err := sessiontodo.NewStore(stores.database.SQL())
+	if err != nil {
+		return out, err
+	}
+	if stack.todoTools != nil {
+		stack.todoTools.SetBackend(todoStore)
+	}
+
+	editStore, err := editrev.NewStore(stores.database.SQL(), stores.artifactStore)
+	if err != nil {
+		return out, err
+	}
+	stack.broker.SetEditCheckpointer(editStore)
+
 	if providerRuntime != nil && providerRuntime.Provider() != nil && strings.TrimSpace(providerRuntime.LoadError()) == "" {
 		roleEndpoints, roleErr := providerruntime.BuildRoleEndpoints(layout.ConfigDir, providerRuntime.SelectedRef())
 		if roleErr != nil {
@@ -120,7 +138,7 @@ func wireChat(
 			Model: providerRuntime.Model(), Stream: out.modelHub,
 			MaxIterations: maxIterations,
 			ContextWindow: out.contextWindow, Roles: roleEndpoints,
-			Context: contextStore, Calibrator: out.calibrator,
+			Context: contextStore, Calibrator: out.calibrator, Transcript: out.memoryManager,
 		})
 		if err != nil {
 			return out, err
@@ -145,9 +163,11 @@ func wireChat(
 			PathGuard: stack.pathGuard, DaemonCWD: workingDirectory, ConfigDir: layout.ConfigDir, ChatConfig: &chatCfgCopy,
 			AllowWriteCeiling: &writeCeiling, AllowGit: allowGit, AllowProcess: allowProcess,
 			PermissionMode: permissionMode, ExtraTools: stack.mcpToolNames,
-			ContextWindow: out.contextWindow, Context: contextStore, Compactor: out.agentRunner,
+			ContextWindow: out.contextWindow, MaxOutputTokens: out.maxOutputTokens,
+			Context: contextStore, Compactor: out.agentRunner,
 			MemoryCurator: out.agentRunner, CompactionEnabled: &compactionEnabled, Calibrator: out.calibrator,
-			Memory: out.memoryManager, Stream: out.modelHub, ToolCalls: stack.broker,
+			MainModel: providerRuntime.Model(),
+			Memory:    out.memoryManager, Todos: todoStore, Edits: editStore, Stream: out.modelHub, ToolCalls: stack.broker,
 			ModelResolver: modelResolver.AsChatResolver(),
 			OnError: func(err error) {
 				slog.Error("chat session failure", "component", "chatsession", "operation", "execute", "result", "failed", "error", err)

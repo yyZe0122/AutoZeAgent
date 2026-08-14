@@ -42,6 +42,15 @@ func (s *stubMain) SetContextWindow(n int64) {
 	s.window = n
 }
 
+type stubChat struct {
+	window int64
+	maxOut int64
+}
+
+func (s *stubChat) SetContextWindow(n int64)   { s.window = n }
+func (s *stubChat) SetMaxOutputTokens(n int64) { s.maxOut = n }
+func (s *stubChat) SetMainModel(string)        {}
+
 type stubSink struct {
 	mu        sync.Mutex
 	lastErr   string

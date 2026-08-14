@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/yyZe0122/yunmengze-agent/internal/contextpack"
 	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
@@ -159,94 +160,107 @@ func (r *Runner) CompactSummaryWithPrevious(ctx context.Context, head []provider
 	return out, nil
 }
 
-// maybeCompactMidTurn shrinks the in-memory transcript when pressure is high after tools.
-// Durable session compaction is left to chatsession packSessionHistory / ForceCompact.
-func (r *Runner) maybeCompactMidTurn(ctx context.Context, messages []providerapi.Message, request RunRequest, model string) []providerapi.Message {
+// maybeCompactMidTurn trims new tool bodies (L1/L2) then rebuilds via Build if over budget.
+func (r *Runner) maybeCompactMidTurn(ctx context.Context, messages []providerapi.Message, request RunRequest, model string, from int) ([]providerapi.Message, bool) {
 	if len(messages) < 4 {
-		return messages
+		return messages, false
 	}
+	maxRunes := r.maxToolResultRunes
+	if maxRunes <= 0 {
+		maxRunes = DefaultMaxToolResultRunes
+	}
+	_ = contextpack.TrimToolBodies(messages, from, maxRunes)
 	window := request.ContextWindow
 	if window <= 0 {
 		r.mu.RLock()
 		window = r.contextWindow
 		r.mu.RUnlock()
 	}
+	raw := contextpack.EstimateMessages(messages)
 	if window <= 0 {
-		// Unknown window: still reclaim if raw estimate is huge.
-		if contextpack.EstimateMessages(messages) < 32_000 {
-			return messages
+		if raw < 32_000 {
+			return messages, false
 		}
 		slog.Info("agent mid-turn compact (unknown window, large estimate)",
 			"component", "agent", "operation", "mid_turn_compact", "result", "succeeded",
 			"run_id", request.RunID, "task_id", request.TaskID)
-		return r.compactMessagesForOverflow(ctx, messages)
+		return r.rebuildProviderView(ctx, messages, request, model), true
 	}
-	maxOut := request.MaxOutputTokens
-	if maxOut <= 0 {
-		maxOut = 8_192
-	}
+	maxOut := contextpack.ClampMaxOutput(request.MaxOutputTokens)
 	usable := contextpack.UsableWindow(window, maxOut, 0)
-	raw := contextpack.EstimateMessages(messages)
 	est := raw
-	if r.calibrator != nil {
+	if r.calibrator != nil && strings.TrimSpace(model) != "" {
 		est = r.calibrator.Apply(model, raw)
 	}
-	// Pack with a representative budget (tools still advertised next iter).
-	budget := usable
-	if budget > 0 {
-		budget = usable * 85 / 100
-		if budget < 1024 {
-			budget = 1024
-		}
-	}
-	packed := contextpack.Pack(messages, contextpack.PackOptions{Budget: budget, Model: model, MaxToolResultRunes: r.maxToolResultRunes})
-	if !contextpack.ShouldCompact(est, usable, packed.OverBudget) {
-		return messages
+	over := usable > 0 && est > usable
+	if !contextpack.ShouldCompact(est, usable, over) {
+		_ = contextpack.ClearOldToolResults(messages, 0, 0)
+		return messages, false
 	}
 	slog.Info("agent mid-turn compact",
 		"component", "agent", "operation", "mid_turn_compact", "result", "succeeded",
 		"run_id", request.RunID, "task_id", request.TaskID,
 		"estimate_tokens", est, "usable_tokens", usable)
-	return r.compactMessagesForOverflow(ctx, messages)
+	return r.rebuildProviderView(ctx, messages, request, model), true
 }
 
-// compactMessagesForOverflow shrinks the in-memory provider transcript after a
-// context-window error: L2/L3 pack, optional LLM head summary, tool-pair safe split.
-func (r *Runner) compactMessagesForOverflow(ctx context.Context, messages []providerapi.Message) []providerapi.Message {
+// rebuildProviderView reassembles Prefix+Summary+Tail+Ephemeral with the same Build used at turn start.
+func (r *Runner) rebuildProviderView(ctx context.Context, messages []providerapi.Message, request RunRequest, model string) []providerapi.Message {
 	if len(messages) == 0 {
 		return messages
 	}
-	// Force reclaim of older tool bodies and drop old turns under a tight budget.
-	packed := contextpack.Pack(messages, contextpack.PackOptions{
-		Budget:             8_000,
-		MaxToolResultRunes: 4_096,
-		ToolProtectTokens:  8_000,
-		ToolReclaimMin:     1_000,
-	})
-	out := packed.Messages
-	if len(out) > 6 {
-		head, tail := contextpack.SplitHeadTail(out, 2)
+	prefix, rest := contextpack.SplitLeadingSystem(messages)
+	var existingSummary string
+	if n := len(prefix); n > 0 && strings.HasPrefix(prefix[n-1].Content, "[Prior") {
+		existingSummary = prefix[n-1].Content
+		prefix = prefix[:n-1]
+	}
+	history, ephemeral := contextpack.SplitCodingEphemeral(rest)
+	window := request.ContextWindow
+	if window <= 0 {
+		r.mu.RLock()
+		window = r.contextWindow
+		r.mu.RUnlock()
+	}
+	maxOut := contextpack.ClampMaxOutput(request.MaxOutputTokens)
+	usable := contextpack.UsableWindow(window, maxOut, 0)
+	budget := contextpack.HistoryBudget(usable)
+	if budget <= 0 {
+		budget = contextpack.MinHistoryBudget
+	}
+	summary := existingSummary
+	if len(history) > 4 {
+		head, tail := contextpack.SplitHeadTail(history, 2)
 		if len(head) > 0 {
-			sum, err := r.CompactSummary(ctx, head)
-			if err != nil || strings.TrimSpace(sum) == "" {
+			allowLLM := true
+			if r.contextStore != nil && strings.TrimSpace(request.SessionID) != "" {
+				allowLLM = r.contextStore.AllowLLMCompact(ctx, request.SessionID, time.Now().UTC(),
+					contextpack.DefaultAntiThrashWindow, contextpack.DefaultAntiThrashMax)
+			}
+			var sum string
+			if allowLLM {
+				var err error
+				sum, err = r.CompactSummary(ctx, head)
+				if err != nil || strings.TrimSpace(sum) == "" {
+					sum = contextpack.ExtractiveSummary(head, 4_000)
+				}
+			} else {
 				sum = contextpack.ExtractiveSummary(head, 4_000)
 			}
-			out = append([]providerapi.Message{{
-				Role:    providerapi.RoleSystem,
-				Content: "[Prior context — compacted after provider overflow]\n" + sum,
-			}}, stripLeadingSystemMsgs(tail)...)
+			summary = sum
+			history = tail
+			_, history = contextpack.SplitLeadingSystem(history)
 		}
 	}
-	return out
-}
-
-func stripLeadingSystemMsgs(msgs []providerapi.Message) []providerapi.Message {
-	i := 0
-	for i < len(msgs) && msgs[i].Role == providerapi.RoleSystem {
-		i++
-	}
-	if i == 0 {
-		return msgs
-	}
-	return msgs[i:]
+	view := contextpack.Build(contextpack.BuildInput{
+		Prefix:    prefix,
+		History:   history,
+		Ephemeral: ephemeral,
+		Summary:   summary,
+	}, contextpack.BuildOptions{
+		Budget:             budget,
+		Model:              model,
+		MaxToolResultRunes: r.maxToolResultRunes,
+	})
+	return view.Messages()
 }

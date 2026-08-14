@@ -241,14 +241,14 @@ func (s *Service) issueChatGrants(ctx context.Context, plan approval.PlanDocumen
 
 func isAskOnlyCapability(scope approval.CapabilityScope) bool {
 	name := scope.Capability
-	if name == "process_exec" || strings.HasPrefix(name, "git_") {
+	if name == "process_exec" || name == "process_shell" || strings.HasPrefix(name, "git_") {
 		return true
 	}
 	return false
 }
 
 func (s *Service) preauthHighRisk(capability string) bool {
-	if capability == "process_exec" {
+	if capability == "process_exec" || capability == "process_shell" {
 		return s.allowProcess
 	}
 	if strings.HasPrefix(capability, "git_") {
@@ -343,6 +343,12 @@ func (s *Service) buildWorkspacePlan(planID kernel.PlanID, taskID kernel.TaskID,
 		approval.CapabilityScope{
 			Capability: "session_search", MaxDurationMillis: defaultToolTimeoutMS, MaxCalls: defaultMaxCalls,
 		},
+		approval.CapabilityScope{
+			Capability: "todo_list", MaxDurationMillis: defaultToolTimeoutMS, MaxCalls: defaultMaxCalls,
+		},
+		approval.CapabilityScope{
+			Capability: "todo_write", MaxDurationMillis: defaultToolTimeoutMS, MaxCalls: defaultMaxCalls,
+		},
 	)
 	if mode == kernel.ExecutionModeAgent {
 		caps = append(caps,
@@ -364,24 +370,27 @@ func (s *Service) buildWorkspacePlan(planID kernel.PlanID, taskID kernel.TaskID,
 	} else {
 		effects = append(effects, "search local memory and past transcripts")
 	}
-	if mode == kernel.ExecutionModeAgent && (s.allowProcess || askMode) {
-		if s.allowProcess {
-			caps = append(caps, approval.CapabilityScope{
-				Capability: "process_exec", Paths: append([]string(nil), pathRoots...),
-				MaxDurationMillis: defaultToolTimeoutMS, MaxCalls: defaultMaxCalls,
-			})
-		}
-		if askMode && !s.allowProcess {
-			caps = append(caps,
-				approval.CapabilityScope{
-					Capability: "process_exec", Paths: append([]string(nil), pathRoots...),
-					MaxDurationMillis: defaultToolTimeoutMS, MaxCalls: 1, OneTime: true,
-				},
-				approval.CapabilityScope{
-					Capability: "process_exec", Paths: append([]string(nil), pathRoots...),
-					MaxDurationMillis: defaultToolTimeoutMS, MaxCalls: defaultMaxCalls, OneTime: false,
-				},
-			)
+	isCron := strings.HasPrefix(string(taskID), "scheduled_")
+	if mode == kernel.ExecutionModeAgent && !isCron && (s.allowProcess || askMode) {
+		for _, name := range []string{"process_exec", "process_shell"} {
+			if s.allowProcess {
+				caps = append(caps, approval.CapabilityScope{
+					Capability: name, Paths: append([]string(nil), pathRoots...),
+					MaxDurationMillis: defaultToolTimeoutMS, MaxCalls: defaultMaxCalls,
+				})
+			}
+			if askMode && !s.allowProcess {
+				caps = append(caps,
+					approval.CapabilityScope{
+						Capability: name, Paths: append([]string(nil), pathRoots...),
+						MaxDurationMillis: defaultToolTimeoutMS, MaxCalls: 1, OneTime: true,
+					},
+					approval.CapabilityScope{
+						Capability: name, Paths: append([]string(nil), pathRoots...),
+						MaxDurationMillis: defaultToolTimeoutMS, MaxCalls: defaultMaxCalls, OneTime: false,
+					},
+				)
+			}
 		}
 		if s.allowProcess || askMode {
 			risk = policy.RiskR2

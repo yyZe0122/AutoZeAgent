@@ -65,6 +65,13 @@ type Config struct {
 	Context *contextpack.Store
 	// Calibrator is optional; when set, post-flight usage calibrates estimates.
 	Calibrator *contextpack.Calibrator
+	// Transcript indexes tool results into L3 as they append (ADR-051 / QF).
+	Transcript TranscriptIndexer
+}
+
+// TranscriptIndexer projects run records into session_search (optional).
+type TranscriptIndexer interface {
+	IndexTranscriptRecord(ctx context.Context, sessionID, runID string, position int, recordType, content, createdAt string) error
 }
 
 type Runner struct {
@@ -80,6 +87,7 @@ type Runner struct {
 	stream             StreamObserver
 	contextStore       *contextpack.Store
 	calibrator         *contextpack.Calibrator
+	transcript         TranscriptIndexer
 }
 
 type RunRequest struct {
@@ -93,10 +101,11 @@ type RunRequest struct {
 	CapabilityGrantIDs map[string][]string
 	Actor              string
 	TraceID            string
-	// Messages are persisted as this run's input_message prefix (Prepare).
+	// Messages are persisted as this run's input_message prefix (Prepare): Prefix + current user.
 	Messages []providerapi.Message
-	// History is prior session turns for the provider only — not written to records.
-	History           []providerapi.Message
+	// ProviderMessages is the assembled ContextView for the provider (ADR-051).
+	// Empty → Messages. Never written to run records.
+	ProviderMessages  []providerapi.Message
 	AllowedTools      []string
 	MaxOutputTokens   int64
 	MaxTotalTokens    int64
@@ -112,9 +121,12 @@ type RunRequest struct {
 	// ModelOverride is optional per-run main endpoint (O4). When set with OverrideProvider,
 	// used instead of Role/main for this run only (does not mutate global main).
 	// Ignored when Role is a non-main configured role (subagent/compact still win).
-	ModelOverride         string
-	OverrideProvider      StreamingProvider
-	OverrideContextWindow int64
+	ModelOverride           string
+	OverrideProvider        StreamingProvider
+	OverrideContextWindow   int64
+	OverrideMaxOutputTokens int64
+	// Compacted is set when the turn-start ContextView already summarized or dropped turns.
+	Compacted bool
 }
 
 type Result struct {
@@ -158,7 +170,7 @@ func New(config Config) (*Runner, error) {
 		provider: config.Provider, broker: config.Broker, records: config.Records,
 		model: model, maxIterations: maxIterations, maxToolResultRunes: maxToolResultRunes,
 		contextWindow: config.ContextWindow, roles: roles, stream: config.Stream,
-		contextStore: config.Context, calibrator: cal,
+		contextStore: config.Context, calibrator: cal, transcript: config.Transcript,
 	}, nil
 }
 

@@ -20,10 +20,12 @@ import (
 	"github.com/yyZe0122/yunmengze-agent/internal/audit"
 	"github.com/yyZe0122/yunmengze-agent/internal/contextpack"
 	"github.com/yyZe0122/yunmengze-agent/internal/corequery"
+	"github.com/yyZe0122/yunmengze-agent/internal/editrev"
 	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
 	"github.com/yyZe0122/yunmengze-agent/internal/memory"
 	"github.com/yyZe0122/yunmengze-agent/internal/providerconfig"
 	"github.com/yyZe0122/yunmengze-agent/internal/runlog"
+	"github.com/yyZe0122/yunmengze-agent/internal/sessiontodo"
 	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
 
@@ -39,17 +41,26 @@ const (
 	chatSystemPromptAgent = "You are YunmengZe, a local coding assistant in a multi-turn chat session (build mode). " +
 		"Reply helpfully in the user's language. You may read and write files under the workspace when needed. " +
 		"Prefer absolute paths under the workspace; relative paths are resolved against the workspace root. " +
-		"Do not invent plan steps or claim tool success without evidence. " +
+		"Workspace state comes from tools. Do not invent file contents, line numbers, or claim tool success without evidence. " +
+		"Find with fs_glob/fs_grep (never shell find/grep). Read with fs_read offset/limit and use the returned sha256. " +
+		"Edit with fs_patch and expected_sha256. Use fs_write only to create a new file. " +
+		"Independent reads (fs_read/fs_grep/fs_glob) may be issued in one step. " +
+		"For multi-step work, keep session todos via todo_write (at most one in_progress). " +
+		"After context compaction, recover paths and errors with session_search instead of relying on memory. " +
 		"For specialized workflows, call skills_list then skill_view before improvising. " +
-		"Prefer configured mcp_* tools over process_exec or writing scripts that reimplement them. " +
-		"Prefer fs_glob and fs_grep over shell find/grep."
+		"Prefer configured mcp_* tools over process_exec/process_shell or writing scripts that reimplement them. " +
+		"process_exec/process_shell are only for running tests or approved commands. " +
+		"If those tools are not granted, say the user must set chat.tools.process; do not write a script to stand in for tests. " +
+		"Do not invent plan steps."
 	chatSystemPromptPlan = "You are YunmengZe in plan mode (read-only analysis). " +
 		"Reply helpfully in the user's language. You may read and inspect the workspace, ask clarifying questions, " +
 		"and discuss approaches. You must NOT modify files, create directories, or apply patches. " +
 		"If the user asks for edits, explain the plan and suggest switching to agent (build) mode. " +
-		"Prefer absolute paths under the workspace. Do not claim tool success without evidence. " +
+		"Prefer absolute paths under the workspace. Workspace state comes from tools; do not invent file contents or claim tool success without evidence. " +
 		"For specialized workflows, call skills_list then skill_view before improvising. " +
-		"Prefer configured mcp_* tools over inventing a scripted substitute."
+		"Prefer configured mcp_* tools over inventing a scripted substitute. " +
+		"Use fs_glob/fs_grep/fs_read to inspect; never shell find/grep. Independent reads may be issued in one step. " +
+		"After compaction, use session_search to recover prior paths and errors."
 	// skillSystemPreamble is prepended to the task skill snapshot system message (ADR-036).
 	// Skills are instruction text only — never grants, approvals, or policy expansion.
 	skillSystemPreamble = "The following selected skill instructions guide this reply only. " +
@@ -111,8 +122,30 @@ type CompactResult struct {
 	CompactionID string `json:"compaction_id,omitempty"`
 }
 
+// RewindResult is the outcome of a human-path file rewind (QG).
+type RewindResult struct {
+	SessionID  string `json:"session_id"`
+	RevisionID string `json:"revision_id"`
+	Path       string `json:"path"`
+}
+
+func (s *Service) RewindEdit(ctx context.Context, sessionID kernel.SessionID, revisionID string) (RewindResult, error) {
+	if ctx == nil {
+		return RewindResult{}, fmt.Errorf("%w: context is required", ErrInvalidRequest)
+	}
+	if s == nil || s.edits == nil {
+		return RewindResult{}, fmt.Errorf("%w: edit checkpoints unavailable", ErrUnavailable)
+	}
+	rev, err := s.edits.Rewind(ctx, string(sessionID), revisionID)
+	if err != nil {
+		return RewindResult{}, classify(err)
+	}
+	return RewindResult{SessionID: rev.SessionID, RevisionID: rev.ID, Path: rev.Path}, nil
+}
+
 type TranscriptLoader interface {
 	SessionTranscript(context.Context, kernel.SessionID, corequery.TranscriptOptions) ([]corequery.TranscriptMessage, error)
+	SessionTranscriptTail(ctx context.Context, sessionID kernel.SessionID, n int) ([]corequery.TranscriptMessage, error)
 }
 
 type Config struct {
@@ -136,14 +169,16 @@ type Config struct {
 	AllowWriteCeiling *bool
 	// AllowGit, when true, pre-authorizes git_* for agent mode only (default false).
 	AllowGit bool
-	// AllowProcess, when true, pre-authorizes process_exec for agent mode only (default false).
+	// AllowProcess, when true, pre-authorizes process_exec and process_shell for agent mode only (default false). Plan and cron never receive these grants.
 	AllowProcess bool
 	// PermissionMode is preauth (default) or ask (ADR-043). ask embeds high-risk caps in plan without pre-issuing grants.
 	PermissionMode string
 	// ExtraTools are additional broker tool names (e.g. mcp_*) granted for chat runs.
 	ExtraTools []string
-	// ContextWindow is model context length for history packing; 0 = unknown.
+	// ContextWindow is model context length for packing; 0 = unknown.
 	ContextWindow int64
+	// MaxOutputTokens is the model output cap (maxTokens); 0 → ClampMaxOutput default.
+	MaxOutputTokens int64
 	// Context persists pressure snapshots and session compactions (optional).
 	Context *contextpack.Store
 	// Compactor summarizes head turns when compaction is enabled (optional; extractive fallback).
@@ -156,14 +191,20 @@ type Config struct {
 	Calibrator *contextpack.Calibrator
 	// Memory is optional in-process session memory (ADR-044).
 	Memory *memory.Manager
+	// Todos is optional session working list (ADR-051 / QE).
+	Todos *sessiontodo.Store
+	// Edits is optional file-edit checkpoints (ADR-051 / QG).
+	Edits *editrev.Store
 	// Stream is optional; PublishTerminal after complete/fail/cancel flush.
 	Stream StreamFanout
 	// ToolCalls is optional; cancel/fail sweeps still-running tool_calls (ADR-012).
 	ToolCalls ToolCallCleaner
 	// ModelResolver optionally applies session PreferredModel per run (O4).
 	ModelResolver ModelPinResolver
-	Now           func() time.Time
-	OnError       func(error)
+	// MainModel is the daemon main wire id written on new compaction rows when no pin.
+	MainModel string
+	Now       func() time.Time
+	OnError   func(error)
 }
 
 // ModelPinResolver resolves a selection ref (provider/model) for one chat run.
@@ -180,6 +221,7 @@ type ModelPin struct {
 	Provider      agent.StreamingProvider
 	Model         string
 	ContextWindow int64
+	MaxTokens     int64
 }
 
 type Service struct {
@@ -200,15 +242,19 @@ type Service struct {
 	permissionMode    string
 	extraTools        []string
 	contextWindow     int64
+	maxOutputTokens   int64
 	contextStore      *contextpack.Store
 	compactor         Compactor
 	compactionEnabled bool
 	calibrator        *contextpack.Calibrator
 	memory            *memory.Manager
+	todos             *sessiontodo.Store
+	edits             *editrev.Store
 	curatorCaller     MemoryCuratorCaller
 	stream            StreamFanout
 	toolCalls         ToolCallCleaner
 	modelResolver     ModelPinResolver
+	mainModel         string
 	audit             *audit.Store
 	now               func() time.Time
 	onError           func(error)
@@ -290,11 +336,14 @@ func New(config Config) (*Service, error) {
 		chatCfg:      config.ChatConfig,
 		writeCeiling: writeCeiling, allowGit: config.AllowGit, allowProcess: config.AllowProcess,
 		permissionMode: permMode, extraTools: extra,
-		contextWindow: config.ContextWindow, contextStore: config.Context,
-		compactor: config.Compactor, compactionEnabled: compactionEnabled,
-		calibrator: config.Calibrator, memory: config.Memory, curatorCaller: config.MemoryCurator,
-		stream: config.Stream, toolCalls: config.ToolCalls, modelResolver: config.ModelResolver,
-		audit: auditStore, now: config.Now, onError: config.OnError,
+		contextWindow: config.ContextWindow, maxOutputTokens: config.MaxOutputTokens,
+		contextStore: config.Context,
+		compactor:    config.Compactor, compactionEnabled: compactionEnabled,
+		calibrator: config.Calibrator, memory: config.Memory, todos: config.Todos, edits: config.Edits,
+		curatorCaller: config.MemoryCurator,
+		stream:        config.Stream, toolCalls: config.ToolCalls, modelResolver: config.ModelResolver,
+		mainModel: strings.TrimSpace(config.MainModel),
+		audit:     auditStore, now: config.Now, onError: config.OnError,
 		active: make(map[kernel.TaskID]context.CancelFunc),
 	}, nil
 }
@@ -305,6 +354,26 @@ func (s *Service) SetContextWindow(n int64) {
 		n = 0
 	}
 	s.contextWindow = n
+}
+
+// SetMaxOutputTokens updates the main model output cap used for packing (ADR-051).
+func (s *Service) SetMaxOutputTokens(n int64) {
+	if n < 0 {
+		n = 0
+	}
+	s.maxOutputTokens = n
+}
+
+// SetMainModel updates the daemon main wire id used on new compaction rows.
+func (s *Service) SetMainModel(model string) {
+	s.mainModel = strings.TrimSpace(model)
+}
+
+func (s *Service) compactionModel(pin string) string {
+	if m := strings.TrimSpace(pin); m != "" {
+		return m
+	}
+	return strings.TrimSpace(s.mainModel)
 }
 
 // Interrupt cancels an in-flight chat agent.Run for taskID (pause/cancel path).
@@ -402,10 +471,6 @@ func (s *Service) StartChat(ctx context.Context, request StartRequest) (StartRes
 		return StartResult{}, classify(err)
 	}
 
-	history, err := s.loadHistory(ctx, task.SessionID, task.ID, userText)
-	if err != nil {
-		return StartResult{}, err
-	}
 	grantIDs, err := s.issueChatGrants(ctx, plan)
 	if err != nil {
 		return StartResult{}, err
@@ -414,18 +479,17 @@ func (s *Service) StartChat(ctx context.Context, request StartRequest) (StartRes
 	slog.Info("chat start accepted", runlog.Attrs("chatsession", "start", "started", runlog.IDs{
 		SessionID: string(task.SessionID), TaskID: string(task.ID), RunID: string(runID),
 		PlanID: string(plan.PlanID), TraceID: request.TraceID,
-	}, "actor", actor, "execution_mode", string(mode), "history_messages", len(history))...)
+	}, "actor", actor, "execution_mode", string(mode))...)
 
-	// Capture for async execution.
+	// Capture for async execution. ContextView is assembled after pin inside executeChat (ADR-051).
 	execTask := task
 	execPlan := plan
 	execHash := planHash
 	execRun := runID
-	execHistory := history
 	execGrants := grantIDs
 	execUser := userText
 	execModelRef := modelRef
-	go s.executeChat(execTask, execPlan, execHash, execRun, execHistory, execGrants, execUser, execModelRef)
+	go s.executeChat(execTask, execPlan, execHash, execRun, execGrants, execUser, execModelRef)
 
 	return StartResult{Task: task, RunID: runID, PlanID: plan.PlanID}, nil
 }

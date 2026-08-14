@@ -32,11 +32,9 @@ func (r *Runner) packForProvider(
 		if budget < 1024 {
 			budget = 1024
 		}
-		// Use calibrated budget so packing targets real window fill.
 		if r.calibrator != nil {
 			ratio := r.calibrator.Ratio(model)
 			if ratio > 0 {
-				// If estimate overshoots, shrink budget so raw*ratio ≈ usable.
 				budget = int64(float64(budget)/ratio + 0.5)
 				if budget < 1024 {
 					budget = 1024
@@ -44,17 +42,34 @@ func (r *Runner) packForProvider(
 			}
 		}
 	}
-	res := contextpack.Pack(messages, contextpack.PackOptions{
-		Budget:             budget,
-		Model:              model,
-		MaxToolResultRunes: r.maxToolResultRunes,
-	})
-	rawEstimate = res.EstimateTokens + toolEst
+	_ = budget
+	// L1 only: never L2/L3 the assembled ContextView on the hot path (ADR-051).
+	maxRunes := r.maxToolResultRunes
+	if maxRunes <= 0 {
+		maxRunes = DefaultMaxToolResultRunes
+	}
+	out := cloneProviderMessages(messages)
+	_ = contextpack.TrimToolBodies(out, 0, maxRunes)
+	rawEstimate = contextpack.EstimateMessages(out) + toolEst
 	estimate = rawEstimate
 	if r.calibrator != nil {
 		estimate = r.calibrator.Apply(model, rawEstimate)
 	}
-	return res.Messages, rawEstimate, estimate, usable
+	return out, rawEstimate, estimate, usable
+}
+
+func cloneProviderMessages(in []providerapi.Message) []providerapi.Message {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]providerapi.Message, len(in))
+	for i, msg := range in {
+		out[i] = msg
+		if len(msg.ToolCalls) > 0 {
+			out[i].ToolCalls = append([]providerapi.ToolCall(nil), msg.ToolCalls...)
+		}
+	}
+	return out
 }
 
 func (r *Runner) observeUsage(
@@ -64,6 +79,7 @@ func (r *Runner) observeUsage(
 	usage providerapi.Usage,
 	rawEstimate, estimate, usable int64,
 	historyMsgs int,
+	compacted bool,
 ) {
 	prompt := int64(usage.PromptTokens())
 	if r.calibrator != nil && rawEstimate > 0 && prompt > 0 {
@@ -100,6 +116,7 @@ func (r *Runner) observeUsage(
 		EstimateSource:   contextpack.SourceLocalEstimate,
 		Ratio:            ratio,
 		Calibrated:       calibrated,
+		Compacted:        compacted,
 		HistoryMessages:  historyMsgs,
 		UpdatedAt:        time.Now().UTC().Format(time.RFC3339Nano),
 	}

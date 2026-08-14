@@ -120,3 +120,14 @@ func (r *Runner) restore(
 	}
 	return messages, seenCallIDs, result, false, nil
 }
+
+func messagesFromRecords(records []RunRecord) []providerapi.Message {
+	if len(records) == 0 {
+		return nil
+	}
+	out := make([]providerapi.Message, 0, len(records))
+	for _, rec := range records {
+		out = append(out, cloneMessage(rec.Message))
+	}
+	return out
+}

@@ -10,67 +10,66 @@ import (
 	"github.com/yyZe0122/yunmengze-agent/internal/contextpack"
 	"github.com/yyZe0122/yunmengze-agent/internal/corequery"
 	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
+	"github.com/yyZe0122/yunmengze-agent/internal/sessiontodo"
 	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
 
-func (s *Service) loadHistory(ctx context.Context, sessionID kernel.SessionID, currentTask kernel.TaskID, currentUser string) ([]providerapi.Message, error) {
-	// Wide fetch; token packing / compaction shrinks the provider view.
-	out, err := s.loadTranscriptMessages(ctx, sessionID, currentTask, currentUser)
+func (s *Service) buildContextView(
+	ctx context.Context,
+	sessionID kernel.SessionID,
+	currentTask kernel.TaskID,
+	currentUser string,
+	prefix []providerapi.Message,
+	window, maxOut int64,
+	model string,
+) (contextpack.ContextView, error) {
+	history, ids, err := s.loadTranscriptTail(ctx, sessionID, currentTask, currentUser)
 	if err != nil {
-		return nil, err
+		return contextpack.ContextView{}, err
 	}
-	return s.packSessionHistory(ctx, sessionID, out)
+	return s.assembleContextView(ctx, sessionID, prefix, history, ids, currentUser, window, maxOut, model)
 }
 
-func (s *Service) packSessionHistory(ctx context.Context, sessionID kernel.SessionID, history []providerapi.Message) ([]providerapi.Message, error) {
-	if len(history) == 0 {
-		return history, nil
-	}
-	// Work from the full transcript for pressure + optional re-summary; inject
-	// latest durable summary only after deciding whether to compact again.
-	full := history
-	prevSummary := ""
-	if s.contextStore != nil {
-		if c, err := s.contextStore.LatestCompaction(ctx, string(sessionID)); err == nil && strings.TrimSpace(c.Summary) != "" {
-			prevSummary = strings.TrimSpace(c.Summary)
+func (s *Service) assembleContextView(
+	ctx context.Context,
+	sessionID kernel.SessionID,
+	prefix, history []providerapi.Message,
+	historyIDs []string,
+	currentUser string,
+	window, maxOut int64,
+	model string,
+) (contextpack.ContextView, error) {
+	maxOut = contextpack.ClampMaxOutput(maxOut)
+	usable := contextpack.UsableWindow(window, maxOut, 0)
+	budget := contextpack.HistoryBudget(usable)
+
+	prev, throughID := s.latestCompaction(ctx, string(sessionID))
+	work := history
+	workIDs := historyIDs
+	if throughID != "" {
+		if cut := indexAfterID(historyIDs, throughID); cut >= 0 && cut <= len(history) {
+			work = history[cut:]
+			workIDs = historyIDs[cut:]
 		}
+		// through id slid out of the tail window: keep the whole tail.
+		// Do not keep-2 (that drops the middle between through and the last 500).
+	} else if prev != "" && len(history) > 4 {
+		_, tail := contextpack.SplitHeadTail(history, 2)
+		work = stripLeadingSystem(tail)
+		workIDs = nil
 	}
 
-	window := s.contextWindow
-	// Leave room for system + current user + tools + output inside agent pack.
-	usable := contextpack.UsableWindow(window, 8_192, 0)
-	budget := int64(0)
-	if usable > 0 {
-		// History should leave ~40% of usable for current turn + tools.
-		budget = usable * 60 / 100
-		if budget < 2048 {
-			budget = 2048
-		}
+	est := contextpack.EstimateMessages(work)
+	if s.calibrator != nil && strings.TrimSpace(model) != "" {
+		est = s.calibrator.Apply(model, est)
 	}
+	probe := contextpack.Pack(work, contextpack.PackOptions{Budget: budget, Model: model})
+	over := probe.OverBudget || (usable > 0 && contextpack.ShouldCompact(est, usable, probe.OverBudget))
 
-	// Provider-view candidate: summary + short tail when we already have a durable summary.
-	view := full
-	if prevSummary != "" {
-		_, tail := contextpack.SplitHeadTail(full, 2)
-		view = append([]providerapi.Message{{
-			Role:    providerapi.RoleSystem,
-			Content: "[Prior session context — compacted]\n" + prevSummary,
-		}}, stripLeadingSystem(tail)...)
-	}
-
-	raw := contextpack.EstimateMessages(view)
-	est := raw
-	if s.calibrator != nil {
-		est = s.calibrator.Apply("", raw)
-	}
-	packed := contextpack.Pack(view, contextpack.PackOptions{Budget: budget})
-	over := packed.OverBudget || (usable > 0 && contextpack.ShouldCompact(est, usable, packed.OverBudget))
-
-	if s.compactionEnabled && over && len(full) > 4 {
-		// Always split the full transcript so re-compact can run when the tail alone is huge.
-		head, tail := contextpack.SplitHeadTail(full, 2)
+	summary := prev
+	if s.compactionEnabled && over && len(history) > 4 {
+		head, tail := contextpack.SplitHeadTail(history, 2)
 		if len(head) > 0 {
-			// ADR-044: extract facts before head is replaced by summary.
 			if s.memory != nil {
 				s.memory.OnPreCompress(ctx, string(sessionID), head)
 			}
@@ -79,32 +78,129 @@ func (s *Service) packSessionHistory(ctx context.Context, sessionID kernel.Sessi
 				allowLLM = s.contextStore.AllowLLMCompact(ctx, string(sessionID), s.now(),
 					contextpack.DefaultAntiThrashWindow, contextpack.DefaultAntiThrashMax)
 			}
-			summary, source := s.summarizeHead(ctx, head, string(sessionID), "", allowLLM)
-			if s.contextStore != nil && strings.TrimSpace(summary) != "" {
-				id := "compact-" + deterministicID("session-compact", string(sessionID), summary[:min(64, len(summary))], s.now().UTC().Format(time.RFC3339Nano))
-				_ = s.contextStore.InsertCompaction(ctx, contextpack.Compaction{
-					ID: id, SessionID: string(sessionID), Summary: summary,
-					Model: "", CreatedAt: s.now().UTC().Format(time.RFC3339Nano),
-				})
-				if source == "llm" {
-					slog.Info("session compacted",
-						"component", "chatsession", "operation", "compact", "result", "succeeded",
-						"session_id", sessionID, "source", source)
-				} else if !allowLLM {
-					slog.Info("session compact anti-thrash; extractive only",
-						"component", "chatsession", "operation", "compact", "result", "warning",
-						"session_id", sessionID)
-				}
+			sum, source := s.summarizeHead(ctx, head, string(sessionID), "", allowLLM)
+			if strings.TrimSpace(sum) != "" {
+				summary = sum
+				through := lastHistoryID(historyIDs, head, history)
+				s.persistCompaction(ctx, sessionID, sum, through, s.compactionModel(model), source, allowLLM)
+				work = stripLeadingSystem(tail)
 			}
-			// System role so Pack L3 keeps the summary when dropping old user turns.
-			view = append([]providerapi.Message{{
-				Role:    providerapi.RoleSystem,
-				Content: "[Prior session context — compacted]\n" + summary,
-			}}, stripLeadingSystem(tail)...)
-			packed = contextpack.Pack(view, contextpack.PackOptions{Budget: budget})
 		}
 	}
-	return packed.Messages, nil
+
+	ephemeral := make([]providerapi.Message, 0, 2)
+	if block := s.todoEphemeral(ctx, sessionID); block != "" {
+		ephemeral = append(ephemeral, providerapi.Message{Role: providerapi.RoleSystem, Content: block})
+	}
+	if strings.TrimSpace(currentUser) != "" {
+		ephemeral = append(ephemeral, providerapi.Message{Role: providerapi.RoleUser, Content: currentUser})
+	}
+	view := contextpack.Build(contextpack.BuildInput{
+		Prefix:    prefix,
+		History:   work,
+		Ephemeral: ephemeral,
+		Summary:   summary,
+	}, contextpack.BuildOptions{Budget: budget, Model: model})
+	_ = workIDs
+	return view, nil
+}
+
+// packSessionHistory remains for tests: packs prior turns only (no Prefix/Ephemeral).
+func (s *Service) packSessionHistory(ctx context.Context, sessionID kernel.SessionID, history []providerapi.Message) ([]providerapi.Message, error) {
+	view, err := s.assembleContextView(ctx, sessionID, nil, history, nil, "", s.contextWindow, s.maxOutputTokens, "")
+	if err != nil {
+		return nil, err
+	}
+	out := append(append([]providerapi.Message(nil), view.Summary...), view.Tail...)
+	if len(out) == 0 {
+		return history, nil
+	}
+	return out, nil
+}
+
+func (s *Service) todoEphemeral(ctx context.Context, sessionID kernel.SessionID) string {
+	if s == nil || s.todos == nil || strings.TrimSpace(string(sessionID)) == "" {
+		return ""
+	}
+	items, err := s.todos.List(ctx, string(sessionID))
+	if err != nil || len(items) == 0 {
+		return ""
+	}
+	return sessiontodo.CompactBlock(items)
+}
+
+func (s *Service) latestCompaction(ctx context.Context, sessionID string) (summary, throughID string) {
+	if s.contextStore == nil {
+		return "", ""
+	}
+	c, err := s.contextStore.LatestCompaction(ctx, sessionID)
+	if err != nil || strings.TrimSpace(c.Summary) == "" {
+		return "", ""
+	}
+	return strings.TrimSpace(c.Summary), strings.TrimSpace(c.ThroughMessageID)
+}
+
+func (s *Service) persistCompaction(ctx context.Context, sessionID kernel.SessionID, summary, through, model, source string, allowLLM bool) {
+	if s.contextStore == nil || strings.TrimSpace(summary) == "" {
+		return
+	}
+	id := "compact-" + deterministicID("session-compact", string(sessionID), summary[:min(64, len(summary))], s.now().UTC().Format(time.RFC3339Nano))
+	_ = s.contextStore.InsertCompaction(ctx, contextpack.Compaction{
+		ID: id, SessionID: string(sessionID), Summary: summary,
+		ThroughMessageID: through, Model: model,
+		CreatedAt: s.now().UTC().Format(time.RFC3339Nano),
+	})
+	if source == "llm" {
+		slog.Info("session compacted",
+			"component", "chatsession", "operation", "compact", "result", "succeeded",
+			"session_id", sessionID, "source", source, "model", model)
+	} else if !allowLLM {
+		slog.Info("session compact anti-thrash; extractive only",
+			"component", "chatsession", "operation", "compact", "result", "warning",
+			"session_id", sessionID)
+	}
+}
+
+func indexAfterID(ids []string, through string) int {
+	if through == "" || len(ids) == 0 {
+		return -1
+	}
+	for i, id := range ids {
+		if id == through {
+			return i + 1
+		}
+	}
+	return -1
+}
+
+func lastHistoryID(ids []string, head, full []providerapi.Message) string {
+	if len(ids) == 0 || len(head) == 0 || len(ids) != len(full) {
+		return ""
+	}
+	last := head[len(head)-1]
+	for i := range full {
+		if sameTranscriptPoint(full[i], last) {
+			if i < len(ids) {
+				return ids[i]
+			}
+			break
+		}
+	}
+	idx := len(head) - 1
+	if idx >= 0 && idx < len(ids) {
+		return ids[idx]
+	}
+	return ""
+}
+
+func sameTranscriptPoint(a, b providerapi.Message) bool {
+	if a.Role != b.Role {
+		return false
+	}
+	if a.ToolCallID != "" || b.ToolCallID != "" {
+		return a.ToolCallID == b.ToolCallID
+	}
+	return a.Content == b.Content
 }
 
 // summarizeHead produces a head summary via LLM (optional) or extractive fallback.
@@ -120,7 +216,6 @@ func (s *Service) summarizeHead(ctx context.Context, head []providerapi.Message,
 		if merger, ok := s.compactor.(interface {
 			CompactSummaryWithPrevious(context.Context, []providerapi.Message, string) (string, error)
 		}); ok {
-			// Inject focus as a synthetic head note for CompactSummaryWithPrevious.
 			sumHead := head
 			if f := strings.TrimSpace(focus); f != "" {
 				sumHead = append([]providerapi.Message{{
@@ -165,8 +260,7 @@ func (s *Service) ForceCompact(ctx context.Context, sessionID kernel.SessionID, 
 	if s.contextStore == nil {
 		return CompactResult{}, fmt.Errorf("%w: context store unavailable", ErrUnavailable)
 	}
-	// Verify session exists via transcript load (empty is ok if session row exists later).
-	history, err := s.loadTranscriptMessages(ctx, sessionID, "", "")
+	history, ids, err := s.loadTranscriptTail(ctx, sessionID, "", "")
 	if err != nil {
 		return CompactResult{}, classify(err)
 	}
@@ -176,7 +270,6 @@ func (s *Service) ForceCompact(ctx context.Context, sessionID kernel.SessionID, 
 	}
 	head, tail := contextpack.SplitHeadTail(history, 2)
 	if len(head) == 0 {
-		// Still force a summary of everything except a minimal tail.
 		if len(history) > 2 {
 			head = history[:len(history)-2]
 			tail = history[len(history)-2:]
@@ -190,14 +283,16 @@ func (s *Service) ForceCompact(ctx context.Context, sessionID kernel.SessionID, 
 		return CompactResult{SessionID: string(sessionID), Source: "skipped"},
 			fmt.Errorf("%w: empty compact summary", ErrUnavailable)
 	}
+	through := lastHistoryID(ids, head, history)
 	id := "compact-" + deterministicID("session-compact", string(sessionID), summary[:min(64, len(summary))], s.now().UTC().Format(time.RFC3339Nano), "force", focus)
 	if err := s.contextStore.InsertCompaction(ctx, contextpack.Compaction{
 		ID: id, SessionID: string(sessionID), Summary: summary,
-		Model: "", CreatedAt: s.now().UTC().Format(time.RFC3339Nano),
+		ThroughMessageID: through, Model: s.compactionModel(""),
+		CreatedAt: s.now().UTC().Format(time.RFC3339Nano),
 	}); err != nil {
 		return CompactResult{}, err
 	}
-	_ = tail // durable only; next loadHistory rebuilds provider view
+	_ = tail
 	slog.Info("session force compacted",
 		"component", "chatsession", "operation", "force_compact", "result", "succeeded",
 		"session_id", sessionID, "source", source)
@@ -206,15 +301,13 @@ func (s *Service) ForceCompact(ctx context.Context, sessionID kernel.SessionID, 
 	}, nil
 }
 
-// loadTranscriptMessages maps durable transcript to provider messages (no packing).
-func (s *Service) loadTranscriptMessages(ctx context.Context, sessionID kernel.SessionID, currentTask kernel.TaskID, currentUser string) ([]providerapi.Message, error) {
-	msgs, err := s.transcript.SessionTranscript(ctx, sessionID, corequery.TranscriptOptions{
-		Page: corequery.Page{Limit: 500},
-	})
+func (s *Service) loadTranscriptTail(ctx context.Context, sessionID kernel.SessionID, currentTask kernel.TaskID, currentUser string) ([]providerapi.Message, []string, error) {
+	msgs, err := s.transcript.SessionTranscriptTail(ctx, sessionID, 500)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := make([]providerapi.Message, 0, len(msgs))
+	ids := make([]string, 0, len(msgs))
 	for _, msg := range msgs {
 		if msg.TaskID == currentTask && msg.Role == "user" && strings.HasPrefix(msg.ID, "task-user:") {
 			continue
@@ -222,25 +315,36 @@ func (s *Service) loadTranscriptMessages(ctx context.Context, sessionID kernel.S
 		if msg.TaskID == currentTask && strings.TrimSpace(msg.Content) == strings.TrimSpace(currentUser) && msg.Role == "user" {
 			continue
 		}
-		switch strings.ToLower(msg.Role) {
-		case "user":
-			if strings.TrimSpace(msg.Content) == "" {
-				continue
-			}
-			out = append(out, providerapi.Message{Role: providerapi.RoleUser, Content: msg.Content})
-		case "assistant":
-			m := providerapi.Message{Role: providerapi.RoleAssistant, Content: msg.Content, Thinking: msg.Thinking}
-			for _, tc := range msg.ToolCalls {
-				m.ToolCalls = append(m.ToolCalls, providerapi.ToolCall{ID: tc.ID, Name: tc.Name, Arguments: tc.Arguments})
-			}
-			out = append(out, m)
-		case "tool":
-			out = append(out, providerapi.Message{
-				Role: providerapi.RoleTool, Content: msg.Content, ToolCallID: msg.ToolCallID,
-			})
+		mapped, ok := mapTranscript(msg)
+		if !ok {
+			continue
 		}
+		out = append(out, mapped)
+		ids = append(ids, msg.ID)
 	}
-	return out, nil
+	return out, ids, nil
+}
+
+func mapTranscript(msg corequery.TranscriptMessage) (providerapi.Message, bool) {
+	switch strings.ToLower(msg.Role) {
+	case "user":
+		if strings.TrimSpace(msg.Content) == "" {
+			return providerapi.Message{}, false
+		}
+		return providerapi.Message{Role: providerapi.RoleUser, Content: msg.Content}, true
+	case "assistant":
+		m := providerapi.Message{Role: providerapi.RoleAssistant, Content: msg.Content, Thinking: msg.Thinking}
+		for _, tc := range msg.ToolCalls {
+			m.ToolCalls = append(m.ToolCalls, providerapi.ToolCall{ID: tc.ID, Name: tc.Name, Arguments: tc.Arguments})
+		}
+		return m, true
+	case "tool":
+		return providerapi.Message{
+			Role: providerapi.RoleTool, Content: msg.Content, ToolCallID: msg.ToolCallID,
+		}, true
+	default:
+		return providerapi.Message{}, false
+	}
 }
 
 func stripLeadingSystem(msgs []providerapi.Message) []providerapi.Message {

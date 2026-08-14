@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yyZe0122/yunmengze-agent/internal/contextpack"
 	coresqlite "github.com/yyZe0122/yunmengze-agent/internal/store/sqlite"
 	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 	"github.com/yyZe0122/yunmengze-agent/pkg/toolapi"
@@ -484,6 +485,54 @@ func newTestRunner(t *testing.T, provider StreamingProvider, broker ToolBroker, 
 	return runner
 }
 
+func TestPackForProviderDoesNotDropPrefixOrCurrentUser(t *testing.T) {
+	store, _, _ := openAgentFixture(t)
+	runner := newTestRunner(t, &sequenceProvider{}, &recordingBroker{}, store)
+	prefix := "AGENTS-keep-" + strings.Repeat("P", 200)
+	current := "current-user-keep"
+	msgs := []providerapi.Message{
+		{Role: providerapi.RoleSystem, Content: prefix},
+		{Role: providerapi.RoleUser, Content: "old"},
+		{Role: providerapi.RoleAssistant, Content: strings.Repeat("A", 4_000)},
+		{Role: providerapi.RoleUser, Content: current},
+	}
+	packed, _, _, _ := runner.packForProvider(msgs, nil, RunRequest{ContextWindow: 2_000, MaxOutputTokens: 256}, "test-model", 256)
+	if len(packed) == 0 || packed[0].Content != prefix {
+		t.Fatalf("prefix dropped: %+v", packed)
+	}
+	if packed[len(packed)-1].Content != current {
+		t.Fatalf("current user dropped: %+v", packed[len(packed)-1])
+	}
+}
+
+func TestRebuildProviderViewKeepsTodoEphemeral(t *testing.T) {
+	store, _, _ := openAgentFixture(t)
+	runner := newTestRunner(t, &sequenceProvider{}, &recordingBroker{}, store)
+	todo := contextpack.TodoSystemPrefix + "\n- [in_progress] patch fs.go"
+	msgs := []providerapi.Message{
+		{Role: providerapi.RoleSystem, Content: "sys"},
+		{Role: providerapi.RoleUser, Content: "old1"},
+		{Role: providerapi.RoleAssistant, Content: "a1"},
+		{Role: providerapi.RoleUser, Content: "old2"},
+		{Role: providerapi.RoleAssistant, Content: "a2"},
+		{Role: providerapi.RoleUser, Content: "old3"},
+		{Role: providerapi.RoleAssistant, Content: "a3"},
+		{Role: providerapi.RoleSystem, Content: todo},
+		{Role: providerapi.RoleUser, Content: "now"},
+	}
+	out := runner.rebuildProviderView(context.Background(), msgs, RunRequest{ContextWindow: 128_000}, "test-model")
+	found := false
+	for _, m := range out {
+		if contextpack.IsTodoSystem(m) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("todo block missing after rebuild: %+v", out)
+	}
+}
+
 func testRunRequest() RunRequest {
 	return RunRequest{
 		RunID: "run-agent", TaskID: "task-agent", PlanID: "plan-agent", PlanHash: "hash-agent",
@@ -708,4 +757,13 @@ func openAgentFixture(t *testing.T) (*RecordStore, *sql.DB, func()) {
 		t.Fatal(err)
 	}
 	return store, db, closeDB
+}
+
+func TestProjectToolResultIncludesNameAndPath(t *testing.T) {
+	got := projectToolResult("fs_read", providerapi.Message{
+		Content: `{"path":"/tmp/ws/a.go","content":"package main"}`,
+	})
+	if !strings.Contains(got, "fs_read") || !strings.Contains(got, "/tmp/ws/a.go") {
+		t.Fatalf("got %q", got)
+	}
 }

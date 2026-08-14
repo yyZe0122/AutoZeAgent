@@ -19,6 +19,7 @@ type Endpoint struct {
 	Provider      agent.StreamingProvider
 	Model         string
 	ContextWindow int64
+	MaxTokens     int64
 }
 
 // Resolver builds and caches endpoints for selection refs (provider/model).
@@ -72,6 +73,7 @@ func (r *Resolver) Resolve(pin string) (*Endpoint, error) {
 		Provider:      stream,
 		Model:         resolved.ModelID,
 		ContextWindow: resolved.ContextWindow,
+		MaxTokens:     resolved.MaxTokens,
 	}
 	r.mu.Lock()
 	r.cache[pin] = ep

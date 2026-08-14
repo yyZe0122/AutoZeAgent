@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/yyZe0122/yunmengze-agent/internal/runmeta"
@@ -91,9 +92,11 @@ func (r *Runner) executeToolCallsSerial(ctx context.Context, request RunRequest,
 		if err != nil {
 			return nil, nil, err
 		}
-		if _, err := r.records.AppendToolResult(ctx, request.RunID, toolMessage); err != nil {
+		rec, err := r.records.AppendToolResult(ctx, request.RunID, toolMessage)
+		if err != nil {
 			return nil, nil, err
 		}
+		r.indexToolResult(ctx, request, call.Name, rec)
 		outMsgs = append(outMsgs, toolMessage)
 		outResps = append(outResps, toolResponse)
 	}
@@ -125,11 +128,58 @@ func (r *Runner) executeToolCallsParallel(ctx context.Context, request RunReques
 		if results[i].err != nil {
 			return nil, nil, results[i].err
 		}
-		if _, err := r.records.AppendToolResult(ctx, request.RunID, results[i].msg); err != nil {
+		rec, err := r.records.AppendToolResult(ctx, request.RunID, results[i].msg)
+		if err != nil {
 			return nil, nil, err
 		}
+		r.indexToolResult(ctx, request, calls[i].Name, rec)
 		outMsgs = append(outMsgs, results[i].msg)
 		outResps = append(outResps, results[i].resp)
 	}
 	return outMsgs, outResps, nil
+}
+
+func (r *Runner) indexToolResult(ctx context.Context, request RunRequest, toolName string, rec RunRecord) {
+	if r == nil || r.transcript == nil || strings.TrimSpace(request.SessionID) == "" {
+		return
+	}
+	body := projectToolResult(toolName, rec.Message)
+	if body == "" {
+		return
+	}
+	created := ""
+	if !rec.CreatedAt.IsZero() {
+		created = rec.CreatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00")
+	}
+	_ = r.transcript.IndexTranscriptRecord(ctx, request.SessionID, request.RunID, rec.Position, "tool", body, created)
+}
+
+func projectToolResult(toolName string, msg providerapi.Message) string {
+	toolName = strings.TrimSpace(toolName)
+	content := strings.TrimSpace(msg.Content)
+	if content == "" {
+		return ""
+	}
+	path := toolResultPath(content)
+	var b strings.Builder
+	if toolName != "" {
+		b.WriteString(toolName)
+		b.WriteByte(' ')
+	}
+	if path != "" {
+		b.WriteString(path)
+		b.WriteByte(' ')
+	}
+	b.WriteString(content)
+	return b.String()
+}
+
+func toolResultPath(content string) string {
+	var payload struct {
+		Path string `json:"path"`
+	}
+	if json.Unmarshal([]byte(content), &payload) == nil {
+		return strings.TrimSpace(payload.Path)
+	}
+	return ""
 }

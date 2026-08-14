@@ -83,7 +83,11 @@ func toolResultContent(response toolapi.Response) (string, error) {
 		return string(response.Output), nil
 	}
 	if response.Artifact != nil {
-		encoded, err := json.Marshal(map[string]any{"artifact": response.Artifact})
+		encoded, err := json.Marshal(map[string]any{
+			"truncated":   true,
+			"artifact_id": response.Artifact.ID,
+			"artifact":    response.Artifact,
+		})
 		if err != nil {
 			return "", err
 		}

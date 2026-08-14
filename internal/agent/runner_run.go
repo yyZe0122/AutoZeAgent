@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/yyZe0122/yunmengze-agent/internal/contextpack"
 	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
 
@@ -47,9 +48,17 @@ func (r *Runner) Run(ctx context.Context, request RunRequest) (Result, error) {
 			"record_count", len(records), "error", err)
 		return result, err
 	}
-	// Prefix prior session turns for the provider; they are not part of this run's records.
-	if len(request.History) > 0 {
-		messages = append(append([]providerapi.Message(nil), request.History...), messages...)
+	// Provider view is Prefix+Summary+Tail+Ephemeral (ADR-051). Records stay Prefix+current user.
+	if len(request.ProviderMessages) > 0 {
+		messages = append([]providerapi.Message(nil), request.ProviderMessages...)
+		if !completed {
+			// Recovery may have appended this-run assistant/tool after the persisted prefix.
+			persistLen := len(request.Messages)
+			if persistLen < len(records) {
+				extra := messagesFromRecords(records[persistLen:])
+				messages = append(messages, extra...)
+			}
+		}
 	}
 	slog.Info("agent history restored", "component", "agent", "operation", "restore", "result", "succeeded",
 		"session_id", request.SessionID, "run_id", request.RunID, "task_id", request.TaskID,
@@ -78,8 +87,12 @@ func (r *Runner) Run(ctx context.Context, request RunRequest) (Result, error) {
 	if request.ContextWindow <= 0 && roleWindow > 0 {
 		request.ContextWindow = roleWindow
 	}
+	if r.useModelOverride(request) && request.OverrideMaxOutputTokens > 0 {
+		request.MaxOutputTokens = contextpack.ClampMaxOutput(request.OverrideMaxOutputTokens)
+	}
 	var stepSigs []string
 	toolsDisabled := false
+	compactedTurn := request.Compacted
 	for result.Iterations < r.maxIterations {
 		if err := ctx.Err(); err != nil {
 			return result, err
@@ -120,7 +133,8 @@ func (r *Runner) Run(ctx context.Context, request RunRequest) (Result, error) {
 				"component", "agent", "operation", "overflow_retry", "result", "warning",
 				"session_id", request.SessionID, "run_id", request.RunID, "task_id", request.TaskID, "error", err,
 			)
-			messages = r.compactMessagesForOverflow(ctx, messages)
+			messages = r.rebuildProviderView(ctx, messages, request, model)
+			compactedTurn = true
 			loopMsgs = messages
 			if toolsDisabled || result.Iterations+1 >= r.maxIterations {
 				loopMsgs = append(append([]providerapi.Message(nil), messages...), providerapi.Message{
@@ -157,7 +171,7 @@ func (r *Runner) Run(ctx context.Context, request RunRequest) (Result, error) {
 			slog.Error("provider iteration failed", logArgs...)
 			return result, err
 		}
-		r.observeUsage(ctx, request, model, response.Usage, packRaw, packEst, usable, len(packed))
+		r.observeUsage(ctx, request, model, response.Usage, packRaw, packEst, usable, len(packed), compactedTurn)
 		slog.Info("provider iteration completed",
 			"component", "provider", "operation", "stream", "result", "succeeded",
 			"session_id", request.SessionID, "run_id", request.RunID, "task_id", request.TaskID,
@@ -242,9 +256,14 @@ func (r *Runner) Run(ctx context.Context, request RunRequest) (Result, error) {
 			return result, err
 		}
 		result.ToolCalls = append(result.ToolCalls, toolResps...)
+		from := len(messages)
 		messages = append(messages, toolMsgs...)
-		// Mid-turn precheck: large tool results can blow the window before the next Stream.
-		messages = r.maybeCompactMidTurn(ctx, messages, request, model)
+		// Mid-turn: incremental L1/L2 on new tool bodies; rebuild via Build if still over.
+		var midCompact bool
+		messages, midCompact = r.maybeCompactMidTurn(ctx, messages, request, model, from)
+		if midCompact {
+			compactedTurn = true
+		}
 	}
 	slog.Warn("agent iteration limit reached", "component", "agent", "operation", "run", "result", "failed",
 		"session_id", request.SessionID, "run_id", request.RunID, "task_id", request.TaskID,

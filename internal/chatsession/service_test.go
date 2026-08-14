@@ -744,13 +744,13 @@ func TestStartChatPlanModeReadOnlyGrants(t *testing.T) {
 	fake.mu.Unlock()
 	for _, name := range req.AllowedTools {
 		switch name {
-		case "fs_read", "fs_list", "fs_stat", "fs_glob", "fs_grep", "task", "memory_search", "session_search", "skills_list", "skill_view":
+		case "fs_read", "fs_list", "fs_stat", "fs_glob", "fs_grep", "task", "memory_search", "session_search", "skills_list", "skill_view", "todo_list", "todo_write":
 		default:
 			t.Fatalf("plan mode must not allow %q; tools=%v", name, req.AllowedTools)
 		}
 	}
-	if len(req.AllowedTools) != 10 {
-		t.Fatalf("plan tools = %v, want read/list/stat/glob/grep/skills_list/skill_view/task/memory_search/session_search", req.AllowedTools)
+	if len(req.AllowedTools) != 12 {
+		t.Fatalf("plan tools = %v, want read/list/stat/glob/grep/skills_list/skill_view/task/memory_search/session_search/todo_list/todo_write", req.AllowedTools)
 	}
 	if len(req.Messages) < 1 || req.Messages[0].Role != providerapi.RoleSystem {
 		t.Fatalf("messages = %#v", req.Messages)
@@ -822,7 +822,7 @@ func TestStartChatAgentHighRiskToolsConfig(t *testing.T) {
 	fake.mu.Unlock()
 	want := map[string]bool{
 		"git_status": true, "git_diff": true, "git_add": true, "git_commit": true,
-		"process_exec": true,
+		"process_exec": true, "process_shell": true,
 	}
 	for _, name := range tools {
 		delete(want, name)
@@ -857,8 +857,64 @@ func TestStartChatAgentHighRiskToolsConfig(t *testing.T) {
 	planTools := fake2.request.AllowedTools
 	fake2.mu.Unlock()
 	for _, name := range planTools {
-		if name == "process_exec" || strings.HasPrefix(name, "git_") {
+		if name == "process_exec" || name == "process_shell" || strings.HasPrefix(name, "git_") {
 			t.Fatalf("plan mode must not allow %q; tools=%v", name, planTools)
+		}
+	}
+}
+
+func TestStartChatCronNeverGetsProcessGrant(t *testing.T) {
+	ctx := context.Background()
+	database, err := storesqlite.Open(ctx, t.TempDir()+"/core.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	db := database.SQL()
+	repo, err := kernel.NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvals, err := approval.NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queries, err := corequery.New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
+	session, err := repo.CreateSession(ctx, "session-cron", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := repo.CreateTaskWithSkillSnapshot(ctx, "scheduled_abc", session.ID, "job", "job", nil, "", kernel.ExecutionModeAgent, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeAgent{done: make(chan struct{})}
+	svc, err := New(Config{
+		DB: db, Repository: repo, Approvals: approvals, Agent: fake, Transcript: queries,
+		WorkspaceRoots: []string{t.TempDir()}, AllowProcess: true,
+		Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.StartChat(ctx, StartRequest{Task: task, Actor: "scheduler", UserText: "job"}); err != nil {
+		t.Fatalf("StartChat: %v", err)
+	}
+	select {
+	case <-fake.done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("agent.Run not called")
+	}
+	fake.mu.Lock()
+	tools := fake.request.AllowedTools
+	fake.mu.Unlock()
+	for _, name := range tools {
+		if name == "process_exec" || name == "process_shell" {
+			t.Fatalf("cron must not grant %s: %v", name, tools)
 		}
 	}
 }

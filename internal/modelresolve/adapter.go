@@ -20,7 +20,8 @@ func (c chatResolver) ResolveOrFallback(pin string) *chatsession.ModelPin {
 		return nil
 	}
 	return &chatsession.ModelPin{
-		Ref: ep.Ref, Provider: ep.Provider, Model: ep.Model, ContextWindow: ep.ContextWindow,
+		Ref: ep.Ref, Provider: ep.Provider, Model: ep.Model,
+		ContextWindow: ep.ContextWindow, MaxTokens: ep.MaxTokens,
 	}
 }
 
@@ -33,6 +34,7 @@ func (c chatResolver) ResolveStrict(pin string) (*chatsession.ModelPin, error) {
 		return nil, nil
 	}
 	return &chatsession.ModelPin{
-		Ref: ep.Ref, Provider: ep.Provider, Model: ep.Model, ContextWindow: ep.ContextWindow,
+		Ref: ep.Ref, Provider: ep.Provider, Model: ep.Model,
+		ContextWindow: ep.ContextWindow, MaxTokens: ep.MaxTokens,
 	}, nil
 }

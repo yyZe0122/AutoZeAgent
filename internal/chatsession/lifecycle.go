@@ -20,6 +20,7 @@ import (
 	"github.com/yyZe0122/yunmengze-agent/internal/applicationerror"
 	"github.com/yyZe0122/yunmengze-agent/internal/approval"
 	"github.com/yyZe0122/yunmengze-agent/internal/audit"
+	"github.com/yyZe0122/yunmengze-agent/internal/contextpack"
 	"github.com/yyZe0122/yunmengze-agent/internal/corequery"
 	"github.com/yyZe0122/yunmengze-agent/internal/injectscan"
 	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
@@ -33,7 +34,6 @@ func (s *Service) executeChat(
 	plan approval.PlanDocument,
 	planHash string,
 	runID kernel.RunID,
-	history []providerapi.Message,
 	grantIDs map[string][]string,
 	userText string,
 	modelRef string,
@@ -70,29 +70,50 @@ func (s *Service) executeChat(
 	if kernel.NormalizeExecutionMode(string(task.ExecutionMode)) == kernel.ExecutionModePlan {
 		sysPrompt = chatSystemPromptPlan
 	}
-	messages := []providerapi.Message{
+	prefix := []providerapi.Message{
 		{Role: providerapi.RoleSystem, Content: sysPrompt},
 	}
 	if agentsMsg := s.agentsSystemMessage(ctx, task); agentsMsg != nil {
-		messages = append(messages, *agentsMsg)
+		prefix = append(prefix, *agentsMsg)
 	}
 	if skillMsg := s.skillSystemMessage(ctx, task.ID); skillMsg != nil {
-		messages = append(messages, *skillMsg)
+		prefix = append(prefix, *skillMsg)
 	}
 	if s.memory != nil {
 		// Hermes-style frozen snapshot: built once per session until /refresh-memory.
 		block := s.memory.FrozenSystemBlock(ctx, string(task.SessionID))
 		if block != "" {
-			messages = append(messages, providerapi.Message{Role: providerapi.RoleSystem, Content: block})
+			prefix = append(prefix, providerapi.Message{Role: providerapi.RoleSystem, Content: block})
 		}
 	}
-	messages = append(messages, providerapi.Message{Role: providerapi.RoleUser, Content: userText})
-	// Plan budget MaxTokens is a run ceiling; model output cap is separate.
-	// Prefer a sane output cap so usable window is not zeroed by huge MaxTokens.
-	maxOut := plan.Budget.MaxTokens
-	if maxOut <= 0 || maxOut > 16_384 {
-		maxOut = 8_192
+	// H7 job pin > O4 session prefer > daemon main (not global SelectModel). Pin before Build (ADR-051).
+	pin := s.resolveRunModelPin(ctx, task.SessionID, modelRef)
+	window := s.contextWindow
+	maxOut := contextpack.ClampMaxOutput(s.maxOutputTokens)
+	modelID := ""
+	if pin != nil {
+		if pin.ContextWindow > 0 {
+			window = pin.ContextWindow
+		}
+		if pin.MaxTokens > 0 {
+			maxOut = contextpack.ClampMaxOutput(pin.MaxTokens)
+		}
+		modelID = pin.Model
+		src := "session"
+		if strings.TrimSpace(modelRef) != "" {
+			src = "job"
+		}
+		slog.Info("chat run using model pin", runlog.Attrs("chatsession", "execute", "model_pin", runlog.IDs{
+			SessionID: string(task.SessionID), TaskID: string(task.ID), RunID: string(runID),
+		}, "source", src, "pin", pin.Ref, "model", pin.Model)...)
 	}
+	view, err := s.buildContextView(ctx, task.SessionID, task.ID, userText, prefix, window, maxOut, modelID)
+	if err != nil {
+		s.failChat(context.WithoutCancel(ctx), task, runID, stepID, err)
+		s.onError(err)
+		return
+	}
+	persist := append(append([]providerapi.Message(nil), prefix...), providerapi.Message{Role: providerapi.RoleUser, Content: userText})
 	// Preserve non-interactive actors (scheduler/job) for Broker permission policy (ADR-043).
 	runActor := "agent"
 	if strings.HasPrefix(string(task.ID), "scheduled_") {
@@ -102,27 +123,20 @@ func (s *Service) executeChat(
 		RunID: string(runID), TaskID: string(task.ID), SessionID: string(task.SessionID),
 		PlanID: string(plan.PlanID), PlanHash: planHash, StepID: string(stepID),
 		Actor: runActor, TraceID: string(runID),
-		Messages: messages, History: history,
+		Messages: persist, ProviderMessages: view.Messages(),
 		AllowedTools: allowed, CapabilityGrantIDs: grantIDs,
 		MaxOutputTokens: maxOut, MaxTotalTokens: plan.Budget.MaxTokens,
 		MaxCostMicros: plan.Budget.MaxCostMicros, ToolTimeoutMillis: timeoutMS,
-		ContextWindow: s.contextWindow,
+		ContextWindow: window,
+		Compacted:     view.Compacted,
 	}
-	// H7 job pin > O4 session prefer > daemon main (not global SelectModel).
-	if pin := s.resolveRunModelPin(ctx, task.SessionID, modelRef); pin != nil {
+	if pin != nil {
 		runReq.ModelOverride = pin.Model
 		runReq.OverrideProvider = pin.Provider
 		runReq.OverrideContextWindow = pin.ContextWindow
-		if pin.ContextWindow > 0 {
-			runReq.ContextWindow = pin.ContextWindow
+		if pin.MaxTokens > 0 {
+			runReq.OverrideMaxOutputTokens = pin.MaxTokens
 		}
-		src := "session"
-		if strings.TrimSpace(modelRef) != "" {
-			src = "job"
-		}
-		slog.Info("chat run using model pin", runlog.Attrs("chatsession", "execute", "model_pin", runlog.IDs{
-			SessionID: string(task.SessionID), TaskID: string(task.ID), RunID: string(runID),
-		}, "source", src, "pin", pin.Ref, "model", pin.Model)...)
 	}
 	result, err := s.agent.Run(ctx, runReq)
 	if err != nil {
