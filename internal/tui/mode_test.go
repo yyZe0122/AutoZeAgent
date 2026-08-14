@@ -9,7 +9,17 @@ import (
 
 	"github.com/yyZe0122/yunmengze-agent/internal/gatewayclient"
 	"github.com/yyZe0122/yunmengze-agent/internal/platform/paths"
+	"github.com/yyZe0122/yunmengze-agent/internal/version"
 )
+
+func TestHeaderShowsAgentVersion(t *testing.T) {
+	m := newModel(paths.ModeUser, &fakeGateway{})
+	m.width, m.height = 80, 24
+	got := m.renderHeader()
+	if !strings.Contains(got, version.Version) {
+		t.Fatalf("header missing version %q: %s", version.Version, got)
+	}
+}
 
 func TestTabTogglesDraftMode(t *testing.T) {
 	m := newModel(paths.ModeUser, &fakeGateway{})

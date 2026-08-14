@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/yyZe0122/yunmengze-agent/internal/gatewayclient"
+	"github.com/yyZe0122/yunmengze-agent/internal/version"
 )
 
 func (m model) themeCommandCmd(arg string) tea.Cmd {
@@ -102,7 +103,11 @@ func (m model) statusCommandCmd() tea.Cmd {
 		}
 		modelCfg, _ := m.gateway.ModelConfig(ctx)
 		var b strings.Builder
-		fmt.Fprintf(&b, "health ok=%v model=%s draft=%s", health.OK, modelCfg.Model, m.draftMode)
+		ver := strings.TrimSpace(health.Core.Version)
+		if ver == "" {
+			ver = version.Version
+		}
+		fmt.Fprintf(&b, "health ok=%v version=%s model=%s draft=%s", health.OK, ver, modelCfg.Model, m.draftMode)
 		if m.sessionID != "" && m.sessionID != "…" {
 			fmt.Fprintf(&b, " session=%s", shortID(string(m.sessionID)))
 			if pref := m.sessionPreferredModel(ctx); pref != "" {

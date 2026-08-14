@@ -68,8 +68,7 @@ func (m model) applyRefresh(msg refreshDoneMsg) (tea.Model, tea.Cmd) {
 			m.taskContext = msg.taskContext
 			m.contextOK = true
 		}
-		// Authoritative transcript clears live typewriter draft.
-		if msg.messages != nil {
+		if msg.messages != nil && !m.keepLiveDraft() {
 			m.resetLiveStream()
 		}
 		m.timeline = buildChatTimeline(m.messages, m.task, m.plan, m.runs)
@@ -80,7 +79,7 @@ func (m model) applyRefresh(msg refreshDoneMsg) (tea.Model, tea.Cmd) {
 			m.timeline = patchRunningStatus(m.timeline, runningStatusTitle(m.task, m.pendingPermCount))
 		}
 		if m.liveContent != "" || m.liveThinking != "" || len(m.liveTools) > 0 {
-			m.timeline = appendLiveDraft(m.timeline, m.liveThinking, m.liveContent, m.liveTools)
+			m.timeline = upsertLiveDraft(m.timeline, m.liveThinking, m.liveContent, m.liveTools)
 		}
 		m.lastRunPoll = time.Now()
 		if n := m.listLen(); n > 0 && m.selectedIdx >= n {
@@ -106,6 +105,41 @@ func (m model) applyRefresh(msg refreshDoneMsg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.pollPermissionsCmd(autoOpen))
 	}
 	return m, tea.Batch(cmds...)
+}
+
+func (m model) keepLiveDraft() bool {
+	if m.liveContent == "" && m.liveThinking == "" && len(m.liveTools) == 0 {
+		return false
+	}
+	if m.runActivity() != activityActive {
+		return false
+	}
+	return !assistantTranscriptCoversLive(m.messages, m.liveContent, m.liveRunID)
+}
+
+func assistantTranscriptCoversLive(messages []gatewayclient.TranscriptMessage, live string, liveRun gatewayclient.RunID) bool {
+	live = strings.TrimRight(live, "\n")
+	if live == "" {
+		return false
+	}
+	start := 0
+	for i := len(messages) - 1; i >= 0; i-- {
+		if strings.ToLower(messages[i].Role) == "user" {
+			start = i + 1
+			break
+		}
+	}
+	for i := len(messages) - 1; i >= start; i-- {
+		if strings.ToLower(messages[i].Role) != "assistant" {
+			continue
+		}
+		if liveRun != "" && messages[i].RunID != "" && messages[i].RunID != liveRun {
+			continue
+		}
+		got := strings.TrimRight(messages[i].Content, "\n")
+		return got != "" && (got == live || strings.HasPrefix(got, live))
+	}
+	return false
 }
 
 func (m model) applyCommand(msg commandDoneMsg) (tea.Model, tea.Cmd) {
@@ -179,7 +213,7 @@ func (m model) applyCommand(msg commandDoneMsg) (tea.Model, tea.Cmd) {
 			m.timeline = append(append([]timelineItem(nil), m.journeyRows...), m.timeline...)
 		}
 		if m.liveContent != "" || m.liveThinking != "" || len(m.liveTools) > 0 {
-			m.timeline = appendLiveDraft(m.timeline, m.liveThinking, m.liveContent, m.liveTools)
+			m.timeline = upsertLiveDraft(m.timeline, m.liveThinking, m.liveContent, m.liveTools)
 		}
 	}
 	submitAfter := strings.TrimSpace(msg.submitAfter)

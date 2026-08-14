@@ -113,7 +113,7 @@ type model struct {
 	plan             *gatewayclient.Plan
 	runs             []gatewayclient.Run
 	messages         []gatewayclient.TranscriptMessage
-	// live assistant draft from model-stream (typewriter); cleared on complete/refresh.
+	// live assistant draft from model-stream (typewriter); cleared on complete or when this turn's transcript covers it.
 	liveContent   string
 	liveThinking  string
 	liveTools     []contentBlock // streamed tool_call lines as blocks

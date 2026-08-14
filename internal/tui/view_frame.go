@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/yyZe0122/yunmengze-agent/internal/version"
 )
 
 func (m model) View() string {
@@ -53,7 +55,7 @@ func (m model) View() string {
 }
 
 func (m model) renderHeader() string {
-	parts := []string{styleTitle.Render("ymz")}
+	parts := []string{styleTitle.Render("ymz " + version.Version)}
 	if m.modelName != "" {
 		parts = append(parts, styleMuted.Render(truncate(m.modelName, 28)))
 	}
@@ -179,10 +181,6 @@ func (m model) renderFooter() string {
 	return m.renderContextStrip()
 }
 
-func (m model) renderStatusLine() string {
-	return m.renderFooter()
-}
-
 func (m model) renderMetricsPanel(height int) string {
 	var b strings.Builder
 	b.WriteString(styleMetricsTitle.Render("context") + "\n\n")
@@ -259,10 +257,6 @@ func (m model) renderMetricsPanel(height int) string {
 	return content
 }
 
-func (m model) renderContextPanel(height int) string {
-	return m.renderMetricsPanel(height)
-}
-
 func (m model) budgetSummary() string {
 	b, ok := planBudgetOf(m.plan)
 	if !ok {
@@ -286,18 +280,18 @@ func (m *model) syncViewport(force bool) {
 	content := renderSessionView(m)
 	if !force && content == m.viewportContent {
 		if m.stickBottom {
-			m.stickViewportBottom()
+			m.pinViewportBottom()
 		}
 		return
 	}
 	m.viewportContent = content
 	m.viewport.SetContent(content)
 	if m.stickBottom {
-		m.stickViewportBottom()
+		m.pinViewportBottom()
 	}
 }
 
-func (m *model) stickViewportBottom() {
+func (m *model) pinViewportBottom() {
 	total := m.viewport.TotalLineCount()
 	h := m.viewport.Height
 	if h < 1 {
@@ -306,6 +300,9 @@ func (m *model) stickViewportBottom() {
 	y := total - h
 	if y < 0 {
 		y = 0
+	}
+	if m.viewport.YOffset == y {
+		return
 	}
 	m.viewport.SetYOffset(y)
 }

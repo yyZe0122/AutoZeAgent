@@ -429,17 +429,20 @@ func renderBlock(bl contentBlock, exp expandState, opts renderOpts, parent timel
 
 	case blockReply:
 		text := bl.Text
+		if bl.Live {
+			if text == "" {
+				return renderPlainBlock(text, styleTLReply, w)
+			}
+			if opts.Stream == nil {
+				return renderPlainBlock(text, styleTLReply, w)
+			}
+			return renderPlainBlock(opts.Stream.render(text, w, opts.Theme), styleTLReply, w)
+		}
 		if !open && needsFold(text, timelineBodyMaxLines, timelineBodyMaxChars) {
 			text = foldHead(text, timelineBodyMaxLines, timelineBodyMaxChars)
 			return renderPlainBlock(text, styleTLReply, w)
 		}
 		if text != "" {
-			if bl.Live {
-				if opts.Stream == nil {
-					return renderPlainBlock(text, styleTLReply, w)
-				}
-				return renderPlainBlock(opts.Stream.render(text, w, opts.Theme), styleTLReply, w)
-			}
 			return renderPlainBlock(renderMarkdown(text, w, opts.Theme), styleTLReply, w)
 		}
 		return renderPlainBlock(text, styleTLReply, w)

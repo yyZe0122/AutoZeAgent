@@ -77,10 +77,6 @@ func patchRunningStatus(items []timelineItem, title string) []timelineItem {
 	return items
 }
 
-func appendLiveDraft(items []timelineItem, thinking, content string, liveTools []contentBlock) []timelineItem {
-	return upsertLiveDraft(items, thinking, content, liveTools)
-}
-
 func upsertLiveDraft(items []timelineItem, thinking, content string, liveTools []contentBlock) []timelineItem {
 	think := strings.TrimSpace(thinking)
 	content = strings.TrimRight(content, "\n")

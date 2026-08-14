@@ -2,7 +2,7 @@
 
 - 状态：Accepted
 - 日期：2026-07-14
-- 更新：2026-08-14（TUI 折叠仅键盘；划选复制；/new 离焦）
+- 更新：2026-08-14（TUI 折叠仅键盘；划选复制；/new 离焦；流式正文不折 + mid-turn 保留 typewriter）
 
 ## 决策
 
@@ -60,9 +60,10 @@ internal/tui             Bubble Tea UI；消费窄 `tui.Gateway`（由 gatewaycl
                           分发：`cmds.go` + `cmds_{session,skills,memory,perm,cron,model,refresh}.go`
                           Elm：`update.go` + `update_{refresh,stream,keys}.go`
                           表现：lipgloss 气泡卡 + contentBlock；完成态 glamour；streaming 冻结前缀 glamour + trail 永远 plain（T8）；
-                          折叠 e/E/c；划选复制（无 bubblezone / mouse cell motion）；无新 list/viewport 引擎（见 docs/backlog/current.md）
+                          折叠 e/E/c（thinking / tool 默认折；**live 回复不折**）；划选复制（无 bubblezone / mouse cell motion）；
+                          mid-turn refresh 保留 typewriter（transcript 已覆盖或回合结束才清）；吸底 pin，无新 list/viewport 引擎（见 docs/backlog/current.md）
 internal/gatewayclient   共享 HTTP/SSE 外观 + transport（不 import gateway server）
 internal/gateway         服务端 only：路由 / handlers / LocalRunner
 ```
 
-TUI 与 CLI 不得 import `tools`、`providers`、`store/sqlite`、`agent`、`chatsession` 实现。主交互斜杠：`/new`（离焦 ready，运行中则 cancel）、`/undo`、`/cron`、`/compact`、`/perm`、`/expand`、`/journey`（memory + skill 事件）、`/skills`（含 apply/reject/archived；显式预载快照）、`/<skill-id>`、`/<command>`（`chat.commands`）、`/model`（全局）/ `/model prefer`（会话偏好并在 run 时生效）。折叠快捷键：`e` / `E` / `c`（输入为空时）。用户规则：`<ConfigDir>/AGENTS.md` + 可选项目 `.yunmengze/AGENTS.md`。模型经 `skills_list` / `skill_view` 按需加载。CLI：`ymz config import-opencode`（离线写 ConfigDir，不经 Gateway）。可选尾巴见 `docs/backlog/current.md`。
+TUI 与 CLI 不得 import `tools`、`providers`、`store/sqlite`、`agent`、`chatsession` 实现。主交互斜杠：`/new`（离焦 ready，运行中则 cancel）、`/undo`、`/cron`、`/compact`、`/perm`、`/expand`、`/journey`（memory + skill 事件）、`/skills`（含 apply/reject/archived；显式预载快照）、`/<skill-id>`、`/<command>`（`chat.commands`）、`/model`（全局）/ `/model prefer`（会话偏好并在 run 时生效）、`/status`（含 daemon 版本）。折叠快捷键：`e` / `E` / `c`（输入为空时）。用户规则：`<ConfigDir>/AGENTS.md` + 可选项目 `.yunmengze/AGENTS.md`。模型经 `skills_list` / `skill_view` 按需加载。CLI：`ymz config import-opencode`（离线写 ConfigDir，不经 Gateway）。可选尾巴见 `docs/backlog/current.md`。

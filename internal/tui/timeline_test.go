@@ -143,7 +143,7 @@ func TestMessageRenderFlattened(t *testing.T) {
 }
 
 func TestLiveThinkingTail(t *testing.T) {
-	items := appendLiveDraft(nil, strings.Repeat("think line\n", 30), "", nil)
+	items := upsertLiveDraft(nil, strings.Repeat("think line\n", 30), "", nil)
 	out := renderTimeline(items)
 	if !strings.Contains(out, "thinking") {
 		t.Fatalf("missing thinking: %s", out)
@@ -156,7 +156,7 @@ func TestLiveThinkingTail(t *testing.T) {
 
 func TestDropLiveDraft(t *testing.T) {
 	base := []timelineItem{{Kind: tlUser, Title: "you", Body: "hi"}}
-	with := appendLiveDraft(base, "", "hello", nil)
+	with := upsertLiveDraft(base, "", "hello", nil)
 	if len(with) != 2 || with[1].Key != "live" {
 		t.Fatalf("draft = %#v", with)
 	}
@@ -235,6 +235,142 @@ func TestExpandStateToggle(t *testing.T) {
 	e.setAll(false)
 	if e.open("any") {
 		t.Fatal("none should close")
+	}
+}
+
+func TestLiveReplyDoesNotFold(t *testing.T) {
+	var lines []string
+	for i := 0; i < timelineBodyMaxLines+8; i++ {
+		lines = append(lines, "reply-line-"+itoa(i))
+	}
+	body := strings.Join(lines, "\n")
+	items := upsertLiveDraft(nil, "", body, nil)
+	out := renderTimeline(items)
+	if strings.Contains(out, "truncated") {
+		t.Fatalf("live reply should not fold:\n%s", out)
+	}
+	if !strings.Contains(out, "reply-line-"+itoa(timelineBodyMaxLines+7)) {
+		t.Fatalf("live tail missing:\n%s", out)
+	}
+}
+
+func TestRefreshKeepsLiveDraftMidTurn(t *testing.T) {
+	sid := gatewayclient.SessionID("sess-1")
+	m := newModel(paths.ModeUser, &fakeGateway{})
+	m.width, m.height = 80, 24
+	m.layout()
+	m.sessionID = sid
+	m.task = &gatewayclient.Task{ID: "task-1", State: gatewayclient.TaskStateRunning, SessionID: &sid}
+	m.liveContent = "partial typewriter"
+	m.refreshGen = 1
+	updated, _ := m.Update(refreshDoneMsg{
+		gen:  1,
+		kind: refreshFull,
+		task: m.task,
+		messages: []gatewayclient.TranscriptMessage{
+			{Role: "user", Content: "hi"},
+		},
+	})
+	got := updated.(model)
+	if got.liveContent != "partial typewriter" {
+		t.Fatalf("mid-turn refresh wiped live: %q", got.liveContent)
+	}
+	view := renderSessionView(&got)
+	if !strings.Contains(view, "partial") || !strings.Contains(view, "typewriter") {
+		t.Fatalf("live draft missing from view:\n%s", view)
+	}
+}
+
+func TestRefreshClearsLiveWhenTranscriptHasReply(t *testing.T) {
+	sid := gatewayclient.SessionID("sess-1")
+	m := newModel(paths.ModeUser, &fakeGateway{})
+	m.sessionID = sid
+	m.task = &gatewayclient.Task{ID: "task-1", State: gatewayclient.TaskStateRunning, SessionID: &sid}
+	m.liveContent = "hello"
+	m.refreshGen = 2
+	updated, _ := m.Update(refreshDoneMsg{
+		gen:  2,
+		kind: refreshFull,
+		task: m.task,
+		messages: []gatewayclient.TranscriptMessage{
+			{Role: "user", Content: "hi"},
+			{Role: "assistant", Content: "hello world"},
+		},
+	})
+	got := updated.(model)
+	if got.liveContent != "" {
+		t.Fatalf("expected live cleared when transcript covers it: %q", got.liveContent)
+	}
+}
+
+func TestRefreshKeepsLiveWhenPriorAssistantSharesPrefix(t *testing.T) {
+	sid := gatewayclient.SessionID("sess-1")
+	m := newModel(paths.ModeUser, &fakeGateway{})
+	m.width, m.height = 80, 24
+	m.layout()
+	m.sessionID = sid
+	m.task = &gatewayclient.Task{ID: "task-2", State: gatewayclient.TaskStateRunning, SessionID: &sid}
+	m.liveContent = "好"
+	m.refreshGen = 3
+	updated, _ := m.Update(refreshDoneMsg{
+		gen:  3,
+		kind: refreshRuns,
+		task: m.task,
+		messages: []gatewayclient.TranscriptMessage{
+			{Role: "user", Content: "hi"},
+			{Role: "assistant", Content: "好的，已完成。"},
+			{Role: "user", Content: "再来"},
+		},
+	})
+	got := updated.(model)
+	if got.liveContent != "好" {
+		t.Fatalf("prior-turn prefix wiped live: %q", got.liveContent)
+	}
+	view := renderSessionView(&got)
+	if !strings.Contains(view, "好") {
+		t.Fatalf("live draft missing from view:\n%s", view)
+	}
+}
+
+func TestAssistantTranscriptCoversLiveThisTurnOnly(t *testing.T) {
+	prior := []gatewayclient.TranscriptMessage{
+		{Role: "user", Content: "hi"},
+		{Role: "assistant", Content: "hello world"},
+		{Role: "user", Content: "again"},
+	}
+	if assistantTranscriptCoversLive(prior, "hello", "") {
+		t.Fatal("prior assistant must not cover this turn")
+	}
+	cur := append(append([]gatewayclient.TranscriptMessage(nil), prior...), gatewayclient.TranscriptMessage{
+		Role: "assistant", Content: "hello again",
+	})
+	if !assistantTranscriptCoversLive(cur, "hello", "") {
+		t.Fatal("this-turn assistant should cover live")
+	}
+	otherRun := []gatewayclient.TranscriptMessage{
+		{Role: "user", Content: "hi"},
+		{Role: "assistant", Content: "hello world", RunID: "run-old"},
+	}
+	if assistantTranscriptCoversLive(otherRun, "hello", "run-live") {
+		t.Fatal("other run must not cover live")
+	}
+}
+
+func TestPinViewportBottomIsIdempotent(t *testing.T) {
+	m := newModel(paths.ModeUser, &fakeGateway{})
+	m.width, m.height = 80, 24
+	m.sessionID = "sess-1"
+	m.layout()
+	m.stickBottom = true
+	m.timeline = []timelineItem{{Kind: tlUser, Title: "you", Body: strings.Repeat("line\n", 40)}}
+	m.syncViewport(true)
+	first := m.viewport.YOffset
+	m.syncViewport(false)
+	if m.viewport.YOffset != first {
+		t.Fatalf("pin jumped: %d -> %d", first, m.viewport.YOffset)
+	}
+	if !m.viewport.AtBottom() {
+		t.Fatal("expected pinned at bottom")
 	}
 }
 

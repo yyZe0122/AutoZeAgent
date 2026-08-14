@@ -50,7 +50,3 @@ func renderEmptySession(m *model) string {
 	}
 	return b.String()
 }
-
-func renderAgentView(m *model) string {
-	return renderSessionView(m)
-}

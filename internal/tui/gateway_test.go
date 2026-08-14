@@ -404,7 +404,7 @@ func TestModelListAndCron(t *testing.T) {
 	if !strings.Contains(strip, "deepseek/a") || !strings.Contains(strip, "ctx") {
 		t.Fatalf("strip=%q", strip)
 	}
-	panel := mm.renderContextPanel(20)
+	panel := mm.renderMetricsPanel(20)
 	for _, want := range []string{"context", "tokens", "data", "/data/ymz"} {
 		if !strings.Contains(panel, want) {
 			t.Fatalf("panel missing %q:\n%s", want, panel)
