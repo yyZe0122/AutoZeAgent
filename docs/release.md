@@ -1,60 +1,95 @@
 # Release and publication
 
-日常安装/运行见根 [README](../README.md)。**本页是唯一发版操作手册**——按下面默认路径执行即可，不必再向 agent 单独确认流程。
+日常安装/运行见根 [README](../README.md)。**本页是唯一发版操作手册**。不要另写平行步骤，不要发明第二套脚本。
 
-This page is the **only** release runbook. Follow the default path; do not invent parallel steps.
+This page is the **only** release runbook.
+
+---
+
+## Hard rules / 硬性规则
+
+| Rule | Detail |
+| --- | --- |
+| **Root only** | On this host, **only root** may `git commit` / `git tag` / `git push` / upload. Agent or `yyze` prepares the tree; a human (or agent via `sudo -i`) publishes as root. |
+| **One script** | Publish is **only** [`scripts/publish-release.sh`](../scripts/publish-release.sh). Delete leftover one-off publish helpers; do not add `scripts/release-*.sh`. |
+| **Clean tree** | The publish script **refuses a dirty working tree**. Batch-commit first. It will not squash a multi-feature dump. |
+| **No mega-commit** | **Never** `--commit-paths all` for a mixed dirty tree. That flag is **removed**. |
+| **Changelog first** | `docs/history/changelog/vX.Y.Z.md` must exist **before** the publish command. Tag name = file name (`v0.3.0` → `v0.3.0.md`). |
+| **No secrets** | Never commit `agent.local.json`, `*.db`, `env` with real keys, `bin/`, `dist/`, tokens. |
+
+### Do not / 禁止
+
+- Run `./scripts/publish-release.sh` as `yyze` or any non-root user.
+- Invent a second publisher (`make release`, CI-only tag, ad-hoc `goreleaser` + `gh release create` mix).
+- One-shot `git add -A && git commit -m "release: …"` across unrelated features.
+- Force-push `main`. `--force-tag` only moves the **tag**, and still needs `--yes`.
+- Rewrite published changelog files under `docs/history/changelog/v*.md`.
 
 ---
 
 ## Default path (this host) / 默认一键发版
 
-**Scheme A:** only **root** may commit / tag / push / upload on this machine.
+### 1) Batch-commit as root (required)
 
-### Batch commits before push (required)
-
-Do **not** squash a multi-feature dirty tree into one `release:` commit via `--commit-paths all`.
-
-1. Split the working tree into **feature-sized commits** (one concern each: e.g. injectscan, live MD, permission hints, skill list/view, skill draft/archive, AGENTS inject, docs).
-2. Each commit must compile and keep tests green (`make check` at least once before the first push).
-3. **Push those commits**, then publish.
-
-`--commit-paths all` is only for a leftover that is already one logical change (typically `docs/history/changelog/vX.Y.Z.md` after the feature commits are on `main`).
-
-### Every release (copy-paste)
+Split the dirty tree into **feature-sized commits**. Each commit must compile. Run `make check` at least once before the first push.
 
 ```bash
 sudo -i
 cd /home/yyze/projects/AutoZeAgent
 
-# Auth once per machine (preferred): gh auth login
-# Or export for this shell:
+# inspect
+git status
+git diff --stat
+git log --oneline -10
+
+# one concern per commit — example only, adapt paths:
+git add -- path/a path/b
+git commit -m "feat(tui): …"
+
+git add -- path/c
+git commit -m "docs: …"
+
+git push origin main
+```
+
+`--commit-paths changelog` on the publish script is **only** for a leftover that is already one logical change (typically `docs/history/changelog/vX.Y.Z.md` after feature commits are on `main`).
+
+### 2) Write notes, then publish
+
+```bash
+sudo -i
+cd /home/yyze/projects/AutoZeAgent
+
+# Auth once per machine (preferred):
+#   gh auth login
+# Or for this shell only:
 #   export GITHUB_TOKEN=...            # main repo Contents (+ Workflows if touching .github)
 #   export PACKAGE_GITHUB_TOKEN=...    # homebrew-tap + scoop-bucket Contents R/W
 
-# 1) Feature commits already on main (see above). Changelog MUST exist:
-#    docs/history/changelog/vX.Y.Z.md
+# Changelog MUST exist: docs/history/changelog/vX.Y.Z.md
+# Working tree MUST be clean (or only that changelog leftover).
 
-# 2) Clean main (or only changelog leftover) → tag + local GoReleaser upload
 ./scripts/publish-release.sh vX.Y.Z --yes
 
 # Changelog-only leftover (one commit), then tag + upload:
 # ./scripts/publish-release.sh vX.Y.Z \
-#   --commit-paths all --yes \
+#   --commit-paths changelog --yes \
 #   --message "docs(changelog): vX.Y.Z"
 ```
 
-Replace `vX.Y.Z` with the real tag (e.g. `v0.2.2`). Script runs `make check`, creates annotated tag, pushes `main` + tag, then **local** `goreleaser release` (not GitHub Actions minutes).
+Replace `vX.Y.Z` (e.g. `v0.3.0`). The script runs `make check`, creates an annotated tag, pushes `main` + tag, then **local** `goreleaser release` (not GitHub Actions minutes).
 
 ### Pre-flight checklist
 
 | Step | Action |
 | --- | --- |
-| 1 | **Batch-commit** the working tree by feature (not one mega `release:` dump). Push those commits. |
-| 2 | Bump / write **`docs/history/changelog/vX.Y.Z.md`** (bilingual highlights, asset table, install). Missing file **fails** publish. |
-| 3 | No secrets in tree: no `agent.local.json`, `*.db`, `env` with real keys, `bin/`, tokens in docs. |
-| 4 | `make check` green (script runs it unless `--skip-check`). |
-| 5 | `gh auth login` or valid `GITHUB_TOKEN` + `PACKAGE_GITHUB_TOKEN`. |
-| 6 | Run `./scripts/publish-release.sh vX.Y.Z` as **root** (clean tree). Use `--commit-paths all` only for changelog leftover. |
+| 1 | **Batch-commit** by feature. Push those commits. |
+| 2 | Write **`docs/history/changelog/vX.Y.Z.md`** (bilingual highlights, asset table, install). Missing file **fails** publish. |
+| 3 | Reset `docs/history/changelog/unreleased.md` to an empty post-tag stub if you promoted notes into `vX.Y.Z.md`. |
+| 4 | No secrets in tree. |
+| 5 | `make check` green (script runs it unless `--skip-check`). |
+| 6 | `gh auth login` or valid `GITHUB_TOKEN` + `PACKAGE_GITHUB_TOKEN`. |
+| 7 | As **root**, clean tree: `./scripts/publish-release.sh vX.Y.Z --yes`. |
 
 ### After publish
 
@@ -84,6 +119,7 @@ curl -fsSL "https://raw.githubusercontent.com/yyZe0122/YunmengZe-Agent/main/pack
 | Move tag to current HEAD | `./scripts/publish-release.sh vX.Y.Z --force-tag --yes` |
 | Print steps only | `./scripts/publish-release.sh vX.Y.Z --dry-run` |
 | Push tag, let Actions publish | `./scripts/publish-release.sh vX.Y.Z --via-actions` (needs billing OK) |
+| Leftover changelog commit | `./scripts/publish-release.sh vX.Y.Z --commit-paths changelog --yes --message "docs(changelog): vX.Y.Z"` |
 
 Script: [`scripts/publish-release.sh`](../scripts/publish-release.sh).
 
@@ -107,10 +143,10 @@ Affiliate repos (auto-updated by GoReleaser on each tag):
 
 GoReleaser builds **one archive per OS/arch**. Each archive contains **two binaries** (`ymz`, `ymzd`) plus configs and packaging scripts.
 
-| Pattern | Example (tag `v0.2.2`) |
+| Pattern | Example (tag `v0.3.0`) |
 | --- | --- |
-| `ymz_{version}_{os}_{arch}.tar.gz` | `ymz_0.2.2_linux_amd64.tar.gz` |
-| `ymz_{version}_windows_{arch}.zip` | `ymz_0.2.2_windows_amd64.zip` |
+| `ymz_{version}_{os}_{arch}.tar.gz` | `ymz_0.3.0_linux_amd64.tar.gz` |
+| `ymz_{version}_windows_{arch}.zip` | `ymz_0.3.0_windows_amd64.zip` |
 | `checksums.txt` | SHA-256 of all archives (fixed name) |
 
 - `{version}` = tag **without** leading `v` (GoReleaser `.Version`).
@@ -119,9 +155,10 @@ GoReleaser builds **one archive per OS/arch**. Each archive contains **two binar
 ## Release notes / 更新日志
 
 1. Add `docs/history/changelog/vX.Y.Z.md` (bilingual: highlights, asset table, verify, install).
-2. Tag must match the file name: tag `v0.2.2` → `docs/history/changelog/v0.2.2.md`.
+2. Tag must match the file name: tag `v0.3.0` → `docs/history/changelog/v0.3.0.md`.
 3. Publish uses: `goreleaser release … --release-notes=docs/history/changelog/${tag}.md`.
 4. Missing notes file **fails** the publish script / CI on purpose.
+5. Working notes live in [`unreleased.md`](history/changelog/unreleased.md); promote at tag time. Do not rewrite published `v*.md`.
 
 ## Auth / 鉴权
 

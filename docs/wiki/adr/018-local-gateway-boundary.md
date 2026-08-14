@@ -2,7 +2,7 @@
 
 - 状态：Accepted
 - 日期：2026-07-14
-- 更新：2026-08-13（路由表对齐实现；resolve 含 H7 job pin）
+- 更新：2026-08-14（TUI 折叠仅键盘；划选复制；/new 离焦）
 
 ## 决策
 
@@ -28,6 +28,7 @@ Linux/macOS 在 RuntimeDir 使用受文件权限保护的 Unix Domain Socket；W
 | `GET` | `/v1/sessions/{id}/messages` | transcript |
 | `GET` | `/v1/sessions/{id}/context` | 窗压（ADR-041） |
 | `POST` | `/v1/sessions/{id}/compact` | `{focus?}`；TUI `/compact` |
+| `POST` | `/v1/sessions/{id}/rewind` | 人径撤回上次 agent 写文件（QG；TUI `/undo` · Esc Esc） |
 | `GET`/`POST` | `/v1/tasks` | 列表 / 提交（`execution_mode` · `skill_ids` · `workspace`） |
 | `GET` | `/v1/tasks/{id}` | 读 |
 | `POST` | `/v1/tasks/{id}/actions` | pause\|resume\|cancel + `expected_version` |
@@ -59,9 +60,9 @@ internal/tui             Bubble Tea UI；消费窄 `tui.Gateway`（由 gatewaycl
                           分发：`cmds.go` + `cmds_{session,skills,memory,perm,cron,model,refresh}.go`
                           Elm：`update.go` + `update_{refresh,stream,keys}.go`
                           表现：lipgloss 气泡卡 + contentBlock；完成态 glamour；streaming 冻结前缀 glamour + trail 永远 plain（T8）；
-                          bubblezone 点击 expand；无新 list/viewport 引擎（见 docs/backlog/current.md）
+                          折叠 e/E/c；划选复制（无 bubblezone / mouse cell motion）；无新 list/viewport 引擎（见 docs/backlog/current.md）
 internal/gatewayclient   共享 HTTP/SSE 外观 + transport（不 import gateway server）
 internal/gateway         服务端 only：路由 / handlers / LocalRunner
 ```
 
-TUI 与 CLI 不得 import `tools`、`providers`、`store/sqlite`、`agent`、`chatsession` 实现。主交互斜杠：`/cron`、`/compact`、`/perm`、`/expand`、`/journey`（memory + skill 事件）、`/skills`（含 apply/reject/archived；显式预载快照）、`/<skill-id>`、`/<command>`（`chat.commands`）、`/model`（全局）/ `/model prefer`（会话偏好并在 run 时生效）。折叠快捷键：`e` / `E` / `c`（输入为空时）。用户规则：`<ConfigDir>/AGENTS.md` + 可选项目 `.yunmengze/AGENTS.md`。模型经 `skills_list` / `skill_view` 按需加载。CLI：`ymz config import-opencode`（离线写 ConfigDir，不经 Gateway）。可选尾巴见 `docs/backlog/current.md`。
+TUI 与 CLI 不得 import `tools`、`providers`、`store/sqlite`、`agent`、`chatsession` 实现。主交互斜杠：`/new`（离焦 ready，运行中则 cancel）、`/undo`、`/cron`、`/compact`、`/perm`、`/expand`、`/journey`（memory + skill 事件）、`/skills`（含 apply/reject/archived；显式预载快照）、`/<skill-id>`、`/<command>`（`chat.commands`）、`/model`（全局）/ `/model prefer`（会话偏好并在 run 时生效）。折叠快捷键：`e` / `E` / `c`（输入为空时）。用户规则：`<ConfigDir>/AGENTS.md` + 可选项目 `.yunmengze/AGENTS.md`。模型经 `skills_list` / `skill_view` 按需加载。CLI：`ymz config import-opencode`（离线写 ConfigDir，不经 Gateway）。可选尾巴见 `docs/backlog/current.md`。

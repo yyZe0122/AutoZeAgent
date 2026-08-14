@@ -219,14 +219,14 @@ ymz stop            # shut down daemon
 
 ### TUI
 
-Chat transcript uses **rounded bubbles** (user / assistant / thinking / tool), not a log dump. Assistant replies with markdown markers render via **glamour** (streaming is throttled; unclosed fences stay plain). Foldable blocks: `/expand` or keys **`e`** (last) · **`E`** (all) · **`c`** (collapse); click a folded card when mouse is supported.
+Chat transcript uses **rounded bubbles** (user / assistant / thinking / tool), not a log dump. Assistant replies with markdown markers render via **glamour** (streaming is throttled; unclosed fences stay plain). Foldable blocks: `/expand` or keys **`e`** (last) · **`E`** (all) · **`c`** (collapse). Drag-select in the transcript to copy.
 
 | Input | Behavior |
 | --- | --- |
 | **Tab** · **Shift+Tab** | **agent** (R/W) ↔ **plan** (read-only); Tab also completes slash |
 | Plain text | Submit on current mode / session |
 | `/help` | Slash list + keys |
-| `/new` · `/sessions` · `/tasks` | New session; list sessions; list / focus tasks |
+| `/new` · `/sessions` · `/tasks` | `/new` leaves to ready and cancels a running turn; type to start; list sessions; list / focus tasks |
 | `/back` · `/clear` | Session list (`/clear` aliases `/back`) |
 | `/model` | Switch **global** main (`/model provider/model`); `/model prefer [ref]` session prefer (next chat run) |
 | `/skills` · `/<skill-id>` | Multi-select preload, or skill-as-slash (instruction only). Model otherwise uses `skills_list` → `skill_view`. `/skills apply\|reject <id>` · `/skills archived` |

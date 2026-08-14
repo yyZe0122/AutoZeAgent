@@ -7,11 +7,12 @@
 # Usage (as root) — full runbook: docs/release.md
 #   cd /home/yyze/projects/AutoZeAgent
 #   # require docs/history/changelog/vX.Y.Z.md first
-#   ./scripts/publish-release.sh v0.2.2 --commit-paths all --yes   # dirty tree → commit+push+tag+upload
-#   ./scripts/publish-release.sh v0.2.2                            # clean main → tag+upload
-#   ./scripts/publish-release.sh v0.2.2 --upload-only               # tag already on HEAD
-#   ./scripts/publish-release.sh v0.2.2 --snapshot-only             # no tag
-#   ./scripts/publish-release.sh v0.2.2 --dry-run
+#   # working tree MUST be clean (batch-commit features yourself)
+#   ./scripts/publish-release.sh v0.3.0 --yes                       # clean main → tag+upload
+#   ./scripts/publish-release.sh v0.3.0 --commit-paths changelog --yes  # leftover notes only
+#   ./scripts/publish-release.sh v0.3.0 --upload-only               # tag already on HEAD
+#   ./scripts/publish-release.sh v0.3.0 --snapshot-only             # no tag
+#   ./scripts/publish-release.sh v0.3.0 --dry-run
 #
 # Requires: git, make, goreleaser; root only (scheme A).
 #   GITHUB_TOKEN or gh auth login  — main Release upload
@@ -26,7 +27,7 @@ GIT_USER_EMAIL="yyze@debianze.local"
 GITHUB_REPO_SLUG="yyZe0122/YunmengZe-Agent"
 
 TAG=""
-COMMIT_PATHS="" # empty | release | all
+COMMIT_PATHS="" # empty | changelog
 DRY_RUN=0
 SKIP_CHECK=0
 SKIP_SNAPSHOT=0
@@ -44,15 +45,15 @@ usage() {
   cat <<'EOF'
 One-shot release (root only). Default: local GoReleaser upload via GITHUB_TOKEN.
 
-  ./scripts/publish-release.sh v0.1.0
-  ./scripts/publish-release.sh v0.1.0 --commit-paths release
-  ./scripts/publish-release.sh v0.1.0 --upload-only
-  ./scripts/publish-release.sh v0.1.0 --via-actions
-  ./scripts/publish-release.sh v0.1.0 --dry-run
+  ./scripts/publish-release.sh v0.3.0 --yes
+  ./scripts/publish-release.sh v0.3.0 --commit-paths changelog --yes
+  ./scripts/publish-release.sh v0.3.0 --upload-only
+  ./scripts/publish-release.sh v0.3.0 --via-actions
+  ./scripts/publish-release.sh v0.3.0 --dry-run
 
 Options:
-  --repo DIR            Repository root (default: /home/yyze/projects/YunmengZe)
-  --commit-paths MODE   release = whitelist; all = full tree (needs --yes)
+  --repo DIR            Repository root (default: /home/yyze/projects/AutoZeAgent)
+  --commit-paths MODE   changelog = leftover docs/history/changelog + unreleased only (needs --yes)
   --message TEXT        Commit message when committing
   --tag-message TEXT    Annotated tag message
   --skip-check          Skip make check
@@ -178,17 +179,12 @@ assert_no_secrets_staged() {
   fi
 }
 
-commit_release_paths() {
-  log "stage release whitelist"
+commit_changelog_paths() {
+  [[ "$YES" -eq 1 ]] || die "--commit-paths changelog requires --yes"
+  log "stage leftover changelog only"
   local paths=(
-    .goreleaser.yaml
-    .github/workflows/release.yml
-    docs/history/changelog/
-    docs/release.md
-    packaging/scripts/
-    README.md
-    scripts/publish-release.sh
-    internal/daemonctl/process_windows.go
+    "docs/history/changelog/${TAG}.md"
+    docs/history/changelog/unreleased.md
   )
   local p
   for p in "${paths[@]}"; do
@@ -197,43 +193,32 @@ commit_release_paths() {
     fi
   done
   assert_no_secrets_staged
+  extra=$(git diff --cached --name-only | grep -vE '^docs/history/changelog/' || true)
+  if [[ -n "$extra" ]]; then
+    printf '%s\n' "$extra" >&2
+    die "--commit-paths changelog staged unexpected paths"
+  fi
   if git diff --cached --quiet 2>/dev/null; then
-    log "nothing to commit on release whitelist"
+    log "nothing to commit on changelog leftover"
     return 0
   fi
-  local msg=${COMMIT_MSG:-"release: prepare ${TAG} pipeline"}
+  local msg=${COMMIT_MSG:-"docs(changelog): ${TAG}"}
   if [[ "$DRY_RUN" -eq 1 ]]; then
     log "would commit: $msg"
     git diff --cached --stat || true
     return 0
   fi
   git commit -m "$msg"
-  log "committed release paths"
-}
-
-commit_all_paths() {
-  [[ "$YES" -eq 1 ]] || die "--commit-paths all requires --yes"
-  log "stage all changes (tracked + untracked, respect gitignore)"
-  run "git add -A"
-  assert_no_secrets_staged
-  if git diff --cached --quiet 2>/dev/null; then
-    log "nothing to commit"
-    return 0
-  fi
-  local msg=${COMMIT_MSG:-"release: prepare ${TAG}"}
-  if [[ "$DRY_RUN" -eq 1 ]]; then
-    log "would commit all: $msg"
-    git diff --cached --stat || true
-    return 0
-  fi
-  git commit -m "$msg"
+  log "committed changelog leftover"
 }
 
 case "$COMMIT_PATHS" in
   "") ;;
-  release) commit_release_paths ;;
-  all) commit_all_paths ;;
-  *) die "--commit-paths must be 'release' or 'all'" ;;
+  changelog) commit_changelog_paths ;;
+  all|release)
+    die "--commit-paths ${COMMIT_PATHS} removed; batch-commit features yourself (see docs/release.md)"
+    ;;
+  *) die "--commit-paths must be 'changelog' (leftover notes only)" ;;
 esac
 
 # Dirty tree (snapshot-only may still want clean for goreleaser; enforce for publish)
@@ -241,7 +226,7 @@ if [[ "$SNAPSHOT_ONLY" -eq 0 ]]; then
   dirty=$(git status --porcelain --untracked-files=normal 2>/dev/null || true)
   if [[ -n "$dirty" ]]; then
     printf '%s\n' "$dirty" >&2
-    die "working tree not clean; commit first or use --commit-paths release|all"
+    die "working tree not clean; batch-commit features first (see docs/release.md). Only leftover notes: --commit-paths changelog --yes"
   fi
 fi
 

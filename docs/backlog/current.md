@@ -1,13 +1,13 @@
 # YunmengZe Agent 当前状态
 
-更新：2026-08-14（**Phase Q + Q-harden → v0.2.8** · 下一优先等用户再提）
+更新：2026-08-14（**v0.3.0** TUI `/new` 离焦 + 划选复制 · 下一优先等用户再提）
 
 **本文件是唯一活着的优化/backlog 文档。** 只写未完成与暂缓项；已落地细节见 ADR（`docs/wiki/adr/`）、[`docs/wiki/database.md`](../wiki/database.md)、changelog 与 git。目录：[`docs/README.md`](../README.md)。
 
 ## 现状
 
 生产形态稳定：`ymzd` + CLI·TUI（`ymz`）+ `core.db`。设计知识库：`docs/wiki/`。  
-当前发布线：**v0.2.8**（Phase Q 编码循环 + Q-harden）。v0.2.7 = T8 冻结前缀 + 32ms 合帧。
+当前发布线：**v0.3.0**（TUI `/new` 离焦 + 划选复制）。v0.2.8 = Phase Q 编码循环 + Q-harden。
 
 | 对标 | 契约重叠（粗） | 说明 |
 | --- | --- | --- |
@@ -20,7 +20,7 @@
 | Hermes 消息网关 | ~0% | 仅本机 UDS/loopback；**暂不上**飞书/微信（本机编码/定时为主） |
 
 **产品焦点：** 本机编码循环质量（工具调用 + 上下文压缩 + TUI 跟手）+ 简单任务 + 定时任务。通道/SDK 是添头。  
-**下一优先：** O5–O6 / H2 / M* **等用户再提**，不插队。Phase Q（QA–QH）+ Q-harden 已发 **v0.2.8**。
+**下一优先：** O5–O6 / H2 / M* **等用户再提**，不插队。Phase Q（QA–QH）+ Q-harden = **v0.2.8**。TUI `/new` + 划选 = **v0.3.0**。
 
 ## 原则（不变）
 
@@ -50,6 +50,7 @@
 | L1 · D1 | 结构化日志 · GoReleaser tap/scoop | v0.2.x |
 | **Q** | QA–QH 编码循环：ContextView · 文件工具 · `process_shell` · session todo · L3 tool 索引 · rewind · TUI Esc/`/undo` | **v0.2.8**（ADR-051 · migration 026） |
 | **Q-harden** | 单 packer（热路径仅 L1）· through 滑窗保 tail · 真 model id · todo 留 Ephemeral · HistoryBudget≤usable · 短编码 prompt | **v0.2.8** |
+| **TUI leave** | `/new` 离焦 ready + cancel 本轮；无焦点丢 stream/refresh/perm SSE；去 bubblezone 划选复制；窄屏不 inflate | **v0.3.0** |
 
 同包大文件拆分已落地（`tui/cmds_*`+`update_*`、`kernel/repository_*`、`tools/fs_*`、`cmd/ymzd/wire_*`）。再拆触发：新 slash / 新聚合 SQL / `ymzd` 接线难 review → 同包再拆。
 
