@@ -2,7 +2,7 @@
 
 - 状态：Roadmap
 - 日期：2026-07-13
-- 适用范围：Linux 本地服务器上的 `process_exec` 与 Git 子进程
+- 适用范围：Linux 本地服务器上的 `process_exec` / `process_shell` 与 Git 子进程
 
 ## 当前基线
 

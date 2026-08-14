@@ -21,9 +21,9 @@ Capability Grant 只能从已批准 Plan 中完全相同的 Capability Scope 签
 
 - Grant 的 `command` 为空 → 接受请求中的任意 command（仍受 path / capability / 时限等约束）；
 - Grant 的 `arguments` 为空 → 接受请求中的任意 arguments；
-- Grant 的 `command` 或 `arguments` 非空 → 必须与请求**精确**相等。
+- Grant 的 `command` 非空 → 必须与请求 command 相等；`arguments` 非空 → 精确相等，或请求 args **以 grant args 为前缀**（ADR-051）。
 
-因此 session chat 可为 `process_exec` / `git_*` 签发「仅路径范围」的预授权（空 command/args），而不必为每次动态 argv 预写死命令。非空 command/args 的 Grant 仍为精确匹配。路径、域名、次数、过期规则不变。
+因此 session chat 可为 `process_exec` / `process_shell` / `git_*` 签发「仅路径范围」的预授权（空 command/args），而不必为每次动态 argv 预写死命令。非空 command 须匹配；非空 args 精确匹配或 **前缀匹配**（ADR-051 / QD3，如 `go test` ⊇ `go test ./foo`）。路径、域名、次数、过期规则不变。
 
 批准、拒绝、修改请求、Grant 签发和 Grant 撤销均写入不可变 Core Event Store。审批与 Grant 元数据保存在 `core.db`，不依赖 Skill 正文或已删除的进程外模块。Session chat 的 workspace 预授权（ADR-038/046，含可选 `chat.tools` 与 ask 模式 `allow_once|similar|permanent`）同样写入真实 Grant；永久信任表在 ConfigDir，不替代 Grant 校验。
 

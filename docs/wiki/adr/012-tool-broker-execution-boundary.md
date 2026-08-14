@@ -48,7 +48,7 @@ Chat cancel/fail 路径（`chatsession`）在 run 终态写之前调用 Broker `
 
 - Windows 使用 Job Object，并启用 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`；取消或超时时终止整个 Job。`taskkill /T /F` 和直接 Kill 仅作为回退。
 - Linux/Unix 使用独立 process group；取消或超时时向负 PID 发送 `SIGKILL`，终止整组进程。
-- **Linux process isolation baseline**：在 cgroups v2 且 `systemd-run` 可用时，`process_exec` 与 `git_*` 子进程由 executor 包装为 **transient scope**（`--scope`，unit 名绑定 `tool_call_id`），并设置 `MemoryMax` / `MemorySwapMax` / `CPUQuota` / `TasksMax` / 可选 `RuntimeMaxSec`。探测在 `RegisterBuiltins` 时执行；不可用时 **显式降级** 为仅 process group，并写 Audit `process.isolation`（`enabled` / `degraded` / `unsupported`），不得静默宣称资源限制已启用。Broker 超时仍是上层最后期限。此阶段**不是**完整 OS sandbox（无 namespace / bubblewrap / seccomp）；文档与 UI 只称 process isolation baseline。见 `docs/wiki/security/linux-sandbox-roadmap.md`。
+- **Linux process isolation baseline**：在 cgroups v2 且 `systemd-run` 可用时，`process_exec` / `process_shell` 与 `git_*` 子进程由 executor 包装为 **transient scope**（`--scope`，unit 名绑定 `tool_call_id`），并设置 `MemoryMax` / `MemorySwapMax` / `CPUQuota` / `TasksMax` / 可选 `RuntimeMaxSec`。探测在 `RegisterBuiltins` 时执行；不可用时 **显式降级** 为仅 process group，并写 Audit `process.isolation`（`enabled` / `degraded` / `unsupported`），不得静默宣称资源限制已启用。Broker 超时仍是上层最后期限。此阶段**不是**完整 OS sandbox（无 namespace / bubblewrap / seccomp）；文档与 UI 只称 process isolation baseline。见 `docs/wiki/security/linux-sandbox-roadmap.md`。
 - 命令名和参数以 `exec.Command(command, args...)` 传递，不拼接 shell 字符串；systemd-run 包装在 executor 内部，Grant 仍按原始 command/args 校验。
 - 工作目录必须为允许根目录中的绝对路径。
 - 子进程环境只继承 allowlist 中的变量。
@@ -70,7 +70,7 @@ HTTP 当前限制审批域名，不等同于完整 SSRF 防护。后续还需要
 
 ### 同 step 只读并行
 
-同一 provider step 若 **全部** tool call 属于只读集合（`fs_read` / `fs_list` / `fs_stat` / `fs_glob` / `fs_grep`），Agent 可 **并行** 调用 `Broker.Execute`。Broker 用 `dbMu` **串行化** grant consume 与 `tool_calls` 写；`tool.Execute`（磁盘 IO）在锁外重叠。混有写/exec/git/http/task/memory_write 或 permission Wait 的 batch **保持串行**。结果按 call 顺序写回 transcript。
+同一 provider step 若 **全部** tool call 属于只读集合（`fs_read` / `fs_list` / `fs_stat` / `fs_glob` / `fs_grep`），Agent 可 **并行** 调用 `Broker.Execute`。Broker 用 `dbMu` **串行化** grant consume 与 `tool_calls` 写；`tool.Execute`（磁盘 IO）在锁外重叠。混有写/exec/git/http/task/memory_write 或 permission Wait 的 batch **保持串行**。`todo_list`/`todo_write` 不在只读并行集合内（与 memory 工具同批串行）。结果按 call 顺序写回 transcript。
 
 ## 结果
 

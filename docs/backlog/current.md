@@ -1,26 +1,26 @@
 # YunmengZe Agent 当前状态
 
-更新：2026-08-14（T8 冻结前缀 + 合帧 paint · 基线 **v0.2.7**）
+更新：2026-08-14（**Phase Q + Q-harden → v0.2.8** · 下一优先等用户再提）
 
 **本文件是唯一活着的优化/backlog 文档。** 只写未完成与暂缓项；已落地细节见 ADR（`docs/wiki/adr/`）、[`docs/wiki/database.md`](../wiki/database.md)、changelog 与 git。目录：[`docs/README.md`](../README.md)。
 
 ## 现状
 
 生产形态稳定：`ymzd` + CLI·TUI（`ymz`）+ `core.db`。设计知识库：`docs/wiki/`。  
-当前发布线：**v0.2.7**（v0.2.6 泽夜/泽昼平铺；v0.2.7 = T8 冻结前缀 + 32ms 合帧，trail 永远 plain）。
+当前发布线：**v0.2.8**（Phase Q 编码循环 + Q-harden）。v0.2.7 = T8 冻结前缀 + 32ms 合帧。
 
 | 对标 | 契约重叠（粗） | 说明 |
 | --- | --- | --- |
 | OpenCode 配置/协议 | ~80–90% | + `import-opencode`；stdio + 远程 MCP（O2） |
-| OpenCode 产品手感 | ~80–90% | + skill-as-slash；Hermes `skills_list`/`skill_view`；`chat.commands`；`AGENTS.md` 规则；session prefer（O4） |
+| OpenCode 产品手感 | ~85–90% | + Phase Q 编码循环（ContextView / fs 行窗+hash / `process_shell` / session todo / rewind） |
 | OpenCode API/SDK | ~10–15% 路径类比 | 本地 `/v1/*` + Go `gatewayclient`；**不追**全量 OC OpenAPI |
 | Crush TUI | 契约 ~95% | T1–T8 + C1–C4 + UX-A/B；无新 list 引擎 |
 | Hermes 分层记忆 | 架构 ~90% | + H6；**H1-lite curator**；**H5-lite** `default_ttl` + 过期软归档（冻结块仍手动 refresh） |
 | Hermes 自进化 | ~40% | H3 草稿+人工 apply；H4 习惯提示；H5-skill 软归档（ADR-050）；无自动 apply / yolo |
 | Hermes 消息网关 | ~0% | 仅本机 UDS/loopback；**暂不上**飞书/微信（本机编码/定时为主） |
 
-**产品焦点：** 本机编码 + 简单任务 + 定时任务。  
-**下一优先：** 无强需求则先收敛。O5–O6 / H2 / M* **等用户再提**。
+**产品焦点：** 本机编码循环质量（工具调用 + 上下文压缩 + TUI 跟手）+ 简单任务 + 定时任务。通道/SDK 是添头。  
+**下一优先：** O5–O6 / H2 / M* **等用户再提**，不插队。Phase Q（QA–QH）+ Q-harden 已发 **v0.2.8**。
 
 ## 原则（不变）
 
@@ -48,6 +48,8 @@
 | H* 已落地 | H7 pin · H1-lite · H5-lite · H3 draft · H4 hint · H5-skill · H6 injectscan | v0.2.4–v0.2.5 |
 | R | 改名 YunmengZe / `ymz` / `~/.yunmengze` | v0.2.0–v0.2.1 |
 | L1 · D1 | 结构化日志 · GoReleaser tap/scoop | v0.2.x |
+| **Q** | QA–QH 编码循环：ContextView · 文件工具 · `process_shell` · session todo · L3 tool 索引 · rewind · TUI Esc/`/undo` | **v0.2.8**（ADR-051 · migration 026） |
+| **Q-harden** | 单 packer（热路径仅 L1）· through 滑窗保 tail · 真 model id · todo 留 Ephemeral · HistoryBudget≤usable · 短编码 prompt | **v0.2.8** |
 
 同包大文件拆分已落地（`tui/cmds_*`+`update_*`、`kernel/repository_*`、`tools/fs_*`、`cmd/ymzd/wire_*`）。再拆触发：新 slash / 新聚合 SQL / `ymzd` 接线难 review → 同包再拆。
 
@@ -61,7 +63,8 @@
 Phase 1：O1–O4 ✅ ──► O5–O6（用户再提）
 Phase 2：C1–C4 + UX-A/B ✅ · T8 live MD ✅
 Phase 3：H* 已落地 ✅（除 H2）
-H2 / O5–O6 / M* ── 用户再提
+Phase Q：编码循环 QA–QH + Q-harden ✅（v0.2.8；细节 ADR-051）
+H2 / O5–O6 / M* ── 用户再提（不插队）
 ```
 
 ### 等用户再提

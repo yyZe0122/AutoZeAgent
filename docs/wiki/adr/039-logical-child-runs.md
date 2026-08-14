@@ -29,7 +29,7 @@
 - Grant：子 Run **不得扩大**父的 workspace roots / 读写天花板；父为 plan（只读）则子只读。
 - 预算：子消耗计入父 Task 用量聚合；子 Run 使用父剩余 token/cost 上限（或明确份额），超限 fail-closed。
 - 可观测（读路径）：`corequery.RunUsage(runID)` = 本 Run + 一层 `parent_run_id` 子 Run 的 assistant usage 汇总；Gateway `GET /v1/runs/{id}/usage`；TUI Metrics 在存在子 Run 时展示 parent/children 旁注。不改预算策略。
-- 高风险工具：子 **不得** 自行扩大；仅当父 agent 已因 `chat.tools`（或其它合法 Grant）具备 `git_*` / `process_exec` 时，子才可经 `allowed_tools ⊆ 父` 继承。`http_get` 仍不由 chat 预授权。首版：子 allowed_tools ⊆ 父 allowed_tools。
+- 高风险工具：子 **不得** 自行扩大；仅当父 agent 已因 `chat.tools`（或其它合法 Grant）具备 `git_*` / `process_exec` / `process_shell` 时，子才可经 `allowed_tools ⊆ 父` 继承。`http_get` 仍不由 chat 预授权。首版：子 allowed_tools ⊆ 父 allowed_tools。
 
 ### 工具 `task` 语义（首版）
 

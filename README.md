@@ -81,14 +81,14 @@ Pin Pre-release tags (or omit `YMZ_VERSION` when a non-prerelease `latest` exist
 **Windows** → `%LOCALAPPDATA%\Programs\YunmengZe\bin` + user PATH:
 
 ```powershell
-$env:YMZ_VERSION = 'v0.2.7'
+$env:YMZ_VERSION = 'v0.2.8'
 irm "https://raw.githubusercontent.com/yyZe0122/YunmengZe-Agent/main/packaging/scripts/install.ps1" | iex
 ```
 
 **Linux / macOS** → `~/.local/bin`:
 
 ```bash
-export YMZ_VERSION=v0.2.7
+export YMZ_VERSION=v0.2.8
 curl -fsSL "https://raw.githubusercontent.com/yyZe0122/YunmengZe-Agent/main/packaging/scripts/install-user.sh" | sh
 export PATH="$HOME/.local/bin:$PATH"
 ```
@@ -232,13 +232,15 @@ Chat transcript uses **rounded bubbles** (user / assistant / thinking / tool), n
 | `/skills` · `/<skill-id>` | Multi-select preload, or skill-as-slash (instruction only). Model otherwise uses `skills_list` → `skill_view`. `/skills apply\|reject <id>` · `/skills archived` |
 | `/<cmd> [args]` | `chat.commands` template slash (`$ARGUMENTS`); priority: built-in → commands → skill |
 | `/compact` · `/perm` | Context compact; tool permission (H4 may hint prior once/similar) |
+| `/undo` | Rewind last agent file write (`POST /v1/sessions/{id}/rewind`; Esc Esc) |
 | `/memory` · `/refresh-memory` | Facts (`/memory archived` · `forget\|promote <id>`); rebuild frozen inject |
 | `/expand` · `/journey` | Fold/expand; prepend memory and/or skill-event timeline (`/journey skills`) |
 | `/cron` | Jobs on focused session |
 | `/pause` · `/resume` · `/cancel` · `/stop` | Task control (`/stop` = `/cancel`) |
-| `/status` · `/retry` · `/theme` | Health · resubmit last user message · day/night theme |
+| `/status` · `/retry` · `/theme` | Health + window pressure + Compacted · resubmit last user message · day/night theme |
 | `/quit` | Exit TUI (`/q` `/exit`; daemon stays up) |
-| **e** / **E** / **c** | Expand last foldable · expand all · collapse (empty input) |
+| **Esc** | Close overlay; if a turn is running → cancel; Esc Esc → `/undo` |
+| **e** / **E** / **c** | Expand last foldable (incl. unified diffs) · expand all · collapse (empty input) |
 
 ### CLI (scripts)
 
@@ -306,6 +308,6 @@ Details: [`SECURITY.md`](SECURITY.md), [threat model ADR-008](docs/wiki/adr/008-
 
 ## Status
 
-Alpha. Production shape is the three-piece stack above. TUI marsh palette shipped in **v0.2.6**; streaming markdown freeze + coalesced paint in **v0.2.7**. Remaining tails (O5–O6 / H2 / M*) in [`docs/backlog/current.md`](docs/backlog/current.md).
+Alpha. Production shape is the three-piece stack above. Phase Q coding loop + Q-harden shipped in **v0.2.8**. Remaining tails (O5–O6 / H2 / M*) in [`docs/backlog/current.md`](docs/backlog/current.md).
 
 Release checklist: [`docs/release.md`](docs/release.md).

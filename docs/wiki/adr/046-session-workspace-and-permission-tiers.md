@@ -36,7 +36,7 @@ Config (optional; defaults preserve client_cwd behavior when roots empty):
 | Decision | Meaning |
 | --- | --- |
 | `allow_once` | Single tool call (existing) |
-| `allow_similar` | Session-scoped: same capability + path parent prefix (and exact command/args for process) |
+| `allow_similar` | Session-scoped: same capability + path parent prefix; process args may **prefix-match** (ADR-051, e.g. `go test` ⊇ `go test ./foo`) |
 | `allow_permanent` | Requires `confirm: true`; writes ConfigDir trust entry; future matches pre-grant |
 | `deny` | Existing |
 

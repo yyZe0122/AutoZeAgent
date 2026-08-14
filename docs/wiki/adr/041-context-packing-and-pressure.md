@@ -34,9 +34,9 @@
 
 | 触发 | 位置 | 持久化 |
 | --- | --- | --- |
-| **Turn start** | `chatsession.packSessionHistory` | 是 → `session_compactions` |
-| **Provider overflow** | `agent` 单次 retry（`IsContextOverflow` → `compactMessagesForOverflow`） | 否（仅 in-memory provider 视图） |
-| **Mid-turn precheck** | tool 结果写入后、下一轮 `Stream` 前（`maybeCompactMidTurn`） | 否（复用 overflow 路径） |
+| **Turn start** | `chatsession` pin 后 `ContextView.Build` | 是 → `session_compactions` |
+| **Provider overflow** | `agent` 单次 retry（`IsContextOverflow` → 同一 `Build`） | 否（仅 in-memory provider 视图） |
+| **Mid-turn precheck** | tool 结果写入后、下一轮 `Stream` 前（增量 L1/L2，必要时 `Build`） | 否 |
 | **手动 `/compact [focus]`** | `chatsession.ForceCompact` → `POST /v1/sessions/{id}/compact` | 是；可选 focus 注入摘要 prompt |
 
 结构化摘要：`agent.CompactSummaryPrompt` + `CompactSummaryWithPrevious`（anchor merge 已有摘要）。
@@ -86,7 +86,7 @@
 - Gateway 不跑 tokenizer、不调 provider 做 count；compact 由 chatsession + agent Compactor 执行，Gateway 只转发。
 - 装配不绕过 Tool Broker / Grant；摘要调用不经 tools。
 - 不接本地 token→$ 定价；不绑单一厂商 opaque server compact 作为主路径。
-- Mid-turn / overflow compact 不替代 turn-start durable 摘要；下次 turn 仍以 `session_compactions` + full transcript 为准。
+- Mid-turn / overflow compact 不替代 turn-start durable 摘要；下次 turn 仍以 `session_compactions` + `SessionTranscriptTail` 为准（ADR-051）。
 
 ## 后果
 
@@ -96,8 +96,11 @@
 - 循环上限由 `chat.max_iterations` 配置，与窗压独立。
 - Anti-thrash 限制自动 LLM 摘要刷爆；手动 compact 仍可用。
 
+Phase Q（ADR-051）把叠在一起的三条 pack 管线收成单 `ContextView.Build`：装配在 `executeChat` 且 pin 之后；`through_message_id` + 真 model 写入 `session_compactions`；CJK 启发式（CJK rune ≈ 1 token，其余 /4）；退役 `RunRequest.History`。TUI 分页仍走 ASC `SessionTranscript`，packing 用 `SessionTranscriptTail`。旧行 `through_message_id=''` 回退 keep-2-turns。Q-harden：热路径不再对整份 view 跑 L2/L3；through 滑出 Tail 窗时保留整段 tail。
+
 ## 相关
 
 - 实现：`internal/contextpack`、`internal/agent/runner.go`、`internal/chatsession`、`internal/corequery`、`providerconfig.ChatConfig`、migration 016、TUI `/compact`。
 - Provider 字段：`docs/wiki/provider-protocols.md`（`contextWindow`）。
 - 交互 tool permission：ADR-043；记忆 `on_pre_compress`：ADR-044。
+- 编码循环合同：ADR-051。

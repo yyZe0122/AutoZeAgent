@@ -24,8 +24,8 @@
 - synthetic plan + 系统审批记录 + Capability Grant（满足 Broker，非人类业务审批）；
 - 副作用只经 Tool Broker（Policy → Grant → 路径/超时 → Audit）。
 
-默认不预授权：`process_exec` / `http_get` / `git_*`。  
-Agent 可通过 `chat.tools.git` / `chat.tools.process`（默认 false）opt-in。**plan 永不**获得这些能力。
+默认不预授权：`process_exec` / `process_shell` / `http_get` / `git_*`。  
+Agent 可通过 `chat.tools.git` / `chat.tools.process`（默认 false）opt-in；`process_shell` 与 `process_exec` **同一闸**。**plan / cron 永不**获得这些能力。
 
 ### 不得恢复（反回归）
 

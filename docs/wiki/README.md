@@ -2,7 +2,7 @@
 
 Numbered ADRs plus the `core.db` map. Catalog: [`docs/README.md`](../README.md).
 
-Living status / backlog (only): [`docs/backlog/current.md`](../backlog/current.md).  
+Living status / backlog (only): [`docs/backlog/current.md`](../backlog/current.md). **Phase Q + Q-harden = v0.2.8。** 下一优先：O5–O6 / H2 / M*（等用户再提）。  
 Agent/contributor entry: [`AGENTS.md`](../../AGENTS.md).  
 Database map: [`database.md`](database.md).
 
@@ -38,6 +38,7 @@ Do **not** restore deleted pieces: Module Runtime/Supervisor, out-of-process Mem
 | 16 | [047](adr/047-structured-logging-and-debug-chain.md) | Structured logs + real-machine debug chain |
 | 17 | [048](adr/048-provider-config-hot-reload.md) | Provider config watch + main-stack hot-reload |
 | 18 | [050](adr/050-in-process-self-improvement.md) | In-process skill draft / habit hint / skill usage (H3/H4/H5-skill) |
+| 19 | [051](adr/051-coding-loop-contextview.md) | Phase Q ContextView + coding-loop contract (QB–QH) |
 
 Also: O3 `chat.commands` (ADR-038 / [provider-protocols](provider-protocols.md)); O4/H7 run resolve (`internal/modelresolve`, ADR-045：job pin → prefer → main).
 
@@ -90,6 +91,7 @@ Provider wire formats: [`provider-protocols.md`](provider-protocols.md).
 | 047 | Structured logging / debug chain | slog JSON stage boundaries; `ymz logs`; tests vs real-machine |
 | 048 | Provider config hot-reload | Main stack only; no late-bind chat |
 | 050 | In-process self-improvement | H3 skill draft+apply; H4 habit hint; H5-skill last-used/archive; ≠ Evolution |
+| 051 | Coding-loop ContextView | Single `Build`; retire `History`; todo / L3 / checkpoint boundaries |
 
 Missing numbers (002, 005, 014–015, 019–021, 025, …) are **historical gaps**, not missing files to recreate.
 

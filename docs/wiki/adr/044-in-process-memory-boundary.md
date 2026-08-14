@@ -96,7 +96,7 @@ chatsession ──► internal/memory.Manager (in-process)
 | `created_at` / `updated_at` | UTC RFC3339Nano |
 
 - FTS5：`memory_entries_fts`（content 检索）。
-- Transcript FTS：`transcript_fts`（由 `agent_run_records` 投影文本；append 时 upsert）。
+- Transcript FTS：`transcript_fts`（由 `agent_run_records` 投影文本；**append 时 upsert**）。`AppendToolResult` 后写入 `transcript_search`（≤4000 runes，带 tool 名+path）；失败/取消 run 也索引已落盘行。`completeChat` 仍投影 user + 最终 assistant。不回填全部历史。
 
 不删除 transcript / `agent_run_records` 行（append-only 不变）。
 
@@ -154,4 +154,4 @@ chatsession ──► internal/memory.Manager (in-process)
 
 ## 相关
 
-- ADR-004 单库；ADR-041 压缩；ADR-038 chat；ADR-012 Broker；ADR-022 corequery。
+- ADR-004 单库；ADR-041 压缩；ADR-038 chat；ADR-012 Broker；ADR-022 corequery；ADR-051 ContextView / L3 投影时机。

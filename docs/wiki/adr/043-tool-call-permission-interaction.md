@@ -6,7 +6,7 @@
 
 ## 背景
 
-Session chat（ADR-038）对 workspace 工具做 **preauth grant**；高风险工具（`process_exec` / `git_*`）仅经 `chat.tools` opt-in。未覆盖 grant 且 Policy 为 `require_approval` 时，Broker 默认 **立即 deny**（fail closed）。
+Session chat（ADR-038）对 workspace 工具做 **preauth grant**；高风险工具（`process_exec` / `process_shell` / `git_*`）仅经 `chat.tools` opt-in（shell 与 exec **同一闸**）。未覆盖 grant 且 Policy 为 `require_approval` 时，Broker 默认 **立即 deny**（fail closed）。
 
 Crush 等产品在 **单次 tool call** 边界提供 allow/deny 队列，无需整单 plan 审批。产品需要：在 **agent** 模式下，对未预授权的高风险 call 可挂起 → 人在 TUI 决策 → 发 **scoped grant** → **同一 agent 循环**继续。
 
