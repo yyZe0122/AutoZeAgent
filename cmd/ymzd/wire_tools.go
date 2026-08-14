@@ -19,11 +19,16 @@ type memoryBackendSetter interface {
 	SetBackend(tools.MemoryBackend)
 }
 
+type todoBackendSetter interface {
+	SetBackend(tools.TodoBackend)
+}
+
 type toolStack struct {
 	broker       *tools.Broker
 	pathGuard    *tools.PathGuard
 	taskTool     taskRunnerSetter
 	memTools     memoryBackendSetter
+	todoTools    todoBackendSetter
 	mcpRegistry  *tools.MCPRegistry
 	mcpToolNames []string
 	chatCfg      providerconfig.ChatConfig
@@ -86,6 +91,12 @@ func wireTools(stores coreStores, layout paths.Layout, workingDirectory string) 
 		return out, err
 	}
 	out.memTools = memTools
+
+	todoTools, err := tools.RegisterTodoTools(broker, nil)
+	if err != nil {
+		return out, err
+	}
+	out.todoTools = todoTools
 
 	mcpConfig, err := providerconfig.LoadMCP(layout.ConfigDir)
 	if err != nil {
