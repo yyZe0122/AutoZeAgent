@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -23,8 +24,12 @@ func (m model) applyModelStream(env modelstream.Envelope) (tea.Model, tea.Cmd) {
 	switch env.Event.Type {
 	case providerapi.StreamDelta:
 		m.liveContent += env.Event.ContentDelta
+		m.streamDirty = true
+		return m, m.ensureStreamPaint()
 	case providerapi.StreamThinking:
 		m.liveThinking += env.Event.ThinkingDelta
+		m.streamDirty = true
+		return m, m.ensureStreamPaint()
 	case providerapi.StreamToolCall:
 		if env.Event.ToolCall != nil {
 			preview := toolCallPreview(env.Event.ToolCall.Name, env.Event.ToolCall.Arguments)
@@ -37,24 +42,73 @@ func (m model) applyModelStream(env modelstream.Envelope) (tea.Model, tea.Cmd) {
 				Live:     true,
 			})
 		}
+		m.streamDirty = false
+		m.paintLiveDraft()
+		return m, nil
 	case providerapi.StreamComplete:
-		m.liveContent = ""
-		m.liveThinking = ""
-		m.liveTools = nil
-		m.liveRunID = ""
+		m.resetLiveStream()
+		m.timeline = dropLiveDraft(m.timeline)
 		return m, m.scheduleRefresh(refreshFull)
 	default:
 		if env.Event.ContentDelta != "" {
 			m.liveContent += env.Event.ContentDelta
+			m.streamDirty = true
 		}
 		if env.Event.ThinkingDelta != "" {
 			m.liveThinking += env.Event.ThinkingDelta
+			m.streamDirty = true
 		}
+		if m.streamDirty {
+			return m, m.ensureStreamPaint()
+		}
+		return m, nil
 	}
-	m.timeline = buildChatTimeline(m.messages, m.task, m.plan, m.runs)
-	m.timeline = appendLiveDraft(m.timeline, m.liveThinking, m.liveContent, m.liveTools)
-	m.syncViewport(true)
+}
+
+type streamPaintMsg struct{}
+
+func streamPaintCmd() tea.Cmd {
+	return tea.Tick(streamPaintInterval, func(time.Time) tea.Msg { return streamPaintMsg{} })
+}
+
+func (m *model) ensureStreamPaint() tea.Cmd {
+	if m.streamPaintOn {
+		return nil
+	}
+	m.streamPaintOn = true
+	return streamPaintCmd()
+}
+
+func (m model) applyStreamPaint() (tea.Model, tea.Cmd) {
+	m.streamPaintOn = false
+	if !m.streamDirty {
+		return m, nil
+	}
+	m.streamDirty = false
+	m.paintLiveDraft()
 	return m, nil
+}
+
+func (m *model) paintLiveDraft() {
+	m.timeline = upsertLiveDraft(m.timeline, m.liveThinking, m.liveContent, m.liveTools)
+	m.syncViewport(false)
+}
+
+func (m *model) resetLiveStream() {
+	m.liveContent = ""
+	m.liveThinking = ""
+	m.liveTools = nil
+	m.liveRunID = ""
+	m.streamDirty = false
+	m.streamPaintOn = false
+	m.streamMD.reset()
+}
+
+func dropLiveDraft(items []timelineItem) []timelineItem {
+	if n := len(items); n > 0 && items[n-1].Key == "live" {
+		return items[:n-1]
+	}
+	return items
 }
 
 func (m model) applyPermPoll(msg permPollDoneMsg) (tea.Model, tea.Cmd) {

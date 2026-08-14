@@ -70,10 +70,7 @@ func (m model) applyRefresh(msg refreshDoneMsg) (tea.Model, tea.Cmd) {
 		}
 		// Authoritative transcript clears live typewriter draft.
 		if msg.messages != nil {
-			m.liveContent = ""
-			m.liveThinking = ""
-			m.liveTools = nil
-			m.liveRunID = ""
+			m.resetLiveStream()
 		}
 		m.timeline = buildChatTimeline(m.messages, m.task, m.plan, m.runs)
 		if len(m.journeyRows) > 0 {
@@ -196,6 +193,7 @@ func (m model) applyCommand(msg commandDoneMsg) (tea.Model, tea.Cmd) {
 		m.timeline = nil
 		m.journeyRows = nil
 		m.tlCache = timelineRenderCache{}
+		m.resetLiveStream()
 		m.usage = gatewayclient.TaskUsage{}
 		m.usageOK = false
 		m.runUsage = gatewayclient.RunUsage{}

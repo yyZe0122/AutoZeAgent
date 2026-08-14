@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"strings"
 	"sync"
-	"time"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/glamour"
@@ -14,10 +13,8 @@ import (
 )
 
 const (
-	mdMaxRunes     = 12000
-	mdCacheLimit   = 64
-	liveMDMinRunes = 80
-	liveMDMinWait  = 200 * time.Millisecond
+	mdMaxRunes   = 12000
+	mdCacheLimit = 64
 )
 
 type mdCacheEntry struct {
@@ -28,20 +25,7 @@ type mdCacheEntry struct {
 var (
 	mdMu    sync.Mutex
 	mdCache []mdCacheEntry
-
-	liveMDMu    sync.Mutex
-	liveMDCache []liveMDEntry
 )
-
-type liveMDEntry struct {
-	key   string
-	src   string
-	out   string
-	at    time.Time
-	runes int
-	width int
-	theme ThemeName
-}
 
 // renderMarkdown renders assistant reply markdown for the terminal.
 // Plain short replies without markdown markers stay plain (no glamour padding).
@@ -54,7 +38,7 @@ func renderMarkdown(src string, width int, theme ThemeName) string {
 		width = 40
 	}
 	// Soft cap: huge dumps stay plain.
-	if len([]rune(src)) > mdMaxRunes {
+	if utf8.RuneCountInString(src) > mdMaxRunes {
 		return src
 	}
 	if !looksLikeMarkdown(src) {
@@ -136,61 +120,97 @@ func unclosedFence(s string) bool {
 	return strings.Count(s, "```")%2 == 1
 }
 
-// renderLiveMarkdown throttles glamour during streaming (T8).
-// Unclosed fences and recent tiny deltas stay plain / last snapshot.
-// key isolates concurrent streams (typically contentBlock.Key).
-func renderLiveMarkdown(src string, width int, theme ThemeName, key string) string {
+// streamingMD freezes a glamour'd prefix at the last safe blank-line cut.
+// The growing trail stays plain (T8). Owned by model, passed via renderOpts.
+type streamingMD struct {
+	src    string
+	cut    int
+	prefix string
+	width  int
+	theme  ThemeName
+}
+
+func (s *streamingMD) reset() {
+	if s == nil {
+		return
+	}
+	*s = streamingMD{}
+}
+
+func (s *streamingMD) render(src string, width int, theme ThemeName) string {
 	src = strings.TrimRight(src, "\n")
-	if src == "" || unclosedFence(src) || !looksLikeMarkdown(src) {
+	if src == "" {
+		return ""
+	}
+	if width < 20 {
+		width = 40
+	}
+	if utf8.RuneCountInString(src) > mdMaxRunes || !looksLikeMarkdown(src) {
 		return src
 	}
-	if utf8.RuneCountInString(src) > mdMaxRunes {
+	if s == nil {
 		return src
 	}
-	if strings.TrimSpace(key) == "" {
-		key = "_"
+	if s.width != width || s.theme != theme {
+		s.reset()
 	}
-	now := time.Now()
-	n := utf8.RuneCountInString(src)
-	liveMDMu.Lock()
-	defer liveMDMu.Unlock()
-	if e, ok := liveMDLookup(key); ok {
-		if src == e.src && width == e.width && theme == e.theme && e.out != "" {
-			return e.out
-		}
-		if e.out != "" && width == e.width && theme == e.theme {
-			if now.Sub(e.at) < liveMDMinWait && n-e.runes < liveMDMinRunes {
-				return e.out
-			}
-		}
+	if s.cut > 0 && (s.cut > len(src) || src[:s.cut] != s.src[:min(s.cut, len(s.src))]) {
+		s.reset()
 	}
-	out := renderMarkdown(src, width, theme)
-	liveMDPut(liveMDEntry{
-		key: key, src: src, out: out, at: now, runes: n, width: width, theme: theme,
-	})
-	return out
+
+	cut := safeMarkdownCut(src)
+	if cut > s.cut {
+		s.prefix = renderMarkdown(src[:cut], width, theme)
+		s.cut = cut
+	}
+	s.src = src
+	s.width = width
+	s.theme = theme
+
+	if s.cut <= 0 || s.prefix == "" {
+		return src
+	}
+	trail := src[s.cut:]
+	if trail == "" {
+		return s.prefix
+	}
+	return joinMD(s.prefix, trail)
 }
 
-func liveMDLookup(key string) (liveMDEntry, bool) {
-	for _, e := range liveMDCache {
-		if e.key == key {
-			return e, true
-		}
+func joinMD(prefix, trail string) string {
+	prefix = strings.TrimRight(prefix, "\n")
+	trail = strings.TrimLeft(trail, "\n")
+	if prefix == "" {
+		return trail
 	}
-	return liveMDEntry{}, false
+	if trail == "" {
+		return prefix
+	}
+	return prefix + "\n\n" + trail
 }
 
-func liveMDPut(e liveMDEntry) {
-	for i := range liveMDCache {
-		if liveMDCache[i].key == e.key {
-			liveMDCache[i] = e
-			return
+// safeMarkdownCut is the last blank-line offset whose prefix has no open fence.
+func safeMarkdownCut(src string) int {
+	best := 0
+	off := 0
+	lines := strings.Split(src, "\n")
+	for i, line := range lines {
+		off += len(line)
+		if i < len(lines)-1 {
+			off++ // newline
 		}
+		if i == len(lines)-1 {
+			break
+		}
+		if strings.TrimSpace(line) != "" {
+			continue
+		}
+		if unclosedFence(src[:off]) {
+			continue
+		}
+		best = off
 	}
-	if len(liveMDCache) >= mdCacheLimit {
-		liveMDCache = liveMDCache[1:]
-	}
-	liveMDCache = append(liveMDCache, e)
+	return best
 }
 
 func mdStyle(theme ThemeName) ansi.StyleConfig {

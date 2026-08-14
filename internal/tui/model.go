@@ -39,15 +39,16 @@ const (
 )
 
 const (
-	runPollInterval   = 2 * time.Second
-	permPollInterval  = 2 * time.Second
-	animInterval      = 400 * time.Millisecond
-	commandTimeout    = 30 * time.Second
-	historyLimit      = 50
-	contextBreakWidth = 100
-	contextPanelWidth = 26
-	overlayMaxLines   = 10
-	helpOverlayMax    = 14
+	runPollInterval     = 2 * time.Second
+	permPollInterval    = 2 * time.Second
+	animInterval        = 400 * time.Millisecond
+	streamPaintInterval = 32 * time.Millisecond
+	commandTimeout      = 30 * time.Second
+	historyLimit        = 50
+	contextBreakWidth   = 100
+	contextPanelWidth   = 26
+	overlayMaxLines     = 10
+	helpOverlayMax      = 14
 	// timeline body defaults (fold large run results).
 	timelineBodyMaxLines = 12
 	timelineBodyMaxChars = 2400
@@ -107,13 +108,16 @@ type model struct {
 	runs             []gatewayclient.Run
 	messages         []gatewayclient.TranscriptMessage
 	// live assistant draft from model-stream (typewriter); cleared on complete/refresh.
-	liveContent  string
-	liveThinking string
-	liveTools    []contentBlock // streamed tool_call lines as blocks
-	liveRunID    gatewayclient.RunID
-	timeline     []timelineItem
-	tlCache      timelineRenderCache
-	expand       expandState
+	liveContent   string
+	liveThinking  string
+	liveTools     []contentBlock // streamed tool_call lines as blocks
+	liveRunID     gatewayclient.RunID
+	streamDirty   bool // coalesced live paint pending
+	streamPaintOn bool
+	streamMD      streamingMD
+	timeline      []timelineItem
+	tlCache       timelineRenderCache
+	expand        expandState
 	// journeyRows optional memory timeline rows (C4); cleared on session clear.
 	journeyRows []timelineItem
 	stickBottom bool

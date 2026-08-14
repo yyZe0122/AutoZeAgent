@@ -420,23 +420,18 @@ func renderBlock(bl contentBlock, exp expandState, opts renderOpts, parent timel
 
 	case blockReply:
 		text := bl.Text
-		plain := strings.TrimSuffix(text, "▌")
-		if !open && needsFold(plain, timelineBodyMaxLines, timelineBodyMaxChars) {
+		if !open && needsFold(text, timelineBodyMaxLines, timelineBodyMaxChars) {
 			text = foldHead(text, timelineBodyMaxLines, timelineBodyMaxChars)
 			return renderPlainBlock(text, styleTLReply, w, bl.Key)
 		}
-		if plain != "" {
-			innerW := w
-			var md string
+		if text != "" {
 			if bl.Live {
-				md = renderLiveMarkdown(plain, innerW, opts.Theme, bl.Key)
-			} else {
-				md = renderMarkdown(plain, innerW, opts.Theme)
+				if opts.Stream == nil {
+					return renderPlainBlock(text, styleTLReply, w, bl.Key)
+				}
+				return renderPlainBlock(opts.Stream.render(text, w, opts.Theme), styleTLReply, w, bl.Key)
 			}
-			if bl.Live && md == plain {
-				return renderPlainBlock(text, styleTLReply, w, bl.Key)
-			}
-			return renderPlainBlock(md, styleTLReply, w, bl.Key)
+			return renderPlainBlock(renderMarkdown(text, w, opts.Theme), styleTLReply, w, bl.Key)
 		}
 		return renderPlainBlock(text, styleTLReply, w, bl.Key)
 

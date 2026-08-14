@@ -20,6 +20,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 
+	case streamPaintMsg:
+		return m.applyStreamPaint()
+
 	case tickMsg:
 		m.animFrame++
 		var cmds []tea.Cmd

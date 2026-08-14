@@ -154,6 +154,54 @@ func TestLiveThinkingTail(t *testing.T) {
 	}
 }
 
+func TestDropLiveDraft(t *testing.T) {
+	base := []timelineItem{{Kind: tlUser, Title: "you", Body: "hi"}}
+	with := appendLiveDraft(base, "", "hello", nil)
+	if len(with) != 2 || with[1].Key != "live" {
+		t.Fatalf("draft = %#v", with)
+	}
+	got := dropLiveDraft(with)
+	if len(got) != 1 || got[0].Kind != tlUser {
+		t.Fatalf("drop = %#v", got)
+	}
+	if dropLiveDraft(base)[0].Kind != tlUser {
+		t.Fatal("drop without draft")
+	}
+}
+
+func TestClearTaskResetsLiveStream(t *testing.T) {
+	m := model{
+		liveContent:   "partial",
+		streamDirty:   true,
+		streamPaintOn: true,
+		streamMD:      streamingMD{cut: 4, src: "hi\n\n"},
+		timeline:      []timelineItem{{Key: "live"}},
+	}
+	updated, _ := m.Update(commandDoneMsg{clearTask: true})
+	got := updated.(model)
+	if got.liveContent != "" || got.streamDirty || got.streamPaintOn || got.streamMD.cut != 0 {
+		t.Fatalf("live leftover content=%q dirty=%v paint=%v cut=%d",
+			got.liveContent, got.streamDirty, got.streamPaintOn, got.streamMD.cut)
+	}
+	if len(got.timeline) != 0 {
+		t.Fatalf("timeline = %#v", got.timeline)
+	}
+}
+
+func TestUpsertLiveDraftNoCaret(t *testing.T) {
+	items := upsertLiveDraft(nil, "", "hello", nil)
+	if len(items) != 1 || items[0].Key != "live" {
+		t.Fatalf("items = %#v", items)
+	}
+	if len(items[0].Blocks) != 1 || items[0].Blocks[0].Text != "hello" {
+		t.Fatalf("blocks = %#v", items[0].Blocks)
+	}
+	again := upsertLiveDraft(items, "", "hello world", nil)
+	if len(again) != 1 || again[0].Blocks[0].Text != "hello world" {
+		t.Fatalf("upsert = %#v", again)
+	}
+}
+
 func TestTimelineRenderCacheHit(t *testing.T) {
 	var cache timelineRenderCache
 	opts := defaultRenderOpts()

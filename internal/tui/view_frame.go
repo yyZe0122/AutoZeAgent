@@ -283,13 +283,26 @@ func (m *model) syncViewport(force bool) {
 	content := renderSessionView(m)
 	if !force && content == m.viewportContent {
 		if m.stickBottom {
-			m.viewport.GotoBottom()
+			m.stickViewportBottom()
 		}
 		return
 	}
 	m.viewportContent = content
 	m.viewport.SetContent(content)
 	if m.stickBottom {
-		m.viewport.GotoBottom()
+		m.stickViewportBottom()
 	}
+}
+
+func (m *model) stickViewportBottom() {
+	total := m.viewport.TotalLineCount()
+	h := m.viewport.Height
+	if h < 1 {
+		h = 1
+	}
+	y := total - h
+	if y < 0 {
+		y = 0
+	}
+	m.viewport.SetYOffset(y)
 }

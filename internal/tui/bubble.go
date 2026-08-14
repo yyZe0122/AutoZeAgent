@@ -9,8 +9,9 @@ import (
 
 // renderOpts controls bubble width and markdown theme for one paint.
 type renderOpts struct {
-	Width int
-	Theme ThemeName
+	Width  int
+	Theme  ThemeName
+	Stream *streamingMD
 }
 
 func defaultRenderOpts() renderOpts {

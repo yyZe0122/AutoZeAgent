@@ -1,6 +1,9 @@
 package tui
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestUnclosedFence(t *testing.T) {
 	if !unclosedFence("hi\n```go\nfunc") {
@@ -11,24 +14,58 @@ func TestUnclosedFence(t *testing.T) {
 	}
 }
 
-func TestRenderLiveMarkdownKeepsUnclosedPlain(t *testing.T) {
+func TestStreamingMDKeepsUnclosedPlain(t *testing.T) {
+	var s streamingMD
 	src := "```md\n**bold**"
-	if got := renderLiveMarkdown(src, 80, ThemeNight, "k1"); got != src {
+	if got := s.render(src, 80, ThemeNight); got != src {
 		t.Fatalf("got %q", got)
 	}
 }
 
-func TestRenderLiveMarkdownKeysDoNotCollide(t *testing.T) {
-	liveMDMu.Lock()
-	liveMDCache = nil
-	liveMDMu.Unlock()
-	a := renderLiveMarkdown("**one**", 80, ThemeNight, "stream-a")
-	b := renderLiveMarkdown("**two**", 80, ThemeNight, "stream-b")
-	if a == b {
-		t.Fatalf("different keys must not share output: %q", a)
+func TestSafeMarkdownCutBlankLine(t *testing.T) {
+	src := "hello\n\nworld still growing"
+	cut := safeMarkdownCut(src)
+	if cut != len("hello\n\n") {
+		t.Fatalf("cut = %d want %d (%q)", cut, len("hello\n\n"), src[:cut])
 	}
-	again := renderLiveMarkdown("**one**", 80, ThemeNight, "stream-a")
-	if again != a {
-		t.Fatalf("same key should hit cache: %q vs %q", again, a)
+}
+
+func TestSafeMarkdownCutSkipsOpenFence(t *testing.T) {
+	src := "intro\n\n```go\nfunc main() {\n"
+	cut := safeMarkdownCut(src)
+	if cut != len("intro\n\n") {
+		t.Fatalf("cut = %d (%q)", cut, src[:cut])
+	}
+}
+
+func TestSafeMarkdownCutCrossesList(t *testing.T) {
+	src := "intro\n\n- item\n\nmore growing"
+	cut := safeMarkdownCut(src)
+	if cut != len("intro\n\n- item\n\n") {
+		t.Fatalf("cut = %d (%q)", cut, src[:cut])
+	}
+}
+
+func TestStreamingMDFreezesPrefixTrailPlain(t *testing.T) {
+	var s streamingMD
+	a := s.render("hello\n\nwor", 80, ThemeNight)
+	b := s.render("hello\n\nworld", 80, ThemeNight)
+	if a == "" || b == "" {
+		t.Fatal("empty render")
+	}
+	first, _, _ := strings.Cut(a, "\n")
+	if first != "" && !strings.Contains(b, first) {
+		t.Fatalf("prefix drifted:\n%q\n%q", a, b)
+	}
+	if !strings.Contains(b, "world") {
+		t.Fatalf("trail missing: %q", b)
+	}
+}
+
+func TestStreamingMDTrailStaysPlain(t *testing.T) {
+	var s streamingMD
+	got := s.render("hello\n\n**wo", 80, ThemeNight)
+	if !strings.Contains(got, "**wo") {
+		t.Fatalf("trail should stay raw: %q", got)
 	}
 }

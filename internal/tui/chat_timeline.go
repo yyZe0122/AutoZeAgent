@@ -77,12 +77,15 @@ func patchRunningStatus(items []timelineItem, title string) []timelineItem {
 	return items
 }
 
-// appendLiveDraft adds in-progress assistant blocks for typewriter UI.
 func appendLiveDraft(items []timelineItem, thinking, content string, liveTools []contentBlock) []timelineItem {
+	return upsertLiveDraft(items, thinking, content, liveTools)
+}
+
+func upsertLiveDraft(items []timelineItem, thinking, content string, liveTools []contentBlock) []timelineItem {
 	think := strings.TrimSpace(thinking)
 	content = strings.TrimRight(content, "\n")
 	if think == "" && content == "" && len(liveTools) == 0 {
-		return items
+		return dropLiveDraft(items)
 	}
 	blocks := make([]contentBlock, 0, 2+len(liveTools))
 	if think != "" {
@@ -93,17 +96,17 @@ func appendLiveDraft(items []timelineItem, thinking, content string, liveTools [
 	blocks = append(blocks, liveTools...)
 	if content != "" {
 		blocks = append(blocks, contentBlock{
-			Kind: blockReply, Text: content + "▌", Key: "live-reply", Live: true,
-		})
-	} else if think != "" || len(liveTools) > 0 {
-		// Still streaming with no text yet — show cursor on a thin reply line.
-		blocks = append(blocks, contentBlock{
-			Kind: blockReply, Text: "▌", Key: "live-reply", Live: true,
+			Kind: blockReply, Text: content, Key: "live-reply", Live: true,
 		})
 	}
-	return append(items, timelineItem{
+	live := timelineItem{
 		Kind: tlRun, Title: "assistant…", State: "streaming", Blocks: blocks, Key: "live",
-	})
+	}
+	if n := len(items); n > 0 && items[n-1].Key == "live" {
+		items[n-1] = live
+		return items
+	}
+	return append(items, live)
 }
 
 func transcriptToItem(msg gatewayclient.TranscriptMessage, toolNames map[string]string, index int) timelineItem {
