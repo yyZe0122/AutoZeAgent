@@ -170,6 +170,83 @@ func TestSessionTranscriptFiltersInternalStepPrompt(t *testing.T) {
 	}
 }
 
+func TestSessionTranscriptTailKeepsNewest(t *testing.T) {
+	ctx := context.Background()
+	db, err := coresqlite.Open(ctx, t.TempDir()+"/core.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	sqlDB := db.SQL()
+	base := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
+	sessionStamp := base.Format(time.RFC3339Nano)
+	if _, err := sqlDB.ExecContext(ctx, `INSERT INTO sessions(session_id,state,version,created_at,updated_at) VALUES(?,?,?,?,?)`,
+		"session-tail", "active", 1, sessionStamp, sessionStamp); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 4; i++ {
+		stamp := base.Add(time.Duration(i) * time.Minute).Format(time.RFC3339Nano)
+		taskID := fmt.Sprintf("task-%d", i)
+		runID := fmt.Sprintf("run-%d", i)
+		if _, err := sqlDB.ExecContext(ctx, `INSERT INTO tasks(task_id,session_id,title,objective,state,execution_mode,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)`,
+			taskID, "session-tail", fmt.Sprintf("T%d", i), fmt.Sprintf("user-%d", i), "completed", "agent", 1, stamp, stamp); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := sqlDB.ExecContext(ctx, `INSERT INTO plans(plan_id,task_id,revision,state,scope_hash,document,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)`,
+			fmt.Sprintf("plan-%d", i), taskID, 1, "approved", "h", "{}", 1, stamp, stamp); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := sqlDB.ExecContext(ctx, `INSERT INTO runs(run_id,task_id,plan_id,state,started_at,updated_at,version) VALUES(?,?,?,?,?,?,?)`,
+			runID, taskID, fmt.Sprintf("plan-%d", i), "completed", stamp, stamp, 1); err != nil {
+			t.Fatal(err)
+		}
+		asstStamp := base.Add(time.Duration(i)*time.Minute + 30*time.Second).Format(time.RFC3339Nano)
+		if _, err := sqlDB.ExecContext(ctx, `INSERT INTO agent_run_records(run_id,position,record_type,message,usage,finish_reason,tool_call_id,created_at) VALUES(?,?,?,?,?,?,?,?)`,
+			runID, 0, "assistant_message",
+			fmt.Sprintf(`{"role":"assistant","content":"asst-%d"}`, i), `{}`, "stop", "", asstStamp); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store, err := New(sqlDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	asc, err := store.SessionTranscript(ctx, coreidentity.SessionID("session-tail"), TranscriptOptions{Page: Page{Limit: 50}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(asc) < 4 || asc[0].Content != "user-0" {
+		t.Fatalf("ASC still oldest-first: %#v", asc)
+	}
+	tail, err := store.SessionTranscriptTail(ctx, coreidentity.SessionID("session-tail"), 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tail) != 3 {
+		t.Fatalf("tail len=%d want 3: %#v", len(tail), tail)
+	}
+	if tail[0].CreatedAt > tail[1].CreatedAt {
+		t.Fatalf("tail must be chronological: %#v", tail)
+	}
+	for _, m := range tail {
+		if m.Content == "user-0" || m.Content == "asst-0" {
+			t.Fatalf("oldest turn leaked into tail: %#v", tail)
+		}
+	}
+}
+
+func TestAlignTranscriptTailCutKeepsToolPair(t *testing.T) {
+	msgs := []TranscriptMessage{
+		{ID: "old-user", Role: "user", Content: "old"},
+		{ID: "asst", Role: "assistant", Content: "call", ToolCalls: []TranscriptToolCall{{ID: "c1", Name: "fs_read"}}},
+		{ID: "tool", Role: "tool", Content: "body", ToolCallID: "c1"},
+		{ID: "new-user", Role: "user", Content: "new"},
+	}
+	if got := alignTranscriptTailCut(msgs, 2); got != 1 {
+		t.Fatalf("cut=%d want 1 (include assistant)", got)
+	}
+}
+
 func TestIsInternalStepPrompt(t *testing.T) {
 	if !isInternalStepPrompt("Task objective: x\nCurrent step: y") {
 		t.Fatal("expected step prompt")

@@ -201,6 +201,98 @@ func (s *Store) SessionTranscript(ctx context.Context, sessionID coreidentity.Se
 	return out, nil
 }
 
+// SessionTranscriptTail returns the newest n transcript messages in chronological
+// order for packing (ADR-051 / QB2). TUI/API pagination stays on SessionTranscript (ASC).
+func (s *Store) SessionTranscriptTail(ctx context.Context, sessionID coreidentity.SessionID, n int) ([]TranscriptMessage, error) {
+	if err := validateGet(ctx, string(sessionID)); err != nil {
+		return nil, err
+	}
+	if n <= 0 {
+		n = 200
+	}
+	if n > MaxPageSize {
+		n = MaxPageSize
+	}
+	if _, err := s.GetSession(ctx, sessionID); err != nil {
+		return nil, err
+	}
+	tasks, err := s.listSessionTasks(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]TranscriptMessage, 0, n+len(tasks))
+	for _, task := range tasks {
+		body := strings.TrimSpace(task.Objective)
+		if body == "" {
+			body = task.Title
+		}
+		out = append(out, TranscriptMessage{
+			ID:        fmt.Sprintf("task-user:%s", task.ID),
+			SessionID: sessionID,
+			TaskID:    task.ID,
+			Role:      "user",
+			Content:   body,
+			CreatedAt: task.CreatedAt,
+		})
+	}
+	rows, err := s.db.QueryContext(ctx, `
+        SELECT a.run_id, a.position, a.record_type, a.message, a.tool_call_id, a.created_at,
+               r.task_id
+        FROM agent_run_records a
+        INNER JOIN runs r ON r.run_id = a.run_id
+        INNER JOIN tasks t ON t.task_id = r.task_id
+        WHERE t.session_id = ?
+        ORDER BY a.created_at DESC, a.run_id DESC, a.position DESC
+        LIMIT ?`, sessionID, n)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		msg, err := scanTranscriptRow(rows, sessionID)
+		if err != nil {
+			return nil, err
+		}
+		if skipTranscriptRecord(msg, out) {
+			continue
+		}
+		out = append(out, msg)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	sortTranscript(out)
+	if len(out) > n {
+		out = out[alignTranscriptTailCut(out, len(out)-n):]
+	}
+	return out, nil
+}
+
+// alignTranscriptTailCut moves cut left so a tool result is not split from
+// its owning assistant tool_calls (ADR-051 pair-safe tail).
+func alignTranscriptTailCut(msgs []TranscriptMessage, cut int) int {
+	if cut <= 0 || cut >= len(msgs) {
+		return cut
+	}
+	if strings.EqualFold(msgs[cut].Role, "tool") {
+		for cut > 0 && strings.EqualFold(msgs[cut-1].Role, "tool") {
+			cut--
+		}
+		if cut > 0 && strings.EqualFold(msgs[cut-1].Role, "assistant") && len(msgs[cut-1].ToolCalls) > 0 {
+			cut--
+		}
+		return cut
+	}
+	i := cut
+	for i > 0 && strings.EqualFold(msgs[i-1].Role, "tool") {
+		i--
+	}
+	if i < cut && i > 0 && strings.EqualFold(msgs[i-1].Role, "assistant") && len(msgs[i-1].ToolCalls) > 0 {
+		return i - 1
+	}
+	return cut
+}
+
 // TaskTranscript is the same projection scoped to one task (for focused views).
 func (s *Store) TaskTranscript(ctx context.Context, taskID coreidentity.TaskID, options TranscriptOptions) ([]TranscriptMessage, error) {
 	if err := validateGet(ctx, string(taskID)); err != nil {
