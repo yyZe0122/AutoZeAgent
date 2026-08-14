@@ -52,11 +52,21 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.layout()
 			return m, nil
 		}
-		m.input.SetValue("")
-		m.errMsg = ""
-		m.historyIdx = -1
-		m.completer.update("")
-		return m, nil
+		if m.runActivity() == activityActive && m.task != nil {
+			m.statusMsg = "cancelling…"
+			return m, m.taskActionCmd(gatewayclient.TaskActionCancel, "esc")
+		}
+		if m.lastEscAt.IsZero() || time.Since(m.lastEscAt) > 800*time.Millisecond {
+			m.lastEscAt = time.Now()
+			m.input.SetValue("")
+			m.errMsg = ""
+			m.historyIdx = -1
+			m.completer.update("")
+			m.statusMsg = "esc again to undo last file edit"
+			return m, nil
+		}
+		m.lastEscAt = time.Time{}
+		return m, m.undoCmd()
 
 	case tea.KeyTab:
 		if m.completer.visible {

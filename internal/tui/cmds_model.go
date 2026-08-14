@@ -117,6 +117,9 @@ func (m model) statusCommandCmd() tea.Cmd {
 			if m.taskContext.Pressure > 0 {
 				fmt.Fprintf(&b, " pressure=%.0f%%", m.taskContext.Pressure*100)
 			}
+			if m.taskContext.Compacted {
+				b.WriteString(" compacted")
+			}
 		}
 		sessionID := strings.TrimSpace(string(m.sessionID))
 		if sessionID == "…" {

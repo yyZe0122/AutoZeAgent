@@ -58,6 +58,10 @@ func (f *fakeGateway) CompactSession(context.Context, gatewayclient.SessionID, s
 	return gatewayclient.CompactResult{Source: "llm"}, nil
 }
 
+func (f *fakeGateway) RewindSession(context.Context, gatewayclient.SessionID, string) (gatewayclient.RewindResult, error) {
+	return gatewayclient.RewindResult{Path: "/tmp/ws/a.go"}, nil
+}
+
 func (f *fakeGateway) TaskMessages(context.Context, gatewayclient.TaskID, int) ([]gatewayclient.TranscriptMessage, error) {
 	return nil, nil
 }

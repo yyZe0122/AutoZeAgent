@@ -32,6 +32,7 @@ type Gateway interface {
 	SessionMessages(ctx context.Context, id gatewayclient.SessionID, limit int) ([]gatewayclient.TranscriptMessage, error)
 	TaskMessages(ctx context.Context, id gatewayclient.TaskID, limit int) ([]gatewayclient.TranscriptMessage, error)
 	CompactSession(ctx context.Context, id gatewayclient.SessionID, focus string) (gatewayclient.CompactResult, error)
+	RewindSession(ctx context.Context, id gatewayclient.SessionID, revisionID string) (gatewayclient.RewindResult, error)
 
 	ListTasks(ctx context.Context, limit int) ([]gatewayclient.Task, error)
 	GetTask(ctx context.Context, id gatewayclient.TaskID) (gatewayclient.Task, error)

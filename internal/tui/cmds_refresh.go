@@ -35,6 +35,26 @@ func (m model) compactCmd(arg string) tea.Cmd {
 	}
 }
 
+func (m model) undoCmd() tea.Cmd {
+	return func() tea.Msg {
+		sessionID := strings.TrimSpace(string(m.sessionID))
+		if sessionID == "" || sessionID == "…" {
+			return commandDoneMsg{err: fmt.Errorf("focus a session first, then /undo")}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+		defer cancel()
+		result, err := m.gateway.RewindSession(ctx, gatewayclient.SessionID(sessionID), "")
+		if err != nil {
+			return commandDoneMsg{err: err}
+		}
+		path := strings.TrimSpace(result.Path)
+		if path == "" {
+			path = result.RevisionID
+		}
+		return commandDoneMsg{status: "restored " + path}
+	}
+}
+
 func (m model) expandCmd(arg string) tea.Cmd {
 	arg = strings.ToLower(strings.TrimSpace(arg))
 	if arg == "" {

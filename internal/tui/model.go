@@ -88,6 +88,7 @@ type model struct {
 	cwd       string
 	dataDir   string
 	busy      bool
+	lastEscAt time.Time
 
 	// Floating picker (sessions/models/jobs/skills). Slash completer is separate.
 	list        listKind

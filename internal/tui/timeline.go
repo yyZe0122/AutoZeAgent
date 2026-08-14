@@ -402,6 +402,15 @@ func renderBlock(bl contentBlock, exp expandState, opts renderOpts, parent timel
 		if bl.ToolID != "" {
 			label = label + " " + shortID(bl.ToolID)
 		}
+		if !open && looksLikeUnifiedDiff(text) {
+			n := lineCount(text)
+			preview := firstDiffHunkLine(text)
+			line := styleTLTool.Render("· " + label + " · diff " + fmt.Sprintf("%d lines · e expand", n))
+			if preview != "" {
+				line += "\n" + styleDim.Render("  "+truncate(preview, 80))
+			}
+			return zoneMark(bl.Key, line)
+		}
 		if !open && needsFold(text, toolResultMaxLines, toolResultMaxChars) {
 			n := lineCount(text)
 			preview := firstLine(text)
@@ -455,6 +464,21 @@ func needsFold(s string, maxLines, maxChars int) bool {
 		return true
 	}
 	return false
+}
+
+func looksLikeUnifiedDiff(s string) bool {
+	return strings.Contains(s, "\n--- a/") || strings.HasPrefix(strings.TrimSpace(s), "--- a/") ||
+		strings.Contains(s, `"diff":`) && strings.Contains(s, "@@ ")
+}
+
+func firstDiffHunkLine(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "@@") || strings.HasPrefix(trim, "---") || strings.HasPrefix(trim, "+++") {
+			return trim
+		}
+	}
+	return firstLine(s)
 }
 
 func firstLine(s string) string {
