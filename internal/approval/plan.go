@@ -188,14 +188,14 @@ func normalizeCapability(scope CapabilityScope) (CapabilityScope, error) {
 	} else if normalized.MaxCalls == 0 {
 		return CapabilityScope{}, fmt.Errorf("%w: maximum calls must be positive", ErrInvalidPlan)
 	}
-	if normalized.Capability == "process_exec" {
-		// Empty Command is allowed (scheme A path-scoped any-command grant). Non-empty is exact match.
+	if normalized.Capability == "process_exec" || normalized.Capability == "process_shell" {
+		// Empty Command is allowed (scheme A path-scoped any-command grant). Non-empty is exact / prefix match.
 		if len(normalized.Paths) == 0 {
-			return CapabilityScope{}, fmt.Errorf("%w: process_exec requires at least one absolute working-directory path", ErrInvalidPlan)
+			return CapabilityScope{}, fmt.Errorf("%w: %s requires at least one absolute working-directory path", ErrInvalidPlan, normalized.Capability)
 		}
 		for _, p := range normalized.Paths {
 			if !isAbsoluteCapabilityPath(p) {
-				return CapabilityScope{}, fmt.Errorf("%w: process_exec path %q must be absolute", ErrInvalidPlan, p)
+				return CapabilityScope{}, fmt.Errorf("%w: %s path %q must be absolute", ErrInvalidPlan, normalized.Capability, p)
 			}
 		}
 	}

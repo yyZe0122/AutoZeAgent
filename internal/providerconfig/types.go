@@ -172,7 +172,7 @@ type ChatPermissionConfig struct {
 type ChatToolsConfig struct {
 	// Git enables git_status / git_diff / git_add / git_commit path-scoped grants (default false).
 	Git bool `json:"git,omitempty"`
-	// Process enables process_exec path-scoped grants (default false).
+	// Process enables process_exec and process_shell path-scoped grants (default false).
 	Process bool `json:"process,omitempty"`
 }
 
@@ -195,7 +195,7 @@ func (c ChatConfig) AgentGitEnabled() bool {
 	return c.Tools != nil && c.Tools.Git
 }
 
-// AgentProcessEnabled reports whether agent mode may receive process_exec grants (default false).
+// AgentProcessEnabled reports whether agent mode may receive process_exec/process_shell grants (default false).
 func (c ChatConfig) AgentProcessEnabled() bool {
 	return c.Tools != nil && c.Tools.Process
 }

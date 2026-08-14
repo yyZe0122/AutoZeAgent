@@ -21,6 +21,9 @@ func TestCommandArgsMatchSchemeA(t *testing.T) {
 		{name: "command mismatch", grantCmd: "git", grantArgs: nil, reqCmd: "echo", reqArgs: nil, wantErr: true},
 		{name: "args exact match", grantCmd: "echo", grantArgs: []string{"hi"}, reqCmd: "echo", reqArgs: []string{"hi"}, wantErr: false},
 		{name: "args mismatch when grant non-empty", grantCmd: "echo", grantArgs: []string{"hi"}, reqCmd: "echo", reqArgs: []string{"bye"}, wantErr: true},
+		{name: "similar prefix go test", grantCmd: "go", grantArgs: []string{"test"}, reqCmd: "go", reqArgs: []string{"test", "./internal/foo/"}, wantErr: false},
+		{name: "similar prefix sh -c", grantCmd: "/bin/sh", grantArgs: []string{"-c", "go test"}, reqCmd: "/bin/sh", reqArgs: []string{"-c", "go test ./internal/foo/"}, wantErr: false},
+		{name: "prefix does not match other command", grantCmd: "go", grantArgs: []string{"test"}, reqCmd: "go", reqArgs: []string{"build", "./..."}, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

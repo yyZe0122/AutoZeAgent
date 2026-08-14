@@ -57,11 +57,15 @@ func RegisterBuiltinsWithOptions(broker *Broker, roots []string, allowAll bool, 
 	if err != nil {
 		return nil, err
 	}
+	shell, err := newProcessShellTool(guard, runner)
+	if err != nil {
+		return nil, err
+	}
 	gitTools, err := newGitTools(guard, runner)
 	if err != nil {
 		return nil, err
 	}
-	all := append(fileTools, process)
+	all := append(fileTools, process, shell)
 	all = append(all, gitTools...)
 	all = append(all, newHTTPGetTool(16*1024*1024))
 	for _, tool := range all {

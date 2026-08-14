@@ -33,9 +33,84 @@ func newProcessTool(guard *PathGuard, runner *executor.Runner) (Tool, error) {
 	return &processTool{guard: guard, runner: runner}, nil
 }
 
+func newProcessShellTool(guard *PathGuard, runner *executor.Runner) (Tool, error) {
+	if runner == nil {
+		return nil, errors.New("process runner is required")
+	}
+	if guard == nil {
+		return nil, errors.New("path guard is required")
+	}
+	return &processShellTool{guard: guard, runner: runner}, nil
+}
+
+type processShellTool struct {
+	guard  *PathGuard
+	runner *executor.Runner
+}
+
+type processShellInput struct {
+	Command     string            `json:"command"`
+	Directory   string            `json:"directory"`
+	Environment map[string]string `json:"environment,omitempty"`
+}
+
+const processShellBin = "/bin/sh"
+
+func (t *processShellTool) Definition() toolapi.Definition {
+	return toolapi.Definition{
+		Name: "process_shell", Description: "Run tests or an approved /bin/sh -c script (not for find/grep). Same grant gate as process_exec (chat.tools.process). Prefer process_exec argv when you do not need a shell. Plan and cron never receive this grant.",
+		Risk: string(policy.RiskR2), DefaultTimeoutMillis: 30000,
+		InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false,"required":["command","directory"],"properties":{"command":{"type":"string","description":"Script passed to /bin/sh -c"},"directory":{"type":"string"},"environment":{"type":"object","additionalProperties":{"type":"string"}}}}`),
+	}
+}
+
+func (t *processShellTool) Authorization(raw json.RawMessage) (Authorization, error) {
+	var input processShellInput
+	if err := decodeStrict(raw, &input); err != nil {
+		return Authorization{}, err
+	}
+	script := strings.TrimSpace(input.Command)
+	if script == "" {
+		return Authorization{}, errors.New("process shell command is required")
+	}
+	directory, err := t.guard.Resolve(input.Directory)
+	if err != nil {
+		return Authorization{}, err
+	}
+	return Authorization{
+		Capability: "process_shell", Path: directory,
+		Command: processShellBin, Arguments: []string{"-c", script},
+	}, nil
+}
+
+func (t *processShellTool) Execute(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	var input processShellInput
+	if err := decodeStrict(raw, &input); err != nil {
+		return nil, err
+	}
+	script := strings.TrimSpace(input.Command)
+	if script == "" {
+		return nil, errors.New("process shell command is required")
+	}
+	directory, err := t.guard.Resolve(input.Directory)
+	if err != nil {
+		return nil, err
+	}
+	result, runErr := t.runner.Run(ctx, executor.Request{
+		Command: processShellBin, Arguments: []string{"-c", script},
+		Directory: directory, Environment: input.Environment,
+		CallID: toolCallIDFromContext(ctx),
+	})
+	encoded, encodeErr := encodeResult(result)
+	if encodeErr != nil {
+		return nil, encodeErr
+	}
+	return encoded, runErr
+}
+
 func (t *processTool) Definition() toolapi.Definition {
 	return toolapi.Definition{
-		Name: "process_exec", Description: "Last resort: execute an approved command as argv (not a shell) in an approved working directory. Do not reimplement a configured mcp_* tool by writing Python/bash. Prefer fs_glob/fs_grep for find/grep. directory must be an absolute path under an approved grant path; command and arguments must match the approved grant exactly.",
+		Name: "process_exec", Description: "Run tests or an approved command as argv (not a shell). Not for find/grep (use fs_glob/fs_grep). Do not reimplement a configured mcp_* tool. directory must be absolute under an approved grant; command and arguments must match the grant exactly.",
 		Risk: string(policy.RiskR2), DefaultTimeoutMillis: 30000,
 		InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false,"required":["command","directory"],"properties":{"command":{"type":"string"},"arguments":{"type":"array","items":{"type":"string"}},"directory":{"type":"string"},"environment":{"type":"object","additionalProperties":{"type":"string"}}}}`),
 	}

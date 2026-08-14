@@ -311,6 +311,9 @@ func (s *Service) DecideWithOptions(ctx context.Context, permissionID, decision,
 // narrowScopeForSimilar keeps plan capability but prefers the request path's parent
 // when it still falls under the plan paths (session-pattern, ADR-046).
 func narrowScopeForSimilar(scope approval.CapabilityScope, req Request) approval.CapabilityScope {
+	if req.Capability == "process_exec" || req.Capability == "process_shell" {
+		scope = applyProcessSimilarPrefix(scope, req)
+	}
 	path := strings.TrimSpace(req.Path)
 	if path == "" {
 		return scope
@@ -347,6 +350,30 @@ func narrowScopeForSimilar(scope approval.CapabilityScope, req Request) approval
 			}
 		}
 	}
+	return scope
+}
+
+func applyProcessSimilarPrefix(scope approval.CapabilityScope, req Request) approval.CapabilityScope {
+	cmd := strings.TrimSpace(req.Command)
+	if cmd == "" {
+		return scope
+	}
+	scope.Command = cmd
+	args := append([]string(nil), req.CommandArgs...)
+	if cmd == "/bin/sh" && len(args) >= 2 && args[0] == "-c" {
+		script := strings.TrimSpace(args[1])
+		if fields := strings.Fields(script); len(fields) >= 2 {
+			scope.Arguments = []string{"-c", fields[0] + " " + fields[1]}
+			return scope
+		}
+		scope.Arguments = []string{"-c", script}
+		return scope
+	}
+	if len(args) >= 1 {
+		scope.Arguments = args[:1]
+		return scope
+	}
+	scope.Arguments = nil
 	return scope
 }
 

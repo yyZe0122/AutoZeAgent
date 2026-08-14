@@ -489,7 +489,7 @@ func grantMatchesRequest(grant CapabilityGrant, request GrantRequest) error {
 		return fmt.Errorf("%w: path is outside grant", ErrGrantDenied)
 	}
 	// Scheme A (P4.3): empty grant command/args = any request command/args within path scope.
-	// Non-empty grant command must match exactly; non-empty grant args must match exactly.
+	// Non-empty grant command must match; non-empty grant args match exactly or as a prefix (QD3 similar).
 	if err := commandArgsMatch(grant.Scope.Command, grant.Scope.Arguments, request.Command, request.Arguments); err != nil {
 		return err
 	}
@@ -507,10 +507,35 @@ func commandArgsMatch(grantCmd string, grantArgs []string, requestCmd string, re
 	if grantCmd != "" && grantCmd != requestCmd {
 		return fmt.Errorf("%w: command or arguments do not match", ErrGrantDenied)
 	}
-	if len(grantArgs) > 0 && !slices.Equal(grantArgs, requestArgs) {
-		return fmt.Errorf("%w: command or arguments do not match", ErrGrantDenied)
+	if len(grantArgs) == 0 {
+		return nil
 	}
-	return nil
+	if slices.Equal(grantArgs, requestArgs) {
+		return nil
+	}
+	if argsMatchPrefix(grantArgs, requestArgs) {
+		return nil
+	}
+	return fmt.Errorf("%w: command or arguments do not match", ErrGrantDenied)
+}
+
+// argsMatchPrefix implements Claude-style Bash(go test *): grant args are a prefix
+// of the request, and the last grant token may be a string prefix of that request arg.
+func argsMatchPrefix(grantArgs, requestArgs []string) bool {
+	if len(grantArgs) > len(requestArgs) || len(grantArgs) == 0 {
+		return false
+	}
+	for i := 0; i < len(grantArgs)-1; i++ {
+		if grantArgs[i] != requestArgs[i] {
+			return false
+		}
+	}
+	last := grantArgs[len(grantArgs)-1]
+	got := requestArgs[len(grantArgs)-1]
+	if last == got {
+		return true
+	}
+	return strings.HasPrefix(got, last+" ") || strings.HasPrefix(got, last)
 }
 
 func pathAllowed(scopes []string, requested string) bool {
