@@ -99,3 +99,31 @@ func (s *Store) Put(ctx context.Context, mediaType string, content []byte, metad
 	}
 	return toolapi.ArtifactRef{ID: id, ContentHash: hash, MediaType: mediaType, SizeBytes: int64(len(content))}, nil
 }
+
+// Get reads artifact bytes by id (sha256:… or bare hash).
+func (s *Store) Get(ctx context.Context, id string) ([]byte, error) {
+	if ctx == nil {
+		return nil, errors.New("artifact context is required")
+	}
+	id = strings.TrimSpace(id)
+	hash := strings.TrimPrefix(id, "sha256:")
+	if hash == "" {
+		return nil, errors.New("artifact id is required")
+	}
+	var path string
+	err := s.db.QueryRowContext(ctx, `SELECT storage_path FROM artifacts WHERE artifact_id = ? OR content_hash = ?`, id, hash).Scan(&path)
+	if errors.Is(err, sql.ErrNoRows) {
+		prefix := hash
+		if len(prefix) > 2 {
+			prefix = prefix[:2]
+		}
+		path = filepath.Join(s.root, prefix, hash)
+	} else if err != nil {
+		return nil, fmt.Errorf("lookup artifact: %w", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read artifact: %w", err)
+	}
+	return data, nil
+}
