@@ -58,7 +58,7 @@ cmd/ymz          flag / daemon ensure / 子命令与 tui.Run 入口
 internal/tui             Bubble Tea UI；消费窄 `tui.Gateway`（由 gatewayclient 满足）；主 UX
                           分发：`cmds.go` + `cmds_{session,skills,memory,perm,cron,model,refresh}.go`
                           Elm：`update.go` + `update_{refresh,stream,keys}.go`
-                          表现：lipgloss 气泡卡 + contentBlock；完成态 glamour；streaming reply 节流 live MD（T8）；
+                          表现：lipgloss 气泡卡 + contentBlock；完成态 glamour；streaming 冻结前缀 glamour + trail 永远 plain（T8）；
                           bubblezone 点击 expand；无新 list/viewport 引擎（见 docs/backlog/current.md）
 internal/gatewayclient   共享 HTTP/SSE 外观 + transport（不 import gateway server）
 internal/gateway         服务端 only：路由 / handlers / LocalRunner

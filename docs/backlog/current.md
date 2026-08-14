@@ -1,13 +1,13 @@
 # YunmengZe Agent 当前状态
 
-更新：2026-08-13（文档三盒：wiki / history / backlog · 基线 **v0.2.6**）
+更新：2026-08-14（T8 冻结前缀 + 合帧 paint · 基线 **v0.2.7**）
 
 **本文件是唯一活着的优化/backlog 文档。** 只写未完成与暂缓项；已落地细节见 ADR（`docs/wiki/adr/`）、[`docs/wiki/database.md`](../wiki/database.md)、changelog 与 git。目录：[`docs/README.md`](../README.md)。
 
 ## 现状
 
 生产形态稳定：`ymzd` + CLI·TUI（`ymz`）+ `core.db`。设计知识库：`docs/wiki/`。  
-当前发布线：**v0.2.6**（v0.2.5 Hermes skill/AGENTS/T8；v0.2.6 = TUI 泽夜/泽昼 + 平铺对话 + 文档三盒）。
+当前发布线：**v0.2.7**（v0.2.6 泽夜/泽昼平铺；v0.2.7 = T8 冻结前缀 + 32ms 合帧，trail 永远 plain）。
 
 | 对标 | 契约重叠（粗） | 说明 |
 | --- | --- | --- |
@@ -43,6 +43,7 @@
 | --- | --- | --- |
 | T / C / UX | T1–T8 · C1–C4 · UX-A/B（气泡 TUI + 节流 live MD） | v0.2.4–v0.2.5 |
 | TUI 视觉 | 泽夜/泽昼 · 去套娃 · 平铺消息 · slash 芦金；会话仅 `/sessions` overlay | v0.2.6 |
+| T8 收紧 | 冻结安全前缀 glamour；trail 永远 plain；32ms 合帧；`streamingMD` 挂 model | v0.2.7 |
 | O1–O4 | import-opencode · MCP remote · `chat.commands` · session prefer | v0.2.4 |
 | H* 已落地 | H7 pin · H1-lite · H5-lite · H3 draft · H4 hint · H5-skill · H6 injectscan | v0.2.4–v0.2.5 |
 | R | 改名 YunmengZe / `ymz` / `~/.yunmengze` | v0.2.0–v0.2.1 |
@@ -113,7 +114,7 @@ H2 / O5–O6 / M* ── 用户再提
 | --- | --- |
 | 全量 OpenCode API/SDK 兼容 | ~162 路径 + 生成 SDK；与三件套冲突；只用 O5 子集或体验兼容 |
 | 新 viewport/list 引擎 | 不引入 Crush-style lazy list / Ultraviolet（气泡 = lipgloss 自绘） |
-| streaming 每 token 全量 glamour | 禁止；T8 必须节流 + 未闭合围栏 plain + 失败回退 C2 |
+| streaming 每 token 全量 glamour | 禁止；T8 = 合帧 + 冻结前缀 glamour + trail 永远 plain + 未闭合围栏不切 + 失败回退 C2 |
 | Crush 三档 permission | 保持 once/similar/permanent/deny 四档 |
 | 沙箱 phase-2+ | namespace / bubblewrap / seccomp |
 | LSP | 另案 |
