@@ -40,9 +40,6 @@ func (t *fileTool) glob(ctx context.Context, raw json.RawMessage) (json.RawMessa
 	if pattern == "" {
 		return nil, errors.New("pattern is required")
 	}
-	if strings.Contains(pattern, "**") {
-		return nil, errors.New("recursive ** patterns are not supported; use a single-level glob or path subtree")
-	}
 	base := strings.TrimSpace(input.Path)
 	if base == "" {
 		base = "."
@@ -65,32 +62,143 @@ func (t *fileTool) glob(ctx context.Context, raw json.RawMessage) (json.RawMessa
 	if limit > maxGlobMaxResults {
 		limit = maxGlobMaxResults
 	}
-	// filepath.Glob is non-recursive; match under root only.
-	matches, err := filepath.Glob(filepath.Join(root, pattern))
-	if err != nil {
-		return nil, err
-	}
-	sort.Strings(matches)
-	out := make([]string, 0, minInt(len(matches), limit))
+	var matches []string
 	truncated := false
-	for _, match := range matches {
-		if err := ctx.Err(); err != nil {
+	if strings.Contains(pattern, "**") {
+		matches, truncated, err = t.globRecursive(ctx, root, pattern, limit)
+		if err != nil {
 			return nil, err
 		}
-		resolved, err := t.guard.Resolve(match)
-		if err != nil {
-			continue
+	} else {
+		raw, globErr := filepath.Glob(filepath.Join(root, pattern))
+		if globErr != nil {
+			return nil, globErr
+		}
+		sort.Strings(raw)
+		for _, match := range raw {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			resolved, resErr := t.guard.Resolve(match)
+			if resErr != nil {
+				continue
+			}
+			if len(matches) >= limit {
+				truncated = true
+				break
+			}
+			matches = append(matches, resolved)
+		}
+	}
+	return encodeResult(map[string]any{
+		"path": root, "pattern": pattern, "matches": matches,
+		"count": len(matches), "truncated": truncated,
+	})
+}
+
+const (
+	globMaxDepth     = 12
+	globMaxWalkFiles = 5000
+)
+
+func (t *fileTool) globRecursive(ctx context.Context, root, pattern string, limit int) ([]string, bool, error) {
+	matcher, err := compileGlobMatcher(pattern)
+	if err != nil {
+		return nil, false, err
+	}
+	var out []string
+	truncated := false
+	walked := 0
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		depth := 0
+		if rel != "." {
+			depth = strings.Count(rel, "/") + 1
+		}
+		if d.IsDir() {
+			if depth > globMaxDepth {
+				return filepath.SkipDir
+			}
+			name := d.Name()
+			if name == ".git" || name == "node_modules" || name == "vendor" || name == "bin" || name == "dist" {
+				if path != root {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+		walked++
+		if walked > globMaxWalkFiles {
+			truncated = true
+			return errGrepWalkLimit
+		}
+		if rel == "." || !matcher(rel) {
+			return nil
+		}
+		resolved, resErr := t.guard.Resolve(path)
+		if resErr != nil {
+			return nil
 		}
 		if len(out) >= limit {
 			truncated = true
-			break
+			return errGrepFileLimit
 		}
 		out = append(out, resolved)
-	}
-	return encodeResult(map[string]any{
-		"path": root, "pattern": pattern, "matches": out,
-		"count": len(out), "truncated": truncated,
+		return nil
 	})
+	if err != nil && !errors.Is(err, errGrepFileLimit) && !errors.Is(err, errGrepWalkLimit) {
+		return nil, false, err
+	}
+	sort.Strings(out)
+	return out, truncated, nil
+}
+
+func compileGlobMatcher(pattern string) (func(rel string) bool, error) {
+	pattern = filepath.ToSlash(strings.TrimSpace(pattern))
+	if pattern == "" {
+		return nil, errors.New("pattern is required")
+	}
+	// Convert ** glob to a simple regex: ** → .*  * → [^/]*  ? → [^/]
+	var b strings.Builder
+	b.WriteByte('^')
+	for i := 0; i < len(pattern); {
+		if i+1 < len(pattern) && pattern[i] == '*' && pattern[i+1] == '*' {
+			b.WriteString(".*")
+			i += 2
+			if i < len(pattern) && pattern[i] == '/' {
+				i++
+			}
+			continue
+		}
+		switch pattern[i] {
+		case '*':
+			b.WriteString("[^/]*")
+		case '?':
+			b.WriteString("[^/]")
+		case '.', '+', '(', ')', '|', '^', '$', '{', '}', '[', ']':
+			b.WriteByte('\\')
+			b.WriteByte(pattern[i])
+		default:
+			b.WriteByte(pattern[i])
+		}
+		i++
+	}
+	b.WriteByte('$')
+	re, err := regexp.Compile(b.String())
+	if err != nil {
+		return nil, fmt.Errorf("invalid glob: %w", err)
+	}
+	return re.MatchString, nil
 }
 
 type grepInput struct {

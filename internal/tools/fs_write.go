@@ -10,8 +10,9 @@ import (
 )
 
 type writeInput struct {
-	Path    string `json:"path"`
-	Content string `json:"content"`
+	Path           string `json:"path"`
+	Content        string `json:"content"`
+	ExpectedSHA256 string `json:"expected_sha256,omitempty"`
 }
 
 func (t *fileTool) write(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
@@ -23,20 +24,37 @@ func (t *fileTool) write(ctx context.Context, raw json.RawMessage) (json.RawMess
 	if err != nil {
 		return nil, err
 	}
+	before, beforeHash, err := readExistingText(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	if want := strings.TrimSpace(input.ExpectedSHA256); want != "" && want != beforeHash {
+		return encodeResult(map[string]any{
+			"error": "expected_sha256 mismatch", "path": path, "sha256": beforeHash,
+		})
+	}
+	if err := t.checkpointWrite(ctx, path, []byte(before), sha256Hex([]byte(input.Content))); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return nil, err
 	}
 	if err := atomicWrite(ctx, path, []byte(input.Content)); err != nil {
 		return nil, err
 	}
-	return encodeResult(map[string]any{"path": path, "size_bytes": len(input.Content)})
+	return encodeResult(map[string]any{
+		"path": path, "size_bytes": len(input.Content),
+		"sha256": sha256Hex([]byte(input.Content)),
+		"diff":   unifiedDiff(filepath.Base(path), before, input.Content),
+	})
 }
 
 type patchInput struct {
-	Path       string `json:"path"`
-	Old        string `json:"old"`
-	New        string `json:"new"`
-	ReplaceAll bool   `json:"replace_all,omitempty"`
+	Path           string `json:"path"`
+	Old            string `json:"old"`
+	New            string `json:"new"`
+	ReplaceAll     bool   `json:"replace_all,omitempty"`
+	ExpectedSHA256 string `json:"expected_sha256,omitempty"`
 }
 
 func (t *fileTool) patch(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
@@ -58,22 +76,41 @@ func (t *fileTool) patch(ctx context.Context, raw json.RawMessage) (json.RawMess
 	if err := validateTextContent(content); err != nil {
 		return nil, err
 	}
-	found := strings.Count(string(content), input.Old)
-	if found == 0 {
-		return nil, errors.New("patch old text not found")
+	currentHash := sha256Hex(content)
+	if want := strings.TrimSpace(input.ExpectedSHA256); want != "" && want != currentHash {
+		return encodeResult(map[string]any{
+			"error": "expected_sha256 mismatch", "path": path, "sha256": currentHash,
+		})
 	}
-	if found > 1 && !input.ReplaceAll {
-		return nil, errors.New("patch old text appears multiple times; provide more context or set replace_all to true")
+	updated, n, hint, matchErr := matchPatchOld(string(content), input.Old, input.New, input.ReplaceAll)
+	if matchErr != nil {
+		return encodeResult(map[string]any{
+			"error": matchErr.Error(), "path": path, "sha256": currentHash,
+			"context": hint,
+		})
 	}
-	replacements := 1
-	if input.ReplaceAll {
-		replacements = found
+	if err := t.checkpointWrite(ctx, path, content, sha256Hex([]byte(updated))); err != nil {
+		return nil, err
 	}
-	updated := strings.Replace(string(content), input.Old, input.New, replacements)
 	if err := atomicWrite(ctx, path, []byte(updated)); err != nil {
 		return nil, err
 	}
-	return encodeResult(map[string]any{"path": path, "replacements": replacements, "size_bytes": len(updated)})
+	return encodeResult(map[string]any{
+		"path": path, "replacements": n, "size_bytes": len(updated),
+		"sha256": sha256Hex([]byte(updated)),
+		"diff":   unifiedDiff(filepath.Base(path), string(content), updated),
+	})
+}
+
+func readExistingText(path string) (string, string, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", "", err
+	}
+	if err := validateTextContent(content); err != nil {
+		return "", sha256Hex(content), err
+	}
+	return string(content), sha256Hex(content), nil
 }
 
 func (t *fileTool) mkdir(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
@@ -94,6 +131,13 @@ func (t *fileTool) mkdir(ctx context.Context, raw json.RawMessage) (json.RawMess
 		return nil, err
 	}
 	return encodeResult(map[string]any{"path": path})
+}
+
+func (t *fileTool) checkpointWrite(ctx context.Context, path string, before []byte, shaAfter string) error {
+	if t == nil || t.checkpoints == nil {
+		return nil
+	}
+	return t.checkpoints.SnapshotBeforeWrite(ctx, path, before, shaAfter)
 }
 
 func atomicWrite(ctx context.Context, path string, content []byte) error {

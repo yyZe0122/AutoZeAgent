@@ -175,6 +175,20 @@ func (b *Broker) SetPermissionMode(mode string) {
 	b.permissionMode = mode
 }
 
+// SetEditCheckpointer attaches QG snapshots to registered fs_write/fs_patch tools.
+func (b *Broker) SetEditCheckpointer(cp EditCheckpointer) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, tool := range b.registry {
+		if ft, ok := tool.(*fileTool); ok {
+			ft.SetCheckpointer(cp)
+		}
+	}
+}
+
 func (b *Broker) Register(tool Tool) error {
 	if tool == nil {
 		return fmt.Errorf("%w: nil handler", ErrInvalidTool)
@@ -343,6 +357,7 @@ func (b *Broker) Execute(ctx context.Context, request toolapi.Request) (toolapi.
 				executeErr = errors.Join(executeErr, artifactErr)
 			} else {
 				response.Artifact = &artifact
+				response.Output = truncateToolOutput(output, b.artifactThreshold, artifact.ID)
 			}
 		} else {
 			response.Output = output
@@ -720,4 +735,25 @@ func (b *Broker) recordIsolationProbe(status IsolationStatus) {
 		"reason", status.Reason,
 		"user_scope", status.UserScope,
 	)
+}
+
+const artifactPreviewRunes = 2_000
+
+func truncateToolOutput(output []byte, _ int, artifactID string) json.RawMessage {
+	preview := string(output)
+	runes := []rune(preview)
+	truncated := false
+	if len(runes) > artifactPreviewRunes {
+		preview = string(runes[:artifactPreviewRunes])
+		truncated = true
+	}
+	body, err := json.Marshal(map[string]any{
+		"truncated":   truncated,
+		"preview":     preview,
+		"artifact_id": artifactID,
+	})
+	if err != nil {
+		return json.RawMessage(`{"truncated":true,"artifact_id":"` + artifactID + `"}`)
+	}
+	return body
 }

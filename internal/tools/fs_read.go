@@ -7,11 +7,14 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 	"unicode/utf8"
 )
 
 type readInput struct {
 	Path     string `json:"path"`
+	Offset   int    `json:"offset,omitempty"`
+	Limit    int    `json:"limit,omitempty"`
 	MaxBytes int64  `json:"max_bytes,omitempty"`
 }
 
@@ -24,17 +27,17 @@ func (t *fileTool) read(ctx context.Context, raw json.RawMessage) (json.RawMessa
 	if err != nil {
 		return nil, err
 	}
-	limit := input.MaxBytes
-	if limit <= 0 {
-		limit = defaultFileReadLimit
-	}
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
-	readLimit := limit
-	if limit <= (1<<63-1)-int64(utf8.UTFMax) {
+	byteCap := input.MaxBytes
+	if byteCap <= 0 {
+		byteCap = defaultFileReadBytes
+	}
+	readLimit := byteCap
+	if byteCap <= (1<<63-1)-int64(utf8.UTFMax) {
 		readLimit += int64(utf8.UTFMax)
 	}
 	content, err := io.ReadAll(io.LimitReader(file, readLimit))
@@ -44,12 +47,35 @@ func (t *fileTool) read(ctx context.Context, raw json.RawMessage) (json.RawMessa
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	truncated := int64(len(content)) > limit
-	content, err = textPrefix(content, limit)
+	byteTrunc := int64(len(content)) > byteCap
+	content, err = textPrefix(content, byteCap)
 	if err != nil {
 		return nil, err
 	}
-	return encodeResult(map[string]any{"path": path, "content": string(content), "size_bytes": len(content), "truncated": truncated})
+	hash := sha256Hex(content)
+	lines := strings.Split(normalizeNewlines(string(content)), "\n")
+	offset := input.Offset
+	if offset < 1 {
+		offset = 1
+	}
+	limit := input.Limit
+	if limit <= 0 {
+		limit = defaultReadLineLimit
+	}
+	if limit > maxReadLineLimit {
+		limit = maxReadLineLimit
+	}
+	lineTrunc := offset-1+limit < len(lines)
+	if offset > len(lines)+1 {
+		offset = len(lines) + 1
+		lineTrunc = false
+	}
+	body := numberedSlice(lines, offset, limit)
+	return encodeResult(map[string]any{
+		"path": path, "content": body, "sha256": hash,
+		"offset": offset, "limit": limit, "line_count": len(lines),
+		"size_bytes": len(content), "truncated": byteTrunc || lineTrunc,
+	})
 }
 
 func textPrefix(content []byte, limit int64) ([]byte, error) {
