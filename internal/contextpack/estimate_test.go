@@ -18,6 +18,12 @@ func TestEstimateText(t *testing.T) {
 	if got := EstimateText(long); got != 10 {
 		t.Fatalf("40 runes=%d want 10", got)
 	}
+	if got := EstimateText("你好世界"); got != 4 {
+		t.Fatalf("cjk=%d want 4", got)
+	}
+	if got := EstimateText("ab你好"); got != 3 {
+		t.Fatalf("mixed=%d want 3", got)
+	}
 }
 
 func TestUsableWindow(t *testing.T) {
