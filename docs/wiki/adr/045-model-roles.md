@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-08-10)
+Accepted (2026-08-10). Updated 2026-08-14: Prefix states no vision; `models.vision` already rejected at load.
 
 ## Context
 
@@ -71,7 +71,7 @@ Not a substitute for `models.subagent` / `models.compact`. H7 job model pin: `jo
 
 ### Out of scope
 
-- Vision / image-gen / browser roles (no product tools yet)
+- Vision / image-gen / browser roles (no product tools yet). `models.vision` is rejected at load. The system prompt states this; do not invent a vision setting path.
 - Per-call model in `task` tool input
 - Gateway API for role map
 - Hot-reload of `models.*`

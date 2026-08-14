@@ -188,7 +188,7 @@ Templates use two sample suppliers: **`deepseek1`** (official bare model ids) an
 - Selection is **`providerId/modelId…`** (first `/` only; model segment may contain `/`). Catalog keys match that segment; optional `models.<key>.id` overrides the wire/API id (OpenCode-style).  
 - Example: `deepseek1/deepseek-chat` wires `deepseek-chat`; `deepseek2/deepseek/deepseek-v4-flash` wires `deepseek/deepseek-v4-flash`.  
 - `maxTokens` = output cap; `contextWindow` = packing / UI pressure ([ADR-041](docs/wiki/adr/041-context-packing-and-pressure.md)).  
-- Optional role map `models.subagent` / `models.compact` ([ADR-045](docs/wiki/adr/045-model-roles.md)).  
+- Optional role map `models.subagent` / `models.compact` ([ADR-045](docs/wiki/adr/045-model-roles.md)). No `models.vision` (rejected at load). `/model` only switches **global main**.  
 - Optional `chat` (workspace, tools, permission, memory, **commands**): full example [`configs/agent.json.example`](configs/agent.json.example) · wire formats [`docs/wiki/provider-protocols.md`](docs/wiki/provider-protocols.md).  
 - User rules: `~/.yunmengze/AGENTS.md` (seeded if missing; do not overwrite existing). Project `.yunmengze/AGENTS.md` is appended when present. Instruction only — no grants.  
 - Optional `mcp.servers`: stdio (`command`) or remote (`type`/`url`/`headers`) — [ADR-040](docs/wiki/adr/040-mcp-tool-broker.md).
@@ -219,7 +219,7 @@ ymz stop            # shut down daemon
 
 ### TUI
 
-Chat transcript uses **rounded bubbles** (user / assistant / thinking / tool), not a log dump. Assistant replies with markdown markers render via **glamour** (streaming is throttled; unclosed fences stay plain). Foldable blocks: `/expand` or keys **`e`** (last) · **`E`** (all) · **`c`** (collapse). Drag-select in the transcript to copy.
+Chat transcript uses **rounded bubbles** (user / assistant / thinking / tool), not a log dump. Assistant replies with markdown markers render via **glamour** (streaming is throttled; unclosed fences stay plain). **Live replies stay unfolded** and pin to the bottom while streaming; thinking / long tool results still fold. Foldable blocks: `/expand` or keys **`e`** (last) · **`E`** (all) · **`c`** (collapse). Drag-select in the transcript to copy. Header and `/status` show the daemon version.
 
 | Input | Behavior |
 | --- | --- |
@@ -237,7 +237,7 @@ Chat transcript uses **rounded bubbles** (user / assistant / thinking / tool), n
 | `/expand` · `/journey` | Fold/expand; prepend memory and/or skill-event timeline (`/journey skills`) |
 | `/cron` | Jobs on focused session |
 | `/pause` · `/resume` · `/cancel` · `/stop` | Task control (`/stop` = `/cancel`) |
-| `/status` · `/retry` · `/theme` | Health + window pressure + Compacted · resubmit last user message · day/night theme |
+| `/status` · `/retry` · `/theme` | Health + **version** + window pressure + Compacted · resubmit last user message · day/night theme |
 | `/quit` | Exit TUI (`/q` `/exit`; daemon stays up) |
 | **Esc** | Close overlay; if a turn is running → cancel; Esc Esc → `/undo` |
 | **e** / **E** / **c** | Expand last foldable (incl. unified diffs) · expand all · collapse (empty input) |

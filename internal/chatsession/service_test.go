@@ -240,6 +240,12 @@ func TestStartChatInjectsAgentsMarkdown(t *testing.T) {
 	if !strings.Contains(joined, "全局：少废话") || !strings.Contains(joined, "项目：只用本目录") {
 		t.Fatalf("agents missing: %q", joined)
 	}
+	if !strings.Contains(joined, "<env>") || !strings.Contains(joined, "workspace: "+ws) || !strings.Contains(joined, "date: 2026-08-13") {
+		t.Fatalf("env missing: %q", joined)
+	}
+	if !strings.Contains(joined, "YunmengZe Agent") || !strings.Contains(joined, "No vision") {
+		t.Fatalf("identity missing: %q", joined)
+	}
 }
 
 func TestStartChatRejectsDirtyAgentsMarkdown(t *testing.T) {
@@ -383,8 +389,9 @@ func TestStartChatSkipsPlannerShape(t *testing.T) {
 	if strings.Contains(req.Messages[0].Content, "Execute exactly one approved plan step") {
 		t.Fatal("chat used plan-step system prompt")
 	}
-	if req.Messages[1].Role != providerapi.RoleUser || req.Messages[1].Content != "你好" {
-		t.Fatalf("user message = %#v", req.Messages[1])
+	last := req.Messages[len(req.Messages)-1]
+	if last.Role != providerapi.RoleUser || last.Content != "你好" {
+		t.Fatalf("user message = %#v", last)
 	}
 	// Wait for complete.
 	deadline := time.Now().Add(2 * time.Second)

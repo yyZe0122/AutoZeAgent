@@ -16,6 +16,7 @@ import (
 	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
 	"github.com/yyZe0122/yunmengze-agent/internal/policy"
 	"github.com/yyZe0122/yunmengze-agent/internal/runmeta"
+	"github.com/yyZe0122/yunmengze-agent/internal/version"
 	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 	"github.com/yyZe0122/yunmengze-agent/pkg/toolapi"
 )
@@ -24,10 +25,14 @@ const (
 	// DefaultMaxTaskDepth: top-level is 0; spawn denied when parent Depth >= max.
 	DefaultMaxTaskDepth = 2
 
-	taskSystemPrompt = "You are a sub-agent of YunmengZe. Complete the delegated task. " +
+	taskSystemPromptBody = "Complete the delegated task. " +
 		"Reply helpfully in the user's language. Prefer absolute paths under the workspace. " +
 		"Do not claim tool success without evidence."
 )
+
+func taskSystemPrompt() string {
+	return "You are a sub-agent of YunmengZe Agent " + version.Version + ". " + taskSystemPromptBody
+}
 
 // SubagentRunner runs a child agent loop. Implemented by *agent.Runner.
 type SubagentRunner interface {
@@ -151,7 +156,7 @@ func (t *taskTool) Execute(ctx context.Context, raw json.RawMessage) (json.RawMe
 		PlanID: parent.PlanID, PlanHash: parent.PlanHash, StepID: parent.StepID,
 		Actor: parent.Actor, TraceID: parent.TraceID,
 		Messages: []providerapi.Message{
-			{Role: providerapi.RoleSystem, Content: taskSystemPrompt},
+			{Role: providerapi.RoleSystem, Content: taskSystemPrompt()},
 			{Role: providerapi.RoleUser, Content: prompt},
 		},
 		AllowedTools:       allowed,

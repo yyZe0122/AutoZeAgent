@@ -26,6 +26,7 @@ import (
 	"github.com/yyZe0122/yunmengze-agent/internal/providerconfig"
 	"github.com/yyZe0122/yunmengze-agent/internal/runlog"
 	"github.com/yyZe0122/yunmengze-agent/internal/sessiontodo"
+	"github.com/yyZe0122/yunmengze-agent/internal/version"
 	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
 
@@ -37,30 +38,23 @@ type PathGuardRoot interface {
 const (
 	// chatStepIDPrefix prefixes per-task step IDs. plan_steps.step_id is a global PK,
 	// so the literal "chat-step" cannot be reused across tasks.
-	chatStepIDPrefix      = "chat-step-"
-	chatSystemPromptAgent = "You are YunmengZe, a local coding assistant in a multi-turn chat session (build mode). " +
-		"Reply helpfully in the user's language. You may read and write files under the workspace when needed. " +
-		"Prefer absolute paths under the workspace; relative paths are resolved against the workspace root. " +
+	chatStepIDPrefix       = "chat-step-"
+	chatToolProtocolShared = "Reply in the user's language. Prefer absolute workspace paths; relative paths resolve against the workspace root. " +
 		"Workspace state comes from tools. Do not invent file contents, line numbers, or claim tool success without evidence. " +
-		"Find with fs_glob/fs_grep (never shell find/grep). Read with fs_read offset/limit and use the returned sha256. " +
-		"Edit with fs_patch and expected_sha256. Use fs_write only to create a new file. " +
+		"Find with fs_glob/fs_grep (never shell find/grep). Read with fs_read offset/limit and the returned sha256. " +
 		"Independent reads (fs_read/fs_grep/fs_glob) may be issued in one step. " +
 		"For multi-step work, keep session todos via todo_write (at most one in_progress). " +
-		"After context compaction, recover paths and errors with session_search instead of relying on memory. " +
+		"After compaction, recover paths and errors with session_search instead of relying on memory. " +
 		"For specialized workflows, call skills_list then skill_view before improvising. " +
-		"Prefer configured mcp_* tools over process_exec/process_shell or writing scripts that reimplement them. " +
+		"Prefer configured mcp_* tools over process_exec/process_shell or writing a script that reimplements them."
+	chatToolProtocolAgent = "You may read and write files under the workspace. " +
+		"Edit with fs_patch and expected_sha256. Use fs_write only to create a new file. " +
 		"process_exec/process_shell are only for running tests or approved commands. " +
 		"If those tools are not granted, say the user must set chat.tools.process; do not write a script to stand in for tests. " +
 		"Do not invent plan steps."
-	chatSystemPromptPlan = "You are YunmengZe in plan mode (read-only analysis). " +
-		"Reply helpfully in the user's language. You may read and inspect the workspace, ask clarifying questions, " +
-		"and discuss approaches. You must NOT modify files, create directories, or apply patches. " +
-		"If the user asks for edits, explain the plan and suggest switching to agent (build) mode. " +
-		"Prefer absolute paths under the workspace. Workspace state comes from tools; do not invent file contents or claim tool success without evidence. " +
-		"For specialized workflows, call skills_list then skill_view before improvising. " +
-		"Prefer configured mcp_* tools over inventing a scripted substitute. " +
-		"Use fs_glob/fs_grep/fs_read to inspect; never shell find/grep. Independent reads may be issued in one step. " +
-		"After compaction, use session_search to recover prior paths and errors."
+	chatToolProtocolPlan = "Read-only analysis: inspect the workspace, ask questions, discuss approaches. " +
+		"Do not modify files, create directories, or apply patches. " +
+		"If the user asks for edits, explain the plan and suggest switching to agent (build) mode."
 	// skillSystemPreamble is prepended to the task skill snapshot system message (ADR-036).
 	// Skills are instruction text only — never grants, approvals, or policy expansion.
 	skillSystemPreamble = "The following selected skill instructions guide this reply only. " +
@@ -71,6 +65,39 @@ const (
 	defaultToolTimeoutMS int64  = 60_000
 	defaultMaxCalls      uint64 = 10_000
 )
+
+func chatIdentityBlock(plan bool) string {
+	mode := "build mode"
+	if plan {
+		mode = "plan mode"
+	}
+	return "You are YunmengZe Agent " + version.Version + ", a local coding assistant (" + mode + "). " +
+		"Roles: this chat is main; task children use models.subagent; /compact uses models.compact. " +
+		"No vision. /model switches global main only; other roles need operator config plus ymz restart."
+}
+
+func chatSystemPrompt(plan bool) string {
+	if plan {
+		return chatIdentityBlock(true) + " " + chatToolProtocolShared + " " + chatToolProtocolPlan
+	}
+	return chatIdentityBlock(false) + " " + chatToolProtocolShared + " " + chatToolProtocolAgent
+}
+
+func chatEnvBlock(model, workspace, date string) string {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		model = "unknown"
+	}
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		workspace = "unknown"
+	}
+	date = strings.TrimSpace(date)
+	if date == "" {
+		date = "unknown"
+	}
+	return "<env>\n  model: " + model + "\n  workspace: " + workspace + "\n  date: " + date + "\n</env>"
+}
 
 // chatStepID returns a globally unique plan_steps.step_id for one chat task turn.
 func chatStepID(taskID kernel.TaskID) kernel.StepID {

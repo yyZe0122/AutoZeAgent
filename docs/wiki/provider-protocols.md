@@ -178,7 +178,7 @@ Top-level `models` maps roles to other **selection** refs (ADR-045). Unset roles
 }
 ```
 
-Allowed keys: `subagent` (`task` child runs), `compact` (session head summarization). Do not set `models.main`. Changing `models.*` requires a daemon restart.
+Allowed keys: `subagent` (`task` child runs), `compact` (session head summarization). Do not set `models.main`. Unknown keys (including `vision`) fail load. Changing `models.*` requires a daemon restart. The chat Prefix states this; after model pin it also injects `<env>` with the current model / workspace / UTC date. The model cannot switch roles.
 
 ## Protocol families and aliases
 

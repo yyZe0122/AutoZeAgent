@@ -30,7 +30,7 @@ executeChat
 装配只发生一次预算、一个顺序。类型在 `internal/contextpack`：
 
 ```text
-Prefix     稳定：sys + AGENTS + skills + frozen memory
+Prefix     稳定：sys（短身份 + 工具协议）+ `<env>`（pin 后：model / workspace / date）+ AGENTS + skills + frozen memory
 Summary    少变：durable session_compactions
 Tail       增长：packed 历史（不含当前 user）
 Ephemeral  每轮变：todos 块 + 当前 user

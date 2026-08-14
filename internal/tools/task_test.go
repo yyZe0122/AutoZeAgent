@@ -11,6 +11,8 @@ import (
 	"github.com/yyZe0122/yunmengze-agent/internal/agent"
 	"github.com/yyZe0122/yunmengze-agent/internal/runmeta"
 	coresqlite "github.com/yyZe0122/yunmengze-agent/internal/store/sqlite"
+	"github.com/yyZe0122/yunmengze-agent/internal/version"
+	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
 
 type stubSubagent struct {
@@ -25,6 +27,17 @@ func (s *stubSubagent) Run(_ context.Context, req agent.RunRequest) (agent.Resul
 		return agent.Result{}, s.err
 	}
 	return agent.Result{Content: s.body, Iterations: 1}, nil
+}
+
+func TestTaskSystemPromptIncludesVersion(t *testing.T) {
+	got := taskSystemPrompt()
+	want := "YunmengZe Agent " + version.Version
+	if !strings.Contains(got, want) {
+		t.Fatalf("prompt missing %q: %s", want, got)
+	}
+	if !strings.Contains(got, "sub-agent") {
+		t.Fatalf("prompt missing sub-agent: %s", got)
+	}
 }
 
 func TestFilterChildTools(t *testing.T) {
@@ -101,6 +114,12 @@ func TestTaskToolSpawnsChildRun(t *testing.T) {
 	}
 	if stub.last.RunID != runID {
 		t.Fatalf("runner run_id = %s want %s", stub.last.RunID, runID)
+	}
+	if len(stub.last.Messages) == 0 || stub.last.Messages[0].Role != providerapi.RoleSystem {
+		t.Fatalf("child messages = %#v", stub.last.Messages)
+	}
+	if !strings.Contains(stub.last.Messages[0].Content, "YunmengZe Agent "+version.Version) {
+		t.Fatalf("child system prompt = %q", stub.last.Messages[0].Content)
 	}
 	var parent string
 	if err := db.QueryRow(`SELECT parent_run_id FROM runs WHERE run_id = ?`, runID).Scan(&parent); err != nil {

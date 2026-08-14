@@ -2,7 +2,7 @@
 
 - 状态：Accepted
 - 日期：2026-07-30
-- 更新：2026-08-13（AGENTS.md 注入；Hermes `skills_list` / `skill_view`）
+- 更新：2026-08-14（Prefix 注入 `internal/version` + 诚实角色：无 vision；`/model` 只切 main）
 
 ## 背景
 
@@ -72,6 +72,7 @@ Agent 可通过 `chat.tools.git` / `chat.tools.process`（默认 false）opt-in�
 - 任务状态机：`created → running → (paused) → completed|failed|cancelled`；无 Planner 遗留态；
 - Skill 与 `chat.commands` 仅指令文本，不扩大授权；TUI 可 `/skills`、`/skills apply|reject`、`/<skill-id>` 或 `/<command>` 显式使用（草稿见 ADR-050）。模型经 `skills_list` / `skill_view` 按需加载（ADR-036）。
 - 可选用户规则：`<ConfigDir>/AGENTS.md`（EnsureConfig 缺则种子）始终注入；`<workspace>/.yunmengze/AGENTS.md` 存在则追加。经 `injectscan`；不扩 grant。
+- Prefix：短身份（`YunmengZe Agent <version>` + 模式 + 三角色 + 无 vision + `/model` 只切 main）+ 共用工具协议。pin 之后另插一条 `<env>`（当前 model / workspace / UTC date）。用户/项目 `AGENTS.md` 仍是后面独立 system（preamble：不扩授权）。子代理 prompt 只带版本，不带 env。
 
 ## 结果
 
