@@ -223,7 +223,7 @@ Chat transcript uses **rounded bubbles** (user / assistant / thinking / tool), n
 
 | Input | Behavior |
 | --- | --- |
-| **Tab** · **Shift+Tab** | **agent** (R/W) ↔ **plan** (read-only); Tab also completes slash |
+| **Tab** · **Shift+Tab** | Cycle **plan** (RO) → **agent** (R/W, `/perm` for tests/git) → **auto** (this session pre-grants process+git); Tab also completes slash |
 | Plain text | Submit on current mode / session |
 | `/help` | Slash list + keys |
 | `/new` · `/sessions` · `/tasks` | `/new` leaves to ready and cancels a running turn; type to start; list sessions; list / focus tasks |

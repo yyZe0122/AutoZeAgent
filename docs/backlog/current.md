@@ -1,6 +1,6 @@
 # YunmengZe Agent 当前状态
 
-更新：2026-08-14（**v0.3.0** TUI `/new` 离焦 + 划选复制 · 下一优先等用户再提）
+更新：2026-08-17（**Tab 三档** Plan / Agent / Auto · 交互 Agent 可 `/perm` · `permission.allow`）
 
 **本文件是唯一活着的优化/backlog 文档。** 只写未完成与暂缓项；已落地细节见 ADR（`docs/wiki/adr/`）、[`docs/wiki/database.md`](../wiki/database.md)、changelog 与 git。目录：[`docs/README.md`](../README.md)。
 
@@ -27,7 +27,7 @@
 - 三件套：daemon + CLI·TUI + `core.db`。不恢复 Module Runtime、多 DB、交互 **Planner**（plan-step 整单审批轨）。
 - 工具副作用只经 Tool Broker；Policy → Approval → Capability Grant → containment → 限流 → Audit。
 - Skill 仅指令文本，不扩大授权；`skill_ids` 仅显式预载（TUI/job）；模型经 `skills_list` → `skill_view` 按需加载（ADR-036）。用户规则：`<ConfigDir>/AGENTS.md` + 可选项目 `.yunmengze/AGENTS.md`。
-- plan 永远只读；高风险工具仅 agent + `chat.tools` allowlist 预授权（ADR-038）；**tool-call** 交互 permission 见 ADR-043（≠ Planner）。
+- plan 永远只读；高风险工具仅 agent。TUI Tab **Plan → Agent → Auto**：Agent 未预授则 `/perm`；Auto 为本 session 预授 process+git（切走结束）。记住放行：`chat.permission.allow` 或 `chat.tools.*`（OR）。cron / CLI 永不 wait。见 ADR-038 / 043 / 046。
 - 会话记忆为 in-process MemoryManager（ADR-044），非独立 Memory 进程。
 - **客户端分层（ADR-018/022）：** 业务用例只在 daemon；Gateway 仅 HTTP 适配；CLI 与 TUI 经 `gatewayclient` 并列，TUI **不** exec CLI、**不** import tools/providers/agent。
 - **消息通道（规划）：** 第二客户端 → `tasksubmission` / `taskcontrol`；**不**在 Gateway 内跑 tool/provider/grant。
@@ -51,6 +51,7 @@
 | **Q** | QA–QH 编码循环：ContextView · 文件工具 · `process_shell` · session todo · L3 tool 索引 · rewind · TUI Esc/`/undo` | **v0.2.8**（ADR-051 · migration 026） |
 | **Q-harden** | 单 packer（热路径仅 L1）· through 滑窗保 tail · 真 model id · todo 留 Ephemeral · HistoryBudget≤usable · 短编码 prompt | **v0.2.8** |
 | **TUI leave** | `/new` 离焦 ready + cancel 本轮；无焦点丢 stream/refresh/perm SSE；去 bubblezone 划选复制；窄屏不 inflate | **v0.3.0** |
+| **Tab stance** | Tab Plan→Agent→Auto；内核仍 agent\|plan；交互 Agent `/perm`；Auto = session 预授 process+git；`permission.allow` OR `tools.*` | **unreleased** |
 
 同包大文件拆分已落地（`tui/cmds_*`+`update_*`、`kernel/repository_*`、`tools/fs_*`、`cmd/ymzd/wire_*`）。再拆触发：新 slash / 新聚合 SQL / `ymzd` 接线难 review → 同包再拆。
 

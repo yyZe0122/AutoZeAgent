@@ -79,12 +79,12 @@ Provider wire formats: [`provider-protocols.md`](provider-protocols.md).
 | 035 | Standard protocol tool boundary | |
 | 036 | Task skill snapshot | Explicit `skill_ids` preload; model `skills_list`/`skill_view`; chatsession injects explicit snapshot |
 | 037 | CLI / daemon lifecycle | |
-| 038 | Session chat boundary | Dual-track agent/plan; optional `chat.tools`; `AGENTS.md` inject |
+| 038 | Session chat boundary | Dual-track agent/plan; Tab Auto stance; `permission.allow`; `AGENTS.md` inject |
 | 039 | Logical child runs | `parent_run_id` + `task` tool (sync) |
 | 040 | MCP via Tool Broker | stdio + remote Streamable HTTP / legacy SSE; no Module Runtime |
 | 041 | Context packing / pressure | Token budget pack, compaction triggers, anti-thrash, `/compact` |
 | 042 | Chat-native jobs | Timed session chat submit; lease from 017; TUI `/cron` primary |
-| 043 | Tool-call permission interaction | `chat.permission.mode`; pending → TUI decide → scoped grant; SSE `permission.*` |
+| 043 | Tool-call permission interaction | TUI Agent `/perm`; Tab Auto session stance; `permission.allow`; SSE `permission.*` |
 | 044 | In-process memory boundary | Layered L0–L3 memory; freeze inject; FTS; `/memory` `/memory archived` `/journey`; injectscan (H6); H1-lite curator; H5-lite `default_ttl` + soft-archive; no Module Runtime |
 | 045 | Model roles | Optional `models.subagent` / `models.compact`; O4 session prefer + H7 job pin resolve |
 | 046 | Session workspace + permission tiers | Client cwd session root; once/similar/permanent/deny |

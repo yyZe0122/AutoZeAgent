@@ -24,12 +24,12 @@ Linux/macOS 在 RuntimeDir 使用受文件权限保护的 Unix Domain Socket；W
 | `GET` | `/v1/memory` | `session_id` · `q` · `kind` · `limit` · `offset` · `include_global` · `include_archived` |
 | `POST` | `/v1/memory/actions` | refresh\|forget\|promote |
 | `GET` | `/v1/sessions` · `/v1/sessions/{id}` | 列表 / 读 |
-| `PATCH` | `/v1/sessions/{id}` | `{preferred_model}`（O4；空串清除） |
+| `PATCH` | `/v1/sessions/{id}` | `{preferred_model}`（O4；空串清除）和/或 `{permission_stance}`（agent\|auto\|plan） |
 | `GET` | `/v1/sessions/{id}/messages` | transcript |
 | `GET` | `/v1/sessions/{id}/context` | 窗压（ADR-041） |
 | `POST` | `/v1/sessions/{id}/compact` | `{focus?}`；TUI `/compact` |
 | `POST` | `/v1/sessions/{id}/rewind` | 人径撤回上次 agent 写文件（QG；TUI `/undo` · Esc Esc） |
-| `GET`/`POST` | `/v1/tasks` | 列表 / 提交（`execution_mode` · `skill_ids` · `workspace`） |
+| `GET`/`POST` | `/v1/tasks` | 列表 / 提交（`execution_mode` · `permission_stance` · `interactive` · `skill_ids` · `workspace`） |
 | `GET` | `/v1/tasks/{id}` | 读 |
 | `POST` | `/v1/tasks/{id}/actions` | pause\|resume\|cancel + `expected_version` |
 | `GET` | `/v1/tasks/{id}/usage` · `/context` · `/messages` | 用量 / 窗压 / transcript |

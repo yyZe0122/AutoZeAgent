@@ -39,7 +39,7 @@ YunmengZe can execute tools and communicate with external model providers. Opera
 
 - run it with the least operating-system privilege required;
 - restrict filesystem access via `chat.workspace` (default session root = launch directory; avoid `allow_all` unless you accept full local-user path reach);
-- verify policy, path ceiling, and capability grants; when `chat.permission.mode=ask`, decide tool-call permissions via TUI `/perm once|similar|permanent|deny` (permanent writes ConfigDir trust; not whole-plan approval);
+- verify policy, path ceiling, and capability grants; TUI Agent decides ungranted high-risk calls via `/perm once|similar|permanent|deny` (permanent writes ConfigDir trust; not whole-plan approval); Tab Auto pre-grants process+git for this session only;
 - treat memory/skill/draft/`AGENTS.md` text as untrusted instruction content: writes and system inject are fail-closed via `injectscan` (H6); do not rely on scan alone for remote/messaging inputs until H2 staging ships; skill drafts never expand grants — apply is human-only;
 - store secrets in environment variables or protected files;
 - keep local configuration, databases, logs, runtime endpoints, and artifacts out of source control;

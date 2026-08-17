@@ -6,7 +6,7 @@
 
 ## 背景
 
-Session chat（ADR-038）对 workspace 工具做 **preauth grant**；高风险工具（`process_exec` / `process_shell` / `git_*`）仅经 `chat.tools` opt-in（shell 与 exec **同一闸**）。未覆盖 grant 且 Policy 为 `require_approval` 时，Broker 默认 **立即 deny**（fail closed）。
+Session chat（ADR-038）对 workspace 工具做 **preauth grant**；高风险工具（`process_exec` / `process_shell` / `git_*`）经 `chat.permission.allow` / `chat.tools.*` 记住，或 Tab **Auto** 本 session 预授（shell 与 exec **同一闸**）。未覆盖 grant 且 Policy 为 `require_approval` 时：交互 TUI Agent **挂起 `/perm`**；CLI / cron **立即 deny**。
 
 Crush 等产品在 **单次 tool call** 边界提供 allow/deny 队列，无需整单 plan 审批。产品需要：在 **agent** 模式下，对未预授权的高风险 call 可挂起 → 人在 TUI 决策 → 发 **scoped grant** → **同一 agent 循环**继续。
 
@@ -23,21 +23,25 @@ Crush 等产品在 **单次 tool call** 边界提供 allow/deny 队列，无需�
 | 授权 | 批 plan 后批量 grant | decide 后 **scoped** grant 再 `AuthorizeAndConsume` |
 | Gateway | 已删除的人批 / plan-step Start | `GET /v1/permissions` + `POST /v1/permissions/{id}/decide` |
 
-### 配置：`chat.permission.mode`
+### 配置：`chat.permission`
 
 ```json
 "chat": {
-  "permission": { "mode": "preauth" }
+  "permission": { "allow": ["process"] }
 }
 ```
 
-| 值 | 行为 |
+| 面 | 行为 |
 | --- | --- |
-| **`preauth`**（默认） | 无 matching grant + `require_approval` → **立即 deny** |
-| **`ask`** | 同上条件且为 **交互** chat → **pending**；TUI/Gateway decide 后继续或 deny |
+| **TUI Agent** | 无 matching grant + `require_approval` → **pending `/perm`** |
+| **TUI Auto** | 本 session 预授 process+git；切走后下一轮按新档 |
+| **`permission.allow` / `tools.*`** | Agent 也不再问该类 |
+| **CLI / cron** | 立刻 deny（`interactive` 省略；`scheduled_*` / actor `scheduler` 永不 wait） |
+| **`permission.mode`** | 仍接受 `preauth`/`ask` 以便旧配置 load；**运行时忽略** |
 
-- **plan 模式**：永不因 permission 扩大写/exec。
+- **plan 模式**：永不因 permission 扩大写/exec。只读看 `execution_mode`，不是 `permission_stance=plan`。
 - **Job/cron**：`scheduled_*` task id 或 actor `scheduler` → **不 wait**，立即 deny（fail closed）。
+- **`interactive`**：本机 TUI 能力声明，不是鉴权。省略 stance 不覆盖已有 session 的 `permission_stance`。
 
 ### 运行时流
 
@@ -45,8 +49,8 @@ Crush 等产品在 **单次 tool call** 边界提供 allow/deny 队列，无需�
 agent loop → Broker.Execute
   Policy deny → denied
   require_approval && 无 matching grant:
-    mode=preauth 或 非交互 → denied
-    mode=ask && interactive → pending
+    非交互（CLI/cron/`scheduled_`）→ denied
+    交互 TUI Agent → pending
       → tool_permission_requests + Waiter
       → TUI /perm 或 API decide
       → IssueGrant（plan 内 once/session scope）→ 同 call 再 Execute（禁嵌套 wait）
@@ -62,7 +66,7 @@ agent loop → Broker.Execute
   - `POST /v1/permissions/{id}/decide` body：`{ "decision": "allow_once"|"allow_similar"|"allow_permanent"|"deny", "actor": "…", "confirm": false }`
 - TUI：`/perm` 列表；`/perm once|similar|permanent|deny <id-prefix>`；热键 1–4
 - H4：List pending 可带只读 `suggested_decision` / `suggested_reason`（once/similar 或 deny 提示）；**不**自动 decide、**不**建议 permanent。路径：双方皆空才只比 tool+capability；一侧空不匹配；非空须 `filepath.Clean` 后相等或带分隔符的目录前缀（`/tmp/foo` 不匹配 `/tmp/foobar`）。有 `session_id` 时只查同会话。
-- ask 模式：chat plan **嵌入** process/git 的 once + session CapabilityScope，**不**预发这些 grant（`issueChatGrants` 跳过）
+- Agent（未预授）：chat plan **嵌入** process/git 的 once + session CapabilityScope，**不**预发这些 grant（`issueChatGrants` 跳过）
 
 ### 事件 / SSE（C1）
 
@@ -94,8 +98,8 @@ CreatePending / Decide 成功后 **best-effort** 追加 Event Store 事件（不
 
 ## 后果
 
-- 默认 `preauth` 与历史行为一致。
-- `ask` 提供 Crush 级交互，且不恢复 Planner。
+- 交互 TUI Agent 默认可 `/perm`；CLI/cron 仍 fail-closed。
+- Tab Auto 是 session stance，不是 `permission.mode=auto`（该值仍拒绝）。
 - Job 路径 fail-closed。
 - TUI 可更及时弹出 pending 队列，而不依赖固定 2s poll  alone。
 

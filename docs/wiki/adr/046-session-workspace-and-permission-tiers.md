@@ -27,7 +27,7 @@ Config (optional; defaults preserve client_cwd behavior when roots empty):
     "allow": [],
     "allow_all": false
   },
-  "permission": { "mode": "ask" }
+  "permission": { "allow": [] }
 }
 ```
 
@@ -40,7 +40,7 @@ Config (optional; defaults preserve client_cwd behavior when roots empty):
 | `allow_permanent` | Requires `confirm: true`; writes ConfigDir trust entry; future matches pre-grant |
 | `deny` | Existing |
 
-Jobs/cron still never wait.
+Jobs/cron still never wait. TUI Tab Auto writes `sessions.metadata.permission_stance=auto` (this session only; omit on later submit does not overwrite). `chat.permission.allow` remembers process/git without prompting. `chat.permission.mode` is load-only compatibility.
 
 ## Consequences
 

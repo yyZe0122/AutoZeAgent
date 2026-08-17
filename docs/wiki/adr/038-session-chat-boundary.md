@@ -12,10 +12,11 @@
 
 ### 双轨 = 权限姿势，不是两条管道
 
-| Tab / `execution_mode` | 对齐 | 路径 | 工具（Grant） |
+| Tab | 内核 `execution_mode` | session `permission_stance` | 工具（Grant） |
 | --- | --- | --- | --- |
-| **agent** | OpenCode **build** | 同一 `chatsession` | workspace **读 + 写** |
-| **plan** | OpenCode **plan** | 同一 `chatsession` | workspace **只读** |
+| **plan** | `plan` | `plan` | workspace **只读** |
+| **agent** | `agent` | `agent` | 读 + 写；未预授的 process/git **等 `/perm`** |
+| **auto** | `agent` | `auto` | 读 + 写；**本 session 预授** process+git（切走结束） |
 
 共性：
 
@@ -25,7 +26,7 @@
 - 副作用只经 Tool Broker（Policy → Grant → 路径/超时 → Audit）。
 
 默认不预授权：`process_exec` / `process_shell` / `http_get` / `git_*`。  
-Agent 可通过 `chat.tools.git` / `chat.tools.process`（默认 false）opt-in；`process_shell` 与 `process_exec` **同一闸**。**plan / cron 永不**获得这些能力。
+记住放行：`chat.permission.allow: ["process","git"]` 或 `chat.tools.*`（OR）。`process_shell` 与 `process_exec` **同一闸**。TUI Auto 只预授**当前 session**。**plan / cron 永不**获得这些能力。CLI/`ymz run` 无 `/perm`，高风险仍立刻 deny。
 
 ### 不得恢复（反回归）
 
@@ -44,14 +45,17 @@ Agent 可通过 `chat.tools.git` / `chat.tools.process`（默认 false）opt-in�
   "tools": { "git": false, "process": false },
   "compaction": { "enabled": true },
   "max_iterations": 16,
-  "permission": { "mode": "preauth" }
+  "permission": { "allow": [] }
 }
 ```
 
 - `workspace`（ADR-046）：会话根与天花板；
 - `allow_write`：仅 agent 写权限天花板；**plan 永远只读**；
-- `tools.git` / `tools.process`：仅 agent 预授权；
-- `permission.mode`：tool-call 交互见 ADR-043 / 四档 ADR-046（≠ 整单 Planner）；
+- `tools.git` / `tools.process`：与 `permission.allow` OR，仅 agent 预授权；
+- Tab Auto：session `permission_stance`，不是第三种 `execution_mode`；
+- `permission_stance=plan` **不**单独强制只读；只读只看 `execution_mode`；
+- 省略 `permission_stance` 不覆盖已有 session 值；
+- `permission.mode`：旧字段，load 接受 `preauth`/`ask`，**运行时忽略**。Wait = TUI `interactive`；CLI/cron fail-closed；
 - 会话记忆：ADR-044；注入/skill 正文经 `injectscan`（H6）fail-closed；
 - 会话模型偏好（O4）：`metadata.model` / `preferred_model`；不改全局 main；chat run 解析 **job pin → prefer → main**（见 ADR-045）；
 - `chat.commands`（O3）：用户 slash 模板，仅 instruction；TUI 展开后作为 user 消息提交；不扩 grant。
