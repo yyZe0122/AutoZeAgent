@@ -550,9 +550,6 @@ func TestLoadChatParsesAndValidates(t *testing.T) {
 	if !chat.CompactionEnabled() || chat.MaxIterationsOrDefault() != 16 {
 		t.Fatalf("defaults: compaction=%v max_iter=%d", chat.CompactionEnabled(), chat.MaxIterationsOrDefault())
 	}
-	if chat.PermissionModeOrDefault() != PermissionModePreauth {
-		t.Fatalf("permission mode default = %q", chat.PermissionModeOrDefault())
-	}
 
 	bad := `{
   "model": "deepseek/deepseek-chat",
@@ -642,12 +639,12 @@ func TestLoadChatPermissionMode(t *testing.T) {
 		}
 	}
 	write(`{"permission": {"mode": "ask"}}`)
-	chat, err := LoadChat(root)
-	if err != nil {
-		t.Fatal(err)
+	if _, err := LoadChat(root); err != nil {
+		t.Fatalf("legacy ask mode must still load: %v", err)
 	}
-	if chat.PermissionModeOrDefault() != PermissionModeAsk {
-		t.Fatalf("mode = %q", chat.PermissionModeOrDefault())
+	write(`{"permission": {"mode": "preauth"}}`)
+	if _, err := LoadChat(root); err != nil {
+		t.Fatalf("legacy preauth mode must still load: %v", err)
 	}
 	write(`{"permission": {"mode": "auto"}}`)
 	if _, err := LoadChat(root); err == nil {
@@ -656,6 +653,18 @@ func TestLoadChatPermissionMode(t *testing.T) {
 	write(`{"permission": {"mode": "wide-open"}}`)
 	if _, err := LoadChat(root); err == nil {
 		t.Fatal("expected invalid permission mode error")
+	}
+	write(`{"permission": {"allow": ["process"]}}`)
+	chat, err := LoadChat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !chat.AgentProcessEnabled() || chat.AgentGitEnabled() {
+		t.Fatalf("allow process: process=%v git=%v", chat.AgentProcessEnabled(), chat.AgentGitEnabled())
+	}
+	write(`{"permission": {"allow": ["http"]}}`)
+	if _, err := LoadChat(root); err == nil {
+		t.Fatal("expected invalid permission.allow error")
 	}
 }
 

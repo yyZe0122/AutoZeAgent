@@ -11,11 +11,11 @@ import (
 )
 
 func (r *Repository) CreateSession(ctx context.Context, id SessionID, now time.Time) (Session, error) {
-	return r.CreateSessionWithWorkspace(ctx, id, "", now)
+	return r.CreateSessionWithWorkspace(ctx, id, "", "", now)
 }
 
-// CreateSessionWithWorkspace creates a session and stores workspace in metadata (ADR-046).
-func (r *Repository) CreateSessionWithWorkspace(ctx context.Context, id SessionID, workspace string, now time.Time) (Session, error) {
+// CreateSessionWithWorkspace creates a session and stores workspace + permission stance in metadata.
+func (r *Repository) CreateSessionWithWorkspace(ctx context.Context, id SessionID, workspace, stance string, now time.Time) (Session, error) {
 	if ctx == nil {
 		return Session{}, errors.New("create session context is required")
 	}
@@ -24,7 +24,12 @@ func (r *Repository) CreateSessionWithWorkspace(ctx context.Context, id SessionI
 		return Session{}, err
 	}
 	workspace = strings.TrimSpace(workspace)
+	normalized, err := NormalizePermissionStance(stance)
+	if err != nil {
+		return Session{}, err
+	}
 	session.Workspace = workspace
+	session.PermissionStance = normalized
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Session{}, fmt.Errorf("begin create session: %w", err)
@@ -39,7 +44,7 @@ func (r *Repository) CreateSessionWithWorkspace(ctx context.Context, id SessionI
 		session.State,
 		formatTime(session.CreatedAt),
 		formatTime(session.UpdatedAt),
-		sessionMetadataJSON(workspace),
+		sessionMetadataEncode(workspace, "", normalized),
 		session.Version,
 	)
 	if err != nil {
@@ -87,7 +92,7 @@ func (r *Repository) EnsureSessionWorkspace(ctx context.Context, id SessionID, w
 	_, err = r.db.ExecContext(ctx, `
 		UPDATE sessions SET metadata = ?, updated_at = ?
 		WHERE session_id = ?`,
-		sessionMetadataEncode(workspace, session.PreferredModel), formatTime(time.Now().UTC()), id,
+		sessionMetadataEncode(workspace, session.PreferredModel, session.PermissionStance), formatTime(time.Now().UTC()), id,
 	)
 	if err != nil {
 		return fmt.Errorf("set session workspace: %w", err)
@@ -179,22 +184,26 @@ func scanSession(row scanner) (Session, error) {
 	session.UpdatedAt = updated
 	session.Workspace = workspaceFromMetadata(metadata)
 	session.PreferredModel = preferredModelFromMetadata(metadata)
+	session.PermissionStance = permissionStanceFromMetadata(metadata)
 	return session, nil
 }
 
-func sessionMetadataJSON(workspace string) string {
-	return sessionMetadataEncode(workspace, "")
-}
-
-func sessionMetadataEncode(workspace, preferredModel string) string {
+func sessionMetadataEncode(workspace, preferredModel, permissionStance string) string {
 	workspace = strings.TrimSpace(workspace)
 	preferredModel = strings.TrimSpace(preferredModel)
+	permissionStance = strings.TrimSpace(permissionStance)
+	if permissionStance == PermissionStanceAgent {
+		permissionStance = ""
+	}
 	meta := map[string]string{}
 	if workspace != "" {
 		meta["workspace"] = workspace
 	}
 	if preferredModel != "" {
 		meta["model"] = preferredModel
+	}
+	if permissionStance != "" {
+		meta["permission_stance"] = permissionStance
 	}
 	if len(meta) == 0 {
 		return "{}"
@@ -212,6 +221,15 @@ func workspaceFromMetadata(raw string) string {
 
 func preferredModelFromMetadata(raw string) string {
 	return metaStringField(raw, "model")
+}
+
+func permissionStanceFromMetadata(raw string) string {
+	stance := metaStringField(raw, "permission_stance")
+	normalized, err := NormalizePermissionStance(stance)
+	if err != nil {
+		return PermissionStanceAgent
+	}
+	return normalized
 }
 
 func metaStringField(raw, key string) string {
@@ -250,10 +268,33 @@ func (r *Repository) SetSessionPreferredModel(ctx context.Context, id SessionID,
 	_, err = r.db.ExecContext(ctx, `
 		UPDATE sessions SET metadata = ?, updated_at = ?
 		WHERE session_id = ?`,
-		sessionMetadataEncode(session.Workspace, model), formatTime(time.Now().UTC()), id,
+		sessionMetadataEncode(session.Workspace, model, session.PermissionStance), formatTime(time.Now().UTC()), id,
 	)
 	if err != nil {
 		return fmt.Errorf("set session preferred model: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) SetSessionPermissionStance(ctx context.Context, id SessionID, stance string) error {
+	if ctx == nil {
+		return errors.New("set session permission stance context is required")
+	}
+	normalized, err := NormalizePermissionStance(stance)
+	if err != nil {
+		return err
+	}
+	session, err := r.GetSession(ctx, id)
+	if err != nil {
+		return err
+	}
+	_, err = r.db.ExecContext(ctx, `
+		UPDATE sessions SET metadata = ?, updated_at = ?
+		WHERE session_id = ?`,
+		sessionMetadataEncode(session.Workspace, session.PreferredModel, normalized), formatTime(time.Now().UTC()), id,
+	)
+	if err != nil {
+		return fmt.Errorf("set session permission stance: %w", err)
 	}
 	return nil
 }

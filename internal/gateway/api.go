@@ -172,13 +172,14 @@ type APIConfig struct {
 	MemoryControl MemoryControlService
 	// SkillControl is optional; when set, exposes POST /v1/skills/actions (apply/reject).
 	SkillControl SkillControlService
-	// SessionPrefs is optional; PATCH session preferred_model (O4).
+	// SessionPrefs is optional; PATCH session preferred_model / permission_stance.
 	SessionPrefs SessionPreferenceService
 }
 
 // SessionPreferenceService updates session metadata preferences (not global model).
 type SessionPreferenceService interface {
 	SetPreferredModel(ctx context.Context, sessionID kernel.SessionID, model string) error
+	SetPermissionStance(ctx context.Context, sessionID kernel.SessionID, stance string) error
 }
 
 // MemoryControlService is the narrow write surface for memory productization (not raw SQL).

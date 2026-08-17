@@ -36,19 +36,22 @@ type Definition struct {
 }
 
 type Request struct {
-	CallID             string          `json:"call_id"`
-	RunID              string          `json:"run_id"`
-	TaskID             string          `json:"task_id"`
-	PlanID             string          `json:"plan_id"`
-	PlanHash           string          `json:"plan_hash"`
-	StepID             string          `json:"step_id"`
-	CapabilityGrantID  string          `json:"capability_grant_id,omitempty"`
-	CapabilityGrantIDs []string        `json:"capability_grant_ids,omitempty"`
-	Actor              string          `json:"actor"`
-	TraceID            string          `json:"trace_id,omitempty"`
-	Tool               string          `json:"tool"`
-	Arguments          json.RawMessage `json:"arguments"`
-	TimeoutMillis      int64           `json:"timeout_ms,omitempty"`
+	CallID             string   `json:"call_id"`
+	RunID              string   `json:"run_id"`
+	TaskID             string   `json:"task_id"`
+	PlanID             string   `json:"plan_id"`
+	PlanHash           string   `json:"plan_hash"`
+	StepID             string   `json:"step_id"`
+	CapabilityGrantID  string   `json:"capability_grant_id,omitempty"`
+	CapabilityGrantIDs []string `json:"capability_grant_ids,omitempty"`
+	Actor              string   `json:"actor"`
+	TraceID            string   `json:"trace_id,omitempty"`
+	// Interactive is true when a TUI can answer /perm for this call (ADR-043).
+	// Omit / false = fail-closed. Not an authn bit — local UDS capability flag.
+	Interactive   bool            `json:"interactive,omitempty"`
+	Tool          string          `json:"tool"`
+	Arguments     json.RawMessage `json:"arguments"`
+	TimeoutMillis int64           `json:"timeout_ms,omitempty"`
 }
 
 type ArtifactRef struct {

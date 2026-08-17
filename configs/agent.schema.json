@@ -169,13 +169,17 @@
         "permission": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Tool-call permission interaction (ADR-043). Omit = preauth.",
+          "description": "Remembered high-risk families (ADR-043). Auto is a TUI session stance, not a config mode. permission.mode is load-only compatibility and ignored at runtime.",
           "properties": {
             "mode": {
               "type": "string",
               "enum": ["preauth", "ask"],
-              "default": "preauth",
-              "description": "preauth = deny without grant (default); ask = interactive tool-call queue."
+              "description": "Accepted for old configs; ignored. Wait is TUI interactive; CLI/cron stay fail-closed."
+            },
+            "allow": {
+              "type": "array",
+              "items": { "type": "string", "enum": ["process", "git"] },
+              "description": "Remember process and/or git so Agent does not prompt. OR with chat.tools.*"
             }
           }
         },

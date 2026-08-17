@@ -55,6 +55,15 @@ func (c *Client) SetSessionPreferredModel(ctx context.Context, id SessionID, mod
 	return session, nil
 }
 
+func (c *Client) SetSessionPermissionStance(ctx context.Context, id SessionID, stance string) (Session, error) {
+	var session Session
+	body := map[string]string{"permission_stance": strings.TrimSpace(stance)}
+	if err := c.inner.DoJSON(ctx, http.MethodPatch, "/v1/sessions/"+url.PathEscape(string(id)), body, &session); err != nil {
+		return Session{}, fmt.Errorf("set session permission stance: %w", err)
+	}
+	return session, nil
+}
+
 func (c *Client) SessionMessages(ctx context.Context, id SessionID, limit int) ([]TranscriptMessage, error) {
 	path := "/v1/sessions/" + url.PathEscape(string(id)) + "/messages"
 	if limit > 0 {

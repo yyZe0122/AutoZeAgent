@@ -178,6 +178,8 @@ type Session struct {
 	PreferredModel string `json:"preferred_model,omitempty"`
 	// Workspace is session-bound client cwd when set (ADR-046).
 	Workspace string `json:"workspace,omitempty"`
+	// PermissionStance is the Tab posture: agent | auto | plan (empty = agent).
+	PermissionStance string `json:"permission_stance,omitempty"`
 }
 
 // TranscriptMessage is a chat-facing projection of agent_run_records

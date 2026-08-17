@@ -140,3 +140,10 @@ func (a sessionPrefsAdapter) SetPreferredModel(ctx context.Context, sessionID ke
 	}
 	return a.repo.SetSessionPreferredModel(ctx, sessionID, model)
 }
+
+func (a sessionPrefsAdapter) SetPermissionStance(ctx context.Context, sessionID kernel.SessionID, stance string) error {
+	if a.repo == nil {
+		return errors.New("session repository unavailable")
+	}
+	return a.repo.SetSessionPermissionStance(ctx, sessionID, stance)
+}

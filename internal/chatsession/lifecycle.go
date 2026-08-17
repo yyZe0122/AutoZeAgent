@@ -37,6 +37,8 @@ func (s *Service) executeChat(
 	grantIDs map[string][]string,
 	userText string,
 	modelRef string,
+	actor string,
+	interactive bool,
 ) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(plan.Budget.MaxDurationMillis)*time.Millisecond)
 	defer cancel()
@@ -94,7 +96,7 @@ func (s *Service) executeChat(
 		}, "source", src, "pin", pin.Ref, "model", pin.Model)...)
 	}
 
-	sysPrompt := chatSystemPrompt(kernel.NormalizeExecutionMode(string(task.ExecutionMode)) == kernel.ExecutionModePlan)
+	sysPrompt := chatSystemPrompt(kernel.NormalizeExecutionMode(string(task.ExecutionMode)) == kernel.ExecutionModePlan, interactive)
 	prefix := []providerapi.Message{
 		{Role: providerapi.RoleSystem, Content: sysPrompt},
 		{Role: providerapi.RoleSystem, Content: chatEnvBlock(modelLabel, s.sessionWorkspace(ctx, task), s.now().UTC().Format("2006-01-02"))},
@@ -118,15 +120,17 @@ func (s *Service) executeChat(
 		return
 	}
 	persist := append(append([]providerapi.Message(nil), prefix...), providerapi.Message{Role: providerapi.RoleUser, Content: userText})
-	// Preserve non-interactive actors (scheduler/job) for Broker permission policy (ADR-043).
-	runActor := "agent"
+	runActor := strings.TrimSpace(actor)
+	if runActor == "" {
+		runActor = "local-user"
+	}
 	if strings.HasPrefix(string(task.ID), "scheduled_") {
 		runActor = "scheduler"
 	}
 	runReq := agent.RunRequest{
 		RunID: string(runID), TaskID: string(task.ID), SessionID: string(task.SessionID),
 		PlanID: string(plan.PlanID), PlanHash: planHash, StepID: string(stepID),
-		Actor: runActor, TraceID: string(runID),
+		Actor: runActor, TraceID: string(runID), Interactive: interactive,
 		Messages: persist, ProviderMessages: view.Messages(),
 		AllowedTools: allowed, CapabilityGrantIDs: grantIDs,
 		MaxOutputTokens: maxOut, MaxTotalTokens: plan.Budget.MaxTokens,

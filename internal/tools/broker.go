@@ -35,13 +35,7 @@ var (
 	ErrPermissionRequired = toolapi.ErrPermissionRequired
 )
 
-// Permission modes (ADR-043); mirror providerconfig without importing it.
-const (
-	PermissionModePreauth = "preauth"
-	PermissionModeAsk     = "ask"
-)
-
-// PermissionGate is optional interactive permission (mode=ask). Implemented by toolpermission.
+// PermissionGate is the interactive /perm gate. Implemented by toolpermission.
 type PermissionGate interface {
 	// CreatePending records a pending permission and returns its id.
 	CreatePending(ctx context.Context, req PermissionPending) (permissionID string, err error)
@@ -97,9 +91,7 @@ type Config struct {
 	ArtifactThreshold int
 	MaximumTimeout    time.Duration
 	Now               func() time.Time
-	// PermissionMode is preauth (default) or ask (ADR-043).
-	PermissionMode string
-	// Permission is optional; required for ask mode interactive waits.
+	// Permission is the interactive /perm gate. TUI agent turns wait when this is set.
 	Permission PermissionGate
 }
 
@@ -112,7 +104,6 @@ type Broker struct {
 	artifactThreshold int
 	maximumTimeout    time.Duration
 	now               func() time.Time
-	permissionMode    string
 	permission        PermissionGate
 	mu                sync.RWMutex
 	// dbMu serializes SQLite grant consume + tool_calls writes so same-step
@@ -138,20 +129,16 @@ func NewBroker(config Config) (*Broker, error) {
 	if config.Now == nil {
 		config.Now = func() time.Time { return time.Now().UTC() }
 	}
-	mode := strings.ToLower(strings.TrimSpace(config.PermissionMode))
-	if mode == "" {
-		mode = PermissionModePreauth
-	}
 	return &Broker{
 		db: config.DB, approvals: config.Approvals, policy: config.Policy,
 		audit: auditStore, artifacts: config.Artifacts,
 		artifactThreshold: config.ArtifactThreshold, maximumTimeout: config.MaximumTimeout,
-		now: config.Now, permissionMode: mode, permission: config.Permission,
+		now: config.Now, permission: config.Permission,
 		registry: make(map[string]Tool),
 	}, nil
 }
 
-// SetPermission attaches or replaces the interactive permission gate (ask mode).
+// SetPermission attaches or replaces the interactive permission gate.
 func (b *Broker) SetPermission(gate PermissionGate) {
 	if b == nil {
 		return
@@ -159,20 +146,6 @@ func (b *Broker) SetPermission(gate PermissionGate) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.permission = gate
-}
-
-// SetPermissionMode updates preauth|ask (auto treated as preauth by config layer).
-func (b *Broker) SetPermissionMode(mode string) {
-	if b == nil {
-		return
-	}
-	mode = strings.ToLower(strings.TrimSpace(mode))
-	if mode == "" {
-		mode = PermissionModePreauth
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.permissionMode = mode
 }
 
 // SetEditCheckpointer attaches QG snapshots to registered fs_write/fs_patch tools.
@@ -399,7 +372,7 @@ func (b *Broker) authorize(ctx context.Context, tx *sql.Tx, request toolapi.Requ
 	}
 	candidates := grantCandidates(request)
 	if result.RequiresApproval && len(candidates) == 0 {
-		// Interactive ask mode: leave authorize to wait path outside the TX.
+		// Interactive TUI: leave authorize to wait path outside the TX.
 		// Job/cron and nested retries never hang (ADR-043).
 		if b.canWaitPermission(ctx, request) {
 			return "", errPermissionWait
@@ -424,7 +397,7 @@ func (b *Broker) authorize(ctx context.Context, tx *sql.Tx, request toolapi.Requ
 		}
 		lastErr = err
 	}
-	// No matching grant: ask mode may wait for interactive permission (once).
+	// No matching grant: interactive TUI may wait for /perm (once).
 	if result.RequiresApproval && b.canWaitPermission(ctx, request) {
 		return "", errPermissionWait
 	}
@@ -436,27 +409,25 @@ var errPermissionWait = errors.New("permission wait required")
 
 type permissionWaitKey struct{}
 
-func (b *Broker) askModeEnabled() bool {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	return b.permissionMode == PermissionModeAsk && b.permission != nil
-}
-
 func permissionWaitDisabled(ctx context.Context) bool {
 	v, _ := ctx.Value(permissionWaitKey{}).(bool)
 	return v
 }
 
-// canWaitPermission is true only for interactive chat under mode=ask.
-// Job/cron tasks (task id prefix scheduled_) and non-interactive actors fail closed.
 func (b *Broker) canWaitPermission(ctx context.Context, request toolapi.Request) bool {
-	if !b.askModeEnabled() || permissionWaitDisabled(ctx) {
+	if b == nil || permissionWaitDisabled(ctx) {
+		return false
+	}
+	b.mu.RLock()
+	gate := b.permission
+	b.mu.RUnlock()
+	if gate == nil {
 		return false
 	}
 	if isNonInteractiveToolCaller(request) {
 		return false
 	}
-	return true
+	return request.Interactive
 }
 
 func isNonInteractiveToolCaller(request toolapi.Request) bool {
@@ -468,8 +439,9 @@ func isNonInteractiveToolCaller(request toolapi.Request) bool {
 	switch actor {
 	case "scheduler", "job", "cron", "scheduledtasks", "system-job":
 		return true
+	default:
+		return false
 	}
-	return false
 }
 
 func grantCandidates(request toolapi.Request) []string {

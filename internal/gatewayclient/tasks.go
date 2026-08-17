@@ -23,6 +23,10 @@ type TaskSubmissionRequest struct {
 	ExecutionMode string    `json:"execution_mode,omitempty"`
 	// Workspace is the client launch directory (absolute); bound to session (ADR-046).
 	Workspace string `json:"workspace,omitempty"`
+	// PermissionStance is the Tab posture (agent|auto|plan). Not execution_mode.
+	PermissionStance string `json:"permission_stance,omitempty"`
+	// Interactive is true when the client can decide /perm (TUI).
+	Interactive bool `json:"interactive,omitempty"`
 }
 
 type TaskSubmissionResponse struct {

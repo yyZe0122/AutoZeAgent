@@ -78,8 +78,6 @@ func wireChat(
 
 	maxIterations := out.chatCfg.MaxIterationsOrDefault()
 	compactionEnabled := out.chatCfg.CompactionEnabled()
-	permissionMode := out.chatCfg.PermissionModeOrDefault()
-	stack.broker.SetPermissionMode(permissionMode)
 
 	permStore, err := toolpermission.NewStore(stores.database.SQL())
 	if err != nil {
@@ -162,7 +160,7 @@ func wireChat(
 			Agent: out.agentRunner, Transcript: queries, WorkspaceRoots: chatRoots,
 			PathGuard: stack.pathGuard, DaemonCWD: workingDirectory, ConfigDir: layout.ConfigDir, ChatConfig: &chatCfgCopy,
 			AllowWriteCeiling: &writeCeiling, AllowGit: allowGit, AllowProcess: allowProcess,
-			PermissionMode: permissionMode, ExtraTools: stack.mcpToolNames,
+			ExtraTools:    stack.mcpToolNames,
 			ContextWindow: out.contextWindow, MaxOutputTokens: out.maxOutputTokens,
 			Context: contextStore, Compactor: out.agentRunner,
 			MemoryCurator: out.agentRunner, CompactionEnabled: &compactionEnabled, Calibrator: out.calibrator,
@@ -180,8 +178,7 @@ func wireChat(
 		slog.Info("chat workspace configured", "component", "daemon", "operation", "chat_config", "result", "succeeded",
 			"ceiling_roots", chatRoots, "allow_all", out.chatCfg.WorkspaceAllowAll(),
 			"agent_write_ceiling", writeCeiling, "agent_git", allowGit, "agent_process", allowProcess,
-			"context_window", out.contextWindow, "max_iterations", maxIterations, "compaction_enabled", compactionEnabled,
-			"permission_mode", permissionMode)
+			"context_window", out.contextWindow, "max_iterations", maxIterations, "compaction_enabled", compactionEnabled)
 	}
 	return out, nil
 }

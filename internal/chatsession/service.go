@@ -49,12 +49,14 @@ const (
 		"Prefer configured mcp_* tools over process_exec/process_shell or writing a script that reimplements them."
 	chatToolProtocolAgent = "You may read and write files under the workspace. " +
 		"Edit with fs_patch and expected_sha256. Use fs_write only to create a new file. " +
-		"process_exec/process_shell are only for running tests or approved commands. " +
-		"If those tools are not granted, say the user must set chat.tools.process; do not write a script to stand in for tests. " +
-		"Do not invent plan steps."
+		"process_exec/process_shell are only for running tests or approved commands. "
 	chatToolProtocolPlan = "Read-only analysis: inspect the workspace, ask questions, discuss approaches. " +
 		"Do not modify files, create directories, or apply patches. " +
 		"If the user asks for edits, explain the plan and suggest switching to agent (build) mode."
+	chatToolProtocolAgentInteractive = "If those tools are not granted, wait for the user to approve via /perm or switch Tab to Auto; do not write a script to stand in for tests. " +
+		"Do not invent plan steps."
+	chatToolProtocolAgentHeadless = "If those tools are not granted, say the user must set chat.permission.allow or chat.tools.process; do not write a script to stand in for tests. " +
+		"Do not invent plan steps."
 	// skillSystemPreamble is prepended to the task skill snapshot system message (ADR-036).
 	// Skills are instruction text only — never grants, approvals, or policy expansion.
 	skillSystemPreamble = "The following selected skill instructions guide this reply only. " +
@@ -76,11 +78,15 @@ func chatIdentityBlock(plan bool) string {
 		"No vision. /model switches global main only; other roles need operator config plus ymz restart."
 }
 
-func chatSystemPrompt(plan bool) string {
+func chatSystemPrompt(plan, interactive bool) string {
 	if plan {
 		return chatIdentityBlock(true) + " " + chatToolProtocolShared + " " + chatToolProtocolPlan
 	}
-	return chatIdentityBlock(false) + " " + chatToolProtocolShared + " " + chatToolProtocolAgent
+	ungranted := chatToolProtocolAgentHeadless
+	if interactive {
+		ungranted = chatToolProtocolAgentInteractive
+	}
+	return chatIdentityBlock(false) + " " + chatToolProtocolShared + " " + chatToolProtocolAgent + " " + ungranted
 }
 
 func chatEnvBlock(model, workspace, date string) string {
@@ -198,8 +204,6 @@ type Config struct {
 	AllowGit bool
 	// AllowProcess, when true, pre-authorizes process_exec and process_shell for agent mode only (default false). Plan and cron never receive these grants.
 	AllowProcess bool
-	// PermissionMode is preauth (default) or ask (ADR-043). ask embeds high-risk caps in plan without pre-issuing grants.
-	PermissionMode string
 	// ExtraTools are additional broker tool names (e.g. mcp_*) granted for chat runs.
 	ExtraTools []string
 	// ContextWindow is model context length for packing; 0 = unknown.
@@ -266,7 +270,6 @@ type Service struct {
 	writeCeiling      bool
 	allowGit          bool
 	allowProcess      bool
-	permissionMode    string
 	extraTools        []string
 	contextWindow     int64
 	maxOutputTokens   int64
@@ -299,6 +302,8 @@ type StartRequest struct {
 	UserText string
 	// ModelRef is an optional job-pinned selection ref (H7). Wins over session prefer.
 	ModelRef string
+	// Interactive is true when a TUI can answer /perm for this turn.
+	Interactive bool
 }
 
 type StartResult struct {
@@ -351,10 +356,6 @@ func New(config Config) (*Service, error) {
 	if config.CompactionEnabled != nil {
 		compactionEnabled = *config.CompactionEnabled
 	}
-	permMode := strings.ToLower(strings.TrimSpace(config.PermissionMode))
-	if permMode == "" {
-		permMode = "preauth"
-	}
 	return &Service{
 		db: config.DB, repository: config.Repository, approvals: config.Approvals,
 		agent: config.Agent, transcript: config.Transcript, roots: roots,
@@ -362,7 +363,7 @@ func New(config Config) (*Service, error) {
 		configDir:    strings.TrimSpace(config.ConfigDir),
 		chatCfg:      config.ChatConfig,
 		writeCeiling: writeCeiling, allowGit: config.AllowGit, allowProcess: config.AllowProcess,
-		permissionMode: permMode, extraTools: extra,
+		extraTools:    extra,
 		contextWindow: config.ContextWindow, maxOutputTokens: config.MaxOutputTokens,
 		contextStore: config.Context,
 		compactor:    config.Compactor, compactionEnabled: compactionEnabled,
@@ -481,7 +482,7 @@ func (s *Service) StartChat(ctx context.Context, request StartRequest) (StartRes
 		}
 	}
 
-	plan, planHash, task, err := s.ensureChatWorkspaceAuth(ctx, task)
+	plan, planHash, task, posture, err := s.ensureChatWorkspaceAuth(ctx, task)
 	if err != nil {
 		return StartResult{}, err
 	}
@@ -498,7 +499,7 @@ func (s *Service) StartChat(ctx context.Context, request StartRequest) (StartRes
 		return StartResult{}, classify(err)
 	}
 
-	grantIDs, err := s.issueChatGrants(ctx, plan)
+	grantIDs, err := s.issueChatGrants(ctx, plan, posture)
 	if err != nil {
 		return StartResult{}, err
 	}
@@ -516,7 +517,9 @@ func (s *Service) StartChat(ctx context.Context, request StartRequest) (StartRes
 	execGrants := grantIDs
 	execUser := userText
 	execModelRef := modelRef
-	go s.executeChat(execTask, execPlan, execHash, execRun, execGrants, execUser, execModelRef)
+	execActor := actor
+	execInteractive := request.Interactive
+	go s.executeChat(execTask, execPlan, execHash, execRun, execGrants, execUser, execModelRef, execActor, execInteractive)
 
 	return StartResult{Task: task, RunID: runID, PlanID: plan.PlanID}, nil
 }

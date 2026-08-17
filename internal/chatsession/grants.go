@@ -52,8 +52,35 @@ func (s *Service) resolveGrantRoots(ctx context.Context, task kernel.Task) []str
 	return append([]string(nil), s.roots...)
 }
 
-// SetContextWindow updates packing window for subsequent chat turns.
-func (s *Service) ensureChatWorkspaceAuth(ctx context.Context, task kernel.Task) (approval.PlanDocument, string, kernel.Task, error) {
+type grantPosture struct {
+	pregrantGit  bool
+	pregrantProc bool
+	askGit       bool
+	askProc      bool
+}
+
+func (s *Service) grantPosture(ctx context.Context, task kernel.Task) grantPosture {
+	cron := strings.HasPrefix(string(task.ID), "scheduled_")
+	stance := kernel.PermissionStanceAgent
+	if !cron {
+		if sess, err := s.repository.GetSession(ctx, task.SessionID); err == nil {
+			if normalized, err := kernel.NormalizePermissionStance(sess.PermissionStance); err == nil {
+				stance = normalized
+			}
+		}
+	}
+	agent := kernel.NormalizeExecutionMode(string(task.ExecutionMode)) == kernel.ExecutionModeAgent
+	auto := agent && !cron && stance == kernel.PermissionStanceAuto
+	preGit := agent && !cron && (s.allowGit || auto)
+	preProc := agent && !cron && (s.allowProcess || auto)
+	return grantPosture{
+		pregrantGit: preGit, pregrantProc: preProc,
+		askGit: agent && !cron && !preGit, askProc: agent && !cron && !preProc,
+	}
+}
+
+func (s *Service) ensureChatWorkspaceAuth(ctx context.Context, task kernel.Task) (approval.PlanDocument, string, kernel.Task, grantPosture, error) {
+	posture := s.grantPosture(ctx, task)
 	planID := chatPlanID(task.ID)
 	var storedHash, state, document string
 	err := s.db.QueryRowContext(ctx, `
@@ -62,39 +89,39 @@ func (s *Service) ensureChatWorkspaceAuth(ctx context.Context, task kernel.Task)
 	).Scan(&storedHash, &state, &document)
 	if err == nil {
 		if state != string(kernel.PlanApproved) {
-			return approval.PlanDocument{}, "", task, applicationerror.Wrap(applicationerror.CodeConflict, false,
+			return approval.PlanDocument{}, "", task, posture, applicationerror.Wrap(applicationerror.CodeConflict, false,
 				fmt.Errorf("%w: chat plan %s is %s, want approved", ErrInvalidRequest, planID, state))
 		}
 		var plan approval.PlanDocument
 		if err := json.Unmarshal([]byte(document), &plan); err != nil {
-			return approval.PlanDocument{}, "", task, fmt.Errorf("decode chat plan: %w", err)
+			return approval.PlanDocument{}, "", task, posture, fmt.Errorf("decode chat plan: %w", err)
 		}
 		if err := s.recordSystemApproval(ctx, plan); err != nil {
-			return approval.PlanDocument{}, "", task, err
+			return approval.PlanDocument{}, "", task, posture, err
 		}
 		task, err = s.repository.GetTask(ctx, task.ID)
 		if err != nil {
-			return approval.PlanDocument{}, "", task, classify(err)
+			return approval.PlanDocument{}, "", task, posture, classify(err)
 		}
-		return plan, storedHash, task, nil
+		return plan, storedHash, task, posture, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return approval.PlanDocument{}, "", task, fmt.Errorf("lookup chat plan: %w", err)
+		return approval.PlanDocument{}, "", task, posture, fmt.Errorf("lookup chat plan: %w", err)
 	}
 
 	grantRoots := s.resolveGrantRoots(ctx, task)
 	if len(grantRoots) == 0 {
-		return approval.PlanDocument{}, "", task, applicationerror.Wrap(applicationerror.CodeInvalidRequest, false,
+		return approval.PlanDocument{}, "", task, posture, applicationerror.Wrap(applicationerror.CodeInvalidRequest, false,
 			fmt.Errorf("%w: no workspace roots for session", ErrInvalidRequest))
 	}
-	plan := s.buildWorkspacePlan(planID, task.ID, kernel.NormalizeExecutionMode(string(task.ExecutionMode)), grantRoots)
+	plan := s.buildWorkspacePlan(planID, task.ID, kernel.NormalizeExecutionMode(string(task.ExecutionMode)), grantRoots, posture)
 	documentBytes, err := plan.CanonicalJSON()
 	if err != nil {
-		return approval.PlanDocument{}, "", task, err
+		return approval.PlanDocument{}, "", task, posture, err
 	}
 	hash, err := plan.Hash()
 	if err != nil {
-		return approval.PlanDocument{}, "", task, err
+		return approval.PlanDocument{}, "", task, posture, err
 	}
 	drafts := []kernel.PlanStepDraft{{
 		ID: plan.Steps[0].StepID, Position: 0, Title: plan.Steps[0].Title, EffectLevel: string(plan.Steps[0].Risk),
@@ -104,12 +131,12 @@ func (s *Service) ensureChatWorkspaceAuth(ctx context.Context, task kernel.Task)
 		"session chat workspace auth", s.now(),
 	)
 	if err != nil {
-		return approval.PlanDocument{}, "", task, classify(err)
+		return approval.PlanDocument{}, "", task, posture, classify(err)
 	}
 	if err := s.recordSystemApproval(ctx, plan); err != nil {
-		return approval.PlanDocument{}, "", task, err
+		return approval.PlanDocument{}, "", task, posture, err
 	}
-	return plan, hash, task, nil
+	return plan, hash, task, posture, nil
 }
 
 func (s *Service) recordSystemApproval(ctx context.Context, plan approval.PlanDocument) error {
@@ -191,7 +218,7 @@ func (s *Service) createChatRun(ctx context.Context, task kernel.Task, plan appr
 	return runID, nil
 }
 
-func (s *Service) issueChatGrants(ctx context.Context, plan approval.PlanDocument) (map[string][]string, error) {
+func (s *Service) issueChatGrants(ctx context.Context, plan approval.PlanDocument, posture grantPosture) (map[string][]string, error) {
 	step := plan.Steps[0]
 	hash, err := plan.Hash()
 	if err != nil {
@@ -218,12 +245,7 @@ func (s *Service) issueChatGrants(ctx context.Context, plan approval.PlanDocumen
 	}
 	grants := make(map[string][]string)
 	for _, scope := range step.Capabilities {
-		// ask-mode high-risk scopes (OneTime true or process/git without preauth) are issued only after decide.
-		if s.permissionMode == "ask" && isAskOnlyCapability(scope) && !s.preauthHighRisk(scope.Capability) {
-			continue
-		}
-		// Prefer non-one-time scopes for preauth (session grants).
-		if scope.OneTime && s.permissionMode == "ask" {
+		if !posture.shouldIssue(scope) {
 			continue
 		}
 		grantID := approval.GrantID(deterministicID("chat-grant", approvalID, string(step.StepID), scope.Capability, fmt.Sprintf("%v", scope.OneTime), fmt.Sprintf("%d", scope.MaxCalls)))
@@ -239,25 +261,18 @@ func (s *Service) issueChatGrants(ctx context.Context, plan approval.PlanDocumen
 	return grants, nil
 }
 
-func isAskOnlyCapability(scope approval.CapabilityScope) bool {
+func (p grantPosture) shouldIssue(scope approval.CapabilityScope) bool {
 	name := scope.Capability
-	if name == "process_exec" || name == "process_shell" || strings.HasPrefix(name, "git_") {
-		return true
+	if name == "process_exec" || name == "process_shell" {
+		return p.pregrantProc && !scope.OneTime
 	}
-	return false
+	if strings.HasPrefix(name, "git_") {
+		return p.pregrantGit && !scope.OneTime
+	}
+	return !scope.OneTime
 }
 
-func (s *Service) preauthHighRisk(capability string) bool {
-	if capability == "process_exec" || capability == "process_shell" {
-		return s.allowProcess
-	}
-	if strings.HasPrefix(capability, "git_") {
-		return s.allowGit
-	}
-	return false
-}
-
-func (s *Service) buildWorkspacePlan(planID kernel.PlanID, taskID kernel.TaskID, mode kernel.ExecutionMode, roots []string) approval.PlanDocument {
+func (s *Service) buildWorkspacePlan(planID kernel.PlanID, taskID kernel.TaskID, mode kernel.ExecutionMode, roots []string, posture grantPosture) approval.PlanDocument {
 	if len(roots) == 0 {
 		roots = append([]string(nil), s.roots...)
 	}
@@ -298,19 +313,14 @@ func (s *Service) buildWorkspacePlan(planID kernel.PlanID, taskID kernel.TaskID,
 		approval.CapabilityScope{Capability: "skill_view", MaxDurationMillis: defaultToolTimeoutMS, MaxCalls: defaultMaxCalls},
 	)
 	effects = append(effects, "list and load local skill instructions")
-	// High-risk tools: agent + config allowlist only (P4.3). Empty command/args = path-scoped (scheme A).
-	// ask mode (ADR-043): embed once+session plan scopes without pre-issuing grants (issueChatGrants skips these).
-	askMode := mode == kernel.ExecutionModeAgent && s.permissionMode == "ask"
-	if mode == kernel.ExecutionModeAgent && (s.allowGit || askMode) {
+	if posture.pregrantGit || posture.askGit {
 		for _, name := range []string{"git_status", "git_diff", "git_add", "git_commit"} {
-			if s.allowGit {
+			if posture.pregrantGit {
 				caps = append(caps, approval.CapabilityScope{
 					Capability: name, Paths: append([]string(nil), pathRoots...),
 					MaxDurationMillis: defaultToolTimeoutMS, MaxCalls: defaultMaxCalls,
 				})
-			}
-			if askMode && !s.allowGit {
-				// Interactive: plan contains scopes for IssueGrant after decide.
+			} else {
 				caps = append(caps,
 					approval.CapabilityScope{
 						Capability: name, Paths: append([]string(nil), pathRoots...),
@@ -323,10 +333,8 @@ func (s *Service) buildWorkspacePlan(planID kernel.PlanID, taskID kernel.TaskID,
 				)
 			}
 		}
-		if s.allowGit || askMode {
-			risk = policy.RiskR2
-			effects = append(effects, "use git tools under workspace roots")
-		}
+		risk = policy.RiskR2
+		effects = append(effects, "use git tools under workspace roots")
 	}
 	// http_get ask scopes (network domain filled at decide via plan template with empty domains fails —
 	// http_get is not path-scoped; skip plan embed for http until domain-wildcard grants exist.
@@ -370,16 +378,14 @@ func (s *Service) buildWorkspacePlan(planID kernel.PlanID, taskID kernel.TaskID,
 	} else {
 		effects = append(effects, "search local memory and past transcripts")
 	}
-	isCron := strings.HasPrefix(string(taskID), "scheduled_")
-	if mode == kernel.ExecutionModeAgent && !isCron && (s.allowProcess || askMode) {
+	if posture.pregrantProc || posture.askProc {
 		for _, name := range []string{"process_exec", "process_shell"} {
-			if s.allowProcess {
+			if posture.pregrantProc {
 				caps = append(caps, approval.CapabilityScope{
 					Capability: name, Paths: append([]string(nil), pathRoots...),
 					MaxDurationMillis: defaultToolTimeoutMS, MaxCalls: defaultMaxCalls,
 				})
-			}
-			if askMode && !s.allowProcess {
+			} else {
 				caps = append(caps,
 					approval.CapabilityScope{
 						Capability: name, Paths: append([]string(nil), pathRoots...),
@@ -392,10 +398,8 @@ func (s *Service) buildWorkspacePlan(planID kernel.PlanID, taskID kernel.TaskID,
 				)
 			}
 		}
-		if s.allowProcess || askMode {
-			risk = policy.RiskR2
-			effects = append(effects, "execute processes under workspace roots")
-		}
+		risk = policy.RiskR2
+		effects = append(effects, "execute processes under workspace roots")
 	}
 	if risk == policy.RiskR0 {
 		risk = policy.RiskR1

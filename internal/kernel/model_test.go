@@ -2,11 +2,45 @@ package kernel
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
 
 var testTime = time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)
+
+func TestNormalizePermissionStance(t *testing.T) {
+	t.Parallel()
+	got, err := NormalizePermissionStance("")
+	if err != nil || got != PermissionStanceAgent {
+		t.Fatalf("empty = %q %v", got, err)
+	}
+	got, err = NormalizePermissionStance("AUTO")
+	if err != nil || got != PermissionStanceAuto {
+		t.Fatalf("auto = %q %v", got, err)
+	}
+	if _, err := NormalizePermissionStance("yolo"); !errors.Is(err, ErrInvalidAggregate) {
+		t.Fatalf("yolo err = %v", err)
+	}
+}
+
+func TestSessionMetadataEncodeKeepsAllFields(t *testing.T) {
+	t.Parallel()
+	raw := sessionMetadataEncode("/tmp/ws", "deepseek1/deepseek-chat", PermissionStanceAuto)
+	if workspaceFromMetadata(raw) != "/tmp/ws" {
+		t.Fatalf("workspace = %q", workspaceFromMetadata(raw))
+	}
+	if preferredModelFromMetadata(raw) != "deepseek1/deepseek-chat" {
+		t.Fatalf("model = %q", preferredModelFromMetadata(raw))
+	}
+	if permissionStanceFromMetadata(raw) != PermissionStanceAuto {
+		t.Fatalf("stance = %q", permissionStanceFromMetadata(raw))
+	}
+	agentOnly := sessionMetadataEncode("/tmp/ws", "deepseek1/deepseek-chat", PermissionStanceAgent)
+	if strings.Contains(agentOnly, "permission_stance") {
+		t.Fatalf("agent stance should omit key: %s", agentOnly)
+	}
+}
 
 func TestTaskChatLifecycle(t *testing.T) {
 	t.Parallel()

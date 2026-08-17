@@ -122,6 +122,9 @@ func applySessionMetadata(item *Session, raw string) {
 	if v, ok := meta["model"].(string); ok {
 		item.PreferredModel = strings.TrimSpace(v)
 	}
+	if v, ok := meta["permission_stance"].(string); ok {
+		item.PermissionStance = strings.TrimSpace(v)
+	}
 }
 
 // SessionTranscript returns chat messages for a session: task objectives as

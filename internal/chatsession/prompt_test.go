@@ -8,7 +8,7 @@ import (
 )
 
 func TestChatSystemPromptIncludesVersionAndRoles(t *testing.T) {
-	agent := chatSystemPrompt(false)
+	agent := chatSystemPrompt(false, true)
 	if !strings.Contains(agent, "YunmengZe Agent "+version.Version) {
 		t.Fatalf("agent prompt missing version: %s", agent)
 	}
@@ -18,7 +18,17 @@ func TestChatSystemPromptIncludesVersionAndRoles(t *testing.T) {
 	if !strings.Contains(agent, "fs_patch") {
 		t.Fatalf("agent prompt missing write tools: %s", agent)
 	}
-	plan := chatSystemPrompt(true)
+	if !strings.Contains(agent, "/perm") {
+		t.Fatalf("interactive agent prompt missing /perm: %s", agent)
+	}
+	headless := chatSystemPrompt(false, false)
+	if strings.Contains(headless, "/perm") {
+		t.Fatalf("headless agent prompt must not mention /perm: %s", headless)
+	}
+	if !strings.Contains(headless, "chat.permission.allow") {
+		t.Fatalf("headless agent prompt missing allow hint: %s", headless)
+	}
+	plan := chatSystemPrompt(true, false)
 	if !strings.Contains(plan, "YunmengZe Agent "+version.Version) {
 		t.Fatalf("plan prompt missing version: %s", plan)
 	}

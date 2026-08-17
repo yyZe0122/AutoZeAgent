@@ -54,6 +54,28 @@ type Session struct {
 	// PreferredModel is an optional session model preference (provider/model).
 	// O4: chat runs resolve job pin → prefer → main via modelresolve; does not rewrite global config.
 	PreferredModel string
+	// PermissionStance is the Tab posture for this session: agent | auto | plan.
+	// Empty means agent. Independent of task execution_mode (still only agent|plan).
+	PermissionStance string
+}
+
+const (
+	PermissionStanceAgent = "agent"
+	PermissionStanceAuto  = "auto"
+	PermissionStancePlan  = "plan"
+)
+
+func NormalizePermissionStance(value string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", PermissionStanceAgent:
+		return PermissionStanceAgent, nil
+	case PermissionStanceAuto:
+		return PermissionStanceAuto, nil
+	case PermissionStancePlan:
+		return PermissionStancePlan, nil
+	default:
+		return "", fmt.Errorf("%w: permission_stance must be agent, auto, or plan", ErrInvalidAggregate)
+	}
 }
 
 func NewSession(id SessionID, now time.Time) (Session, error) {

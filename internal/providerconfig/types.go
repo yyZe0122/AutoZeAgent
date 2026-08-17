@@ -71,7 +71,7 @@ type MCPServer struct {
 	Headers map[string]string `json:"headers,omitempty"`
 }
 
-// Permission modes for chat.permission.mode (ADR-043).
+// Permission modes accepted on chat.permission.mode (load-only; ignored at runtime).
 const (
 	PermissionModePreauth = "preauth"
 	PermissionModeAsk     = "ask"
@@ -93,7 +93,7 @@ type ChatConfig struct {
 	Compaction *ChatCompactionConfig `json:"compaction,omitempty"`
 	// MaxIterations caps agent tool-loop iterations per chat run (1–64). Omit → 16.
 	MaxIterations int `json:"max_iterations,omitempty"`
-	// Permission controls tool-call interactive approval (ADR-043). Omit → preauth.
+	// Permission remembers high-risk families (allow). Mode is load-only compatibility.
 	Permission *ChatPermissionConfig `json:"permission,omitempty"`
 	// Memory controls in-process layered memory (ADR-044). Omit → enabled defaults.
 	Memory *ChatMemoryConfig `json:"memory,omitempty"`
@@ -164,8 +164,11 @@ type ChatSkillsConfig struct {
 
 // ChatPermissionConfig is the optional chat.permission object.
 type ChatPermissionConfig struct {
-	// Mode is preauth (default) | ask | auto (reserved; treated as preauth).
+	// Mode is accepted for old configs (preauth|ask) and ignored at runtime.
+	// Wait is TUI interactive; CLI/cron stay fail-closed. Auto is a session stance.
 	Mode string `json:"mode,omitempty"`
+	// Allow remembers high-risk families so Agent does not prompt: process | git.
+	Allow []string `json:"allow,omitempty"`
 }
 
 // ChatToolsConfig is the optional chat.tools allowlist for agent mode only.
@@ -190,14 +193,35 @@ func (c ChatConfig) AgentWriteCeiling() bool {
 	return *c.AllowWrite
 }
 
-// AgentGitEnabled reports whether agent mode may receive git_* grants (default false).
+// AgentGitEnabled reports whether agent mode may receive git_* grants.
+// True when chat.tools.git or chat.permission.allow contains "git".
 func (c ChatConfig) AgentGitEnabled() bool {
-	return c.Tools != nil && c.Tools.Git
+	if c.Tools != nil && c.Tools.Git {
+		return true
+	}
+	return c.permissionAllowContains("git")
 }
 
-// AgentProcessEnabled reports whether agent mode may receive process_exec/process_shell grants (default false).
+// AgentProcessEnabled reports whether agent mode may receive process_exec/process_shell grants.
+// True when chat.tools.process or chat.permission.allow contains "process".
 func (c ChatConfig) AgentProcessEnabled() bool {
-	return c.Tools != nil && c.Tools.Process
+	if c.Tools != nil && c.Tools.Process {
+		return true
+	}
+	return c.permissionAllowContains("process")
+}
+
+func (c ChatConfig) permissionAllowContains(name string) bool {
+	if c.Permission == nil {
+		return false
+	}
+	want := strings.ToLower(strings.TrimSpace(name))
+	for _, item := range c.Permission.Allow {
+		if strings.ToLower(strings.TrimSpace(item)) == want {
+			return true
+		}
+	}
+	return false
 }
 
 // CompactionEnabled reports whether LLM/extractive session compaction is on.
@@ -298,19 +322,6 @@ func (c ChatConfig) MemoryCuratorTimeoutMS() int {
 		return 15_000
 	}
 	return c.Memory.Curator.TimeoutMS
-}
-
-// PermissionModeOrDefault returns chat.permission.mode or preauth.
-func (c ChatConfig) PermissionModeOrDefault() string {
-	if c.Permission == nil {
-		return PermissionModePreauth
-	}
-	switch strings.ToLower(strings.TrimSpace(c.Permission.Mode)) {
-	case PermissionModeAsk:
-		return PermissionModeAsk
-	default:
-		return PermissionModePreauth
-	}
 }
 
 type Provider struct {

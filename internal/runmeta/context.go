@@ -26,6 +26,8 @@ type Context struct {
 	Depth int
 	// CallID is the current tool call when set by the broker.
 	CallID string
+	// Interactive is true when a TUI can answer /perm for this run (ADR-043).
+	Interactive bool
 }
 
 // With attaches metadata for tools that need parent identity.

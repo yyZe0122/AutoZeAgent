@@ -30,8 +30,9 @@ var (
 
 type Repository interface {
 	CreateSession(context.Context, kernel.SessionID, time.Time) (kernel.Session, error)
-	CreateSessionWithWorkspace(context.Context, kernel.SessionID, string, time.Time) (kernel.Session, error)
+	CreateSessionWithWorkspace(context.Context, kernel.SessionID, string, string, time.Time) (kernel.Session, error)
 	EnsureSessionWorkspace(context.Context, kernel.SessionID, string) error
+	SetSessionPermissionStance(context.Context, kernel.SessionID, string) error
 	GetSession(context.Context, kernel.SessionID) (kernel.Session, error)
 	CreateTaskWithSkillSnapshot(context.Context, kernel.TaskID, kernel.SessionID, string, string, []string, string, kernel.ExecutionMode, time.Time) (kernel.Task, error)
 	GetTask(context.Context, kernel.TaskID) (kernel.Task, error)
@@ -51,6 +52,8 @@ type ChatStartRequest struct {
 	UserText string
 	// ModelRef is an optional job-pinned selection ref (H7). Empty → session prefer → main.
 	ModelRef string
+	// Interactive is true when the caller can decide /perm (TUI).
+	Interactive bool
 }
 
 type ChatStartResult struct {
@@ -95,7 +98,12 @@ type Request struct {
 	// ModelRef is an optional job-pinned selection ref (H7). Empty → session prefer → main.
 	ModelRef string
 	// Workspace is the client launch directory (absolute); bound to session on create (ADR-046).
-	Workspace     string
+	Workspace string
+	// PermissionStance is the Tab posture written onto the session (agent|auto|plan).
+	// Empty on an existing session leaves the stored stance unchanged.
+	PermissionStance string
+	// Interactive is true when a TUI can answer pending /perm.
+	Interactive   bool
 	EnsureSession bool
 	AllowExisting bool
 	// TraceID is optional; empty means chatsession will use run_id after create (ADR-047).
@@ -167,7 +175,7 @@ func (s *Service) Submit(ctx context.Context, request Request) (Result, error) {
 		}
 	}
 	if request.EnsureSession {
-		if err := s.ensureSession(ctx, request.SessionID, request.Workspace); err != nil {
+		if err := s.ensureSession(ctx, request.SessionID, request.Workspace, request.PermissionStance); err != nil {
 			return Result{}, classifyError(err)
 		}
 	}
@@ -251,7 +259,7 @@ func (s *Service) startChat(ctx context.Context, task kernel.Task, request Reque
 	}, "actor", actor, "execution_mode", string(task.ExecutionMode))...)
 	chatResult, err := s.chat.StartChat(ctx, ChatStartRequest{
 		Task: task, Actor: actor, TraceID: traceID, UserText: request.Objective,
-		ModelRef: strings.TrimSpace(request.ModelRef),
+		ModelRef: strings.TrimSpace(request.ModelRef), Interactive: request.Interactive,
 	})
 	if err != nil {
 		slog.Error("tasksubmission start chat failed", runlog.Attrs("tasksubmission", "start_chat", "failed", runlog.IDs{
@@ -319,8 +327,18 @@ func classifyError(err error) error {
 	}
 }
 
-func (s *Service) ensureSession(ctx context.Context, id kernel.SessionID, workspace string) error {
+func (s *Service) ensureSession(ctx context.Context, id kernel.SessionID, workspace, stance string) error {
 	workspace = strings.TrimSpace(workspace)
+	stance = strings.TrimSpace(stance)
+	// Empty stance means "leave existing" on update; create still defaults to agent.
+	var normalized string
+	if stance != "" {
+		var err error
+		normalized, err = kernel.NormalizePermissionStance(stance)
+		if err != nil {
+			return err
+		}
+	}
 	session, err := s.repository.GetSession(ctx, id)
 	if err == nil {
 		if session.State != kernel.SessionActive {
@@ -329,12 +347,17 @@ func (s *Service) ensureSession(ctx context.Context, id kernel.SessionID, worksp
 		if workspace != "" {
 			_ = s.repository.EnsureSessionWorkspace(ctx, id, workspace)
 		}
+		if normalized != "" && normalized != session.PermissionStance {
+			if err := s.repository.SetSessionPermissionStance(ctx, id, normalized); err != nil {
+				return err
+			}
+		}
 		return nil
 	}
 	if !errors.Is(err, kernel.ErrNotFound) {
 		return err
 	}
-	_, err = s.repository.CreateSessionWithWorkspace(ctx, id, workspace, s.now())
+	_, err = s.repository.CreateSessionWithWorkspace(ctx, id, workspace, normalized, s.now())
 	if errors.Is(err, kernel.ErrAlreadyExists) {
 		session, err = s.repository.GetSession(ctx, id)
 		if err == nil && session.State != kernel.SessionActive {
@@ -342,6 +365,11 @@ func (s *Service) ensureSession(ctx context.Context, id kernel.SessionID, worksp
 		}
 		if err == nil && workspace != "" {
 			_ = s.repository.EnsureSessionWorkspace(ctx, id, workspace)
+		}
+		if err == nil && normalized != "" && normalized != session.PermissionStance {
+			if setErr := s.repository.SetSessionPermissionStance(ctx, id, normalized); setErr != nil {
+				return setErr
+			}
 		}
 	}
 	return err

@@ -101,6 +101,8 @@ type RunRequest struct {
 	CapabilityGrantIDs map[string][]string
 	Actor              string
 	TraceID            string
+	// Interactive is true when a TUI can answer /perm for this run (ADR-043).
+	Interactive bool
 	// Messages are persisted as this run's input_message prefix (Prepare): Prefix + current user.
 	Messages []providerapi.Message
 	// ProviderMessages is the assembled ContextView for the provider (ADR-051).

@@ -154,7 +154,7 @@ func (t *taskTool) Execute(ctx context.Context, raw json.RawMessage) (json.RawMe
 	req := agent.RunRequest{
 		RunID: childRunID, TaskID: parent.TaskID, SessionID: parent.SessionID,
 		PlanID: parent.PlanID, PlanHash: parent.PlanHash, StepID: parent.StepID,
-		Actor: parent.Actor, TraceID: parent.TraceID,
+		Actor: parent.Actor, TraceID: parent.TraceID, Interactive: parent.Interactive,
 		Messages: []providerapi.Message{
 			{Role: providerapi.RoleSystem, Content: taskSystemPrompt()},
 			{Role: providerapi.RoleUser, Content: prompt},

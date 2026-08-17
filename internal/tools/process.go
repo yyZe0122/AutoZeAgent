@@ -58,7 +58,7 @@ const processShellBin = "/bin/sh"
 
 func (t *processShellTool) Definition() toolapi.Definition {
 	return toolapi.Definition{
-		Name: "process_shell", Description: "Run tests or an approved /bin/sh -c script (not for find/grep). Same grant gate as process_exec (chat.tools.process). Prefer process_exec argv when you do not need a shell. Plan and cron never receive this grant.",
+		Name: "process_shell", Description: "Run tests or an approved /bin/sh -c script (not for find/grep). Same grant gate as process_exec (chat.permission.allow / chat.tools.process, or Tab Auto). Prefer process_exec argv when you do not need a shell. Plan and cron never receive this grant.",
 		Risk: string(policy.RiskR2), DefaultTimeoutMillis: 30000,
 		InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false,"required":["command","directory"],"properties":{"command":{"type":"string","description":"Script passed to /bin/sh -c"},"directory":{"type":"string"},"environment":{"type":"object","additionalProperties":{"type":"string"}}}}`),
 	}

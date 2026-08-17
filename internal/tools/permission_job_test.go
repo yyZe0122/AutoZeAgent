@@ -22,8 +22,25 @@ func TestIsNonInteractiveToolCaller(t *testing.T) {
 	if !isNonInteractiveToolCaller(toolapi.Request{Actor: "scheduler"}) {
 		t.Fatal("scheduler actor")
 	}
-	if isNonInteractiveToolCaller(toolapi.Request{TaskID: "task-1", Actor: "agent"}) {
-		t.Fatal("interactive chat should wait")
+	if isNonInteractiveToolCaller(toolapi.Request{TaskID: "task-1", Actor: "local-user"}) {
+		t.Fatal("human actor is not itself a fail-closed signal")
+	}
+}
+
+func TestCanWaitPermissionRequiresInteractive(t *testing.T) {
+	gate := &denyWaitGate{}
+	b := &Broker{permission: gate}
+	human := toolapi.Request{TaskID: "task-1", Actor: "local-user"}
+	if b.canWaitPermission(context.Background(), human) {
+		t.Fatal("omit interactive must fail-closed")
+	}
+	human.Interactive = true
+	if !b.canWaitPermission(context.Background(), human) {
+		t.Fatal("interactive TUI should wait")
+	}
+	job := toolapi.Request{TaskID: "scheduled_abc", Actor: "scheduler", Interactive: true}
+	if b.canWaitPermission(context.Background(), job) {
+		t.Fatal("cron must not wait even if interactive is set")
 	}
 }
 
@@ -40,7 +57,7 @@ func (g *denyWaitGate) Wait(context.Context, string) (PermissionDecision, error)
 	return PermissionDecision{}, errors.New("should not wait")
 }
 
-func TestAskModeJobTaskDoesNotWaitPermission(t *testing.T) {
+func TestJobTaskDoesNotWaitPermission(t *testing.T) {
 	ctx := context.Background()
 	database, err := storesqlite.Open(ctx, t.TempDir()+"/core.db")
 	if err != nil {
@@ -76,7 +93,7 @@ func TestAskModeJobTaskDoesNotWaitPermission(t *testing.T) {
 	broker, err := NewBroker(Config{
 		DB: db, Approvals: repository, Policy: policy.NewEvaluator(policy.DefaultConfig()),
 		Artifacts: artifactStore, Now: func() time.Time { return now },
-		PermissionMode: PermissionModeAsk, Permission: gate,
+		Permission: gate,
 	})
 	if err != nil {
 		t.Fatal(err)

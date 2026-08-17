@@ -27,6 +27,11 @@ type taskSubmissionRequest struct {
 	ExecutionMode kernel.ExecutionMode `json:"execution_mode,omitempty"`
 	// Workspace is the client launch directory (absolute); bound to session (ADR-046).
 	Workspace string `json:"workspace,omitempty"`
+	// PermissionStance is the Tab posture written onto the session (agent|auto|plan).
+	PermissionStance string `json:"permission_stance,omitempty"`
+	// Interactive is true for TUI turns that can answer /perm. CLI/cron omit it.
+	// Local capability flag, not authentication.
+	Interactive bool `json:"interactive,omitempty"`
 }
 
 type taskSubmissionResponse struct {
@@ -84,27 +89,44 @@ func (a *API) handleSessionPatch(w http.ResponseWriter, r *http.Request, id kern
 		return
 	}
 	var body struct {
-		PreferredModel *string `json:"preferred_model"`
+		PreferredModel   *string `json:"preferred_model"`
+		PermissionStance *string `json:"permission_stance"`
 	}
 	if err := decodeJSON(w, r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
-	if body.PreferredModel == nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "preferred_model is required (string; empty clears)")
+	if body.PreferredModel == nil && body.PermissionStance == nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "preferred_model or permission_stance is required")
 		return
 	}
-	if err := a.sessionPrefs.SetPreferredModel(r.Context(), id, *body.PreferredModel); err != nil {
-		if errors.Is(err, kernel.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "session not found")
+	if body.PreferredModel != nil {
+		if err := a.sessionPrefs.SetPreferredModel(r.Context(), id, *body.PreferredModel); err != nil {
+			if errors.Is(err, kernel.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "not_found", "session not found")
+				return
+			}
+			if errors.Is(err, kernel.ErrInvalidAggregate) {
+				writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+				return
+			}
+			writeInternal(w, err)
 			return
 		}
-		if errors.Is(err, kernel.ErrInvalidAggregate) {
-			writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+	}
+	if body.PermissionStance != nil {
+		if err := a.sessionPrefs.SetPermissionStance(r.Context(), id, *body.PermissionStance); err != nil {
+			if errors.Is(err, kernel.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "not_found", "session not found")
+				return
+			}
+			if errors.Is(err, kernel.ErrInvalidAggregate) {
+				writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+				return
+			}
+			writeInternal(w, err)
 			return
 		}
-		writeInternal(w, err)
-		return
 	}
 	item, err := a.queries.GetSession(r.Context(), id)
 	if err != nil {
@@ -220,7 +242,9 @@ func (a *API) submitTask(w http.ResponseWriter, r *http.Request) {
 		TaskID: request.TaskID, SessionID: request.SessionID, PlanID: request.PlanID,
 		Title: request.Title, Objective: request.Objective, SkillIDs: request.SkillIDs,
 		ExecutionMode: request.ExecutionMode, Workspace: strings.TrimSpace(request.Workspace),
-		EnsureSession: true, AllowExisting: allowExisting,
+		PermissionStance: strings.TrimSpace(request.PermissionStance),
+		Interactive:      request.Interactive,
+		EnsureSession:    true, AllowExisting: allowExisting,
 	})
 	if err != nil {
 		slog.Error("task submit failed", runlog.Attrs("gateway", "submit", "failed", runlog.IDs{

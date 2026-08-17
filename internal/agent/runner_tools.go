@@ -50,13 +50,13 @@ func (r *Runner) executeOneToolCall(ctx context.Context, request RunRequest, cal
 		CapabilityGrantIDs: cloneGrantMap(request.CapabilityGrantIDs),
 		MaxOutputTokens:    request.MaxOutputTokens, MaxTotalTokens: request.MaxTotalTokens,
 		MaxCostMicros: request.MaxCostMicros, ToolTimeoutMillis: request.ToolTimeoutMillis,
-		Depth: request.Depth, CallID: call.ID,
+		Depth: request.Depth, CallID: call.ID, Interactive: request.Interactive,
 	})
 	toolResponse, err := r.broker.Execute(toolCtx, toolapi.Request{
 		CallID: call.ID, RunID: request.RunID, TaskID: request.TaskID,
 		PlanID: request.PlanID, PlanHash: request.PlanHash, StepID: request.StepID,
 		CapabilityGrantID: request.CapabilityGrantID, CapabilityGrantIDs: append([]string(nil), request.CapabilityGrantIDs[call.Name]...),
-		Actor: request.Actor, TraceID: request.TraceID,
+		Actor: request.Actor, TraceID: request.TraceID, Interactive: request.Interactive,
 		Tool: call.Name, Arguments: json.RawMessage(call.Arguments), TimeoutMillis: request.ToolTimeoutMillis,
 	})
 	if err != nil {

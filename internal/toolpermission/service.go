@@ -431,7 +431,7 @@ func findPlanScope(plan approval.PlanDocument, stepID kernel.StepID, capability,
 			return scope, nil
 		}
 	}
-	return approval.CapabilityScope{}, fmt.Errorf("%w: no plan capability %q for %s (chat.permission.mode=ask required)", ErrInvalidDecide, capName, decision)
+	return approval.CapabilityScope{}, fmt.Errorf("%w: no plan capability %q for %s (interactive Agent plan must embed process/git scopes)", ErrInvalidDecide, capName, decision)
 }
 
 func (s *Service) loadPlanDocument(ctx context.Context, planID string) (approval.PlanDocument, error) {

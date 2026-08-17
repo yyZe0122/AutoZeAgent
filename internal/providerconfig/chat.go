@@ -197,6 +197,15 @@ func (c ChatConfig) validate() error {
 		if mode != "" && mode != PermissionModePreauth && mode != PermissionModeAsk {
 			return fmt.Errorf("chat.permission.mode must be preauth or ask")
 		}
+		for i, item := range c.Permission.Allow {
+			switch strings.ToLower(strings.TrimSpace(item)) {
+			case "process", "git":
+			case "":
+				return fmt.Errorf("chat.permission.allow[%d] is empty", i)
+			default:
+				return fmt.Errorf("chat.permission.allow[%d] must be process or git", i)
+			}
+		}
 	}
 	if c.Memory != nil {
 		if c.Memory.MaxInjectRunes != 0 && (c.Memory.MaxInjectRunes < 200 || c.Memory.MaxInjectRunes > 16_000) {
