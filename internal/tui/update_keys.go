@@ -89,15 +89,14 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.layout()
 			return m, nil
 		}
-		// Tab toggles agent/plan permission mode (OpenCode-style).
-		m.toggleDraftMode()
+		m.cycleDraftMode(1)
 		m.statusMsg = "mode " + string(m.draftMode)
-		return m, nil
+		return m, m.patchStanceCmd()
 
 	case tea.KeyShiftTab:
-		m.toggleDraftMode()
+		m.cycleDraftMode(-1)
 		m.statusMsg = "mode " + string(m.draftMode)
-		return m, nil
+		return m, m.patchStanceCmd()
 
 	case tea.KeyPgUp:
 		// Always scroll conversation — pickers do not steal this.
@@ -264,10 +263,7 @@ func (m *model) optimisticNew(line string) (tea.Cmd, bool) {
 		return nil, false
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	execMode := string(m.draftMode)
-	if execMode == "" {
-		execMode = gatewayclient.ExecutionModeAgent
-	}
+	execMode := m.submitExecutionMode()
 	// Both agent (build) and plan (read-only) are chat turns.
 	m.task = &gatewayclient.Task{
 		ID:            "…",

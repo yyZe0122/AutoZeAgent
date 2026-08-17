@@ -16,6 +16,7 @@ var (
 	colorSurface         lipgloss.Color
 	colorModeAgent       lipgloss.Color
 	colorModePlan        lipgloss.Color
+	colorModeAuto        lipgloss.Color
 	colorBubbleUser      lipgloss.Color
 	colorBubbleAssistant lipgloss.Color
 	colorBubbleThinking  lipgloss.Color
@@ -54,6 +55,7 @@ var (
 	stylePanelLabel   lipgloss.Style
 	styleModeAgent    lipgloss.Style
 	styleModePlan     lipgloss.Style
+	styleModeAuto     lipgloss.Style
 	stylePickerBox    lipgloss.Style
 )
 

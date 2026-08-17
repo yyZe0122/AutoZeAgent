@@ -24,7 +24,7 @@ func renderEmptySession(m *model) string {
 	var b strings.Builder
 	b.WriteString(truncate(styleTitle.Render("ready"), w) + "\n")
 	b.WriteString(truncate(styleDim.Render("type a message to start · ")+paintKeywords("/sessions")+styleDim.Render("  ·  ")+paintKeywords("/help"), w) + "\n")
-	b.WriteString(truncate(styleMuted.Render("Tab mode  ·  e expand"), w) + "\n")
+	b.WriteString(truncate(styleMuted.Render("Tab plan/agent/auto  ·  e expand"), w) + "\n")
 	if len(m.sessions) > 0 {
 		b.WriteString("\n")
 		b.WriteString(truncate(styleMuted.Render("recent"), w) + "\n")

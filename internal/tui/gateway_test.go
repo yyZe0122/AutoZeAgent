@@ -53,6 +53,10 @@ func (f *fakeGateway) SetSessionPreferredModel(_ context.Context, id gatewayclie
 	return gatewayclient.Session{ID: id, PreferredModel: f.sessionPreferred}, nil
 }
 
+func (f *fakeGateway) SetSessionPermissionStance(_ context.Context, id gatewayclient.SessionID, stance string) (gatewayclient.Session, error) {
+	return gatewayclient.Session{ID: id, PermissionStance: strings.TrimSpace(stance)}, nil
+}
+
 func (f *fakeGateway) SessionMessages(context.Context, gatewayclient.SessionID, int) ([]gatewayclient.TranscriptMessage, error) {
 	return nil, nil
 }

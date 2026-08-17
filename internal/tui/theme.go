@@ -38,6 +38,7 @@ type Theme struct {
 	Heart     lipgloss.Color
 	ModeAgent lipgloss.Color
 	ModePlan  lipgloss.Color
+	ModeAuto  lipgloss.Color
 	Thinking  lipgloss.Color
 	Tool      lipgloss.Color
 	Reply     lipgloss.Color
@@ -62,6 +63,7 @@ var dayTheme = Theme{
 	Heart:     lipgloss.Color("#B8322C"),
 	ModeAgent: lipgloss.Color("#2F6B62"),
 	ModePlan:  lipgloss.Color("#8A6418"),
+	ModeAuto:  lipgloss.Color("#8B3A30"),
 	Thinking:  lipgloss.Color("#5A5C56"),
 	Tool:      lipgloss.Color("#3A524E"),
 	Reply:     lipgloss.Color("#161814"),
@@ -86,6 +88,7 @@ var nightTheme = Theme{
 	Heart:     lipgloss.Color("#C73E3A"),
 	ModeAgent: lipgloss.Color("#9EC9B8"),
 	ModePlan:  lipgloss.Color("#D4B46A"),
+	ModeAuto:  lipgloss.Color("#D07060"),
 	Thinking:  lipgloss.Color("#8A9094"),
 	Tool:      lipgloss.Color("#8AA098"),
 	Reply:     lipgloss.Color("#F4F5EE"),
@@ -130,6 +133,7 @@ func applyTheme(t Theme) {
 	colorSurface = t.Surface
 	colorModeAgent = t.ModeAgent
 	colorModePlan = t.ModePlan
+	colorModeAuto = t.ModeAuto
 	colorBubbleUser = t.Accent
 	colorBubbleAssistant = t.OK
 	colorBubbleThinking = t.Thinking
@@ -168,6 +172,7 @@ func applyTheme(t Theme) {
 	stylePanelLabel = lipgloss.NewStyle().Foreground(colorMuted)
 	styleModeAgent = lipgloss.NewStyle().Foreground(colorModeAgent).Bold(true)
 	styleModePlan = lipgloss.NewStyle().Foreground(colorModePlan).Bold(true)
+	styleModeAuto = lipgloss.NewStyle().Foreground(colorModeAuto).Bold(true)
 	stylePickerBox = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorAccent).Background(colorSurface).Padding(0, 1)
 }
 

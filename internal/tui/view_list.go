@@ -249,7 +249,7 @@ func renderPickerOverlay(m *model, width int) string {
 		case listSkills:
 			empty = "No skills found. Add <id>/SKILL.md under config or .yunmengze/skills."
 		case listPermissions:
-			empty = "No pending permissions. (chat.permission.mode=ask + ungranted high-risk tools)"
+			empty = "No pending permissions. (Agent mode + ungranted high-risk tools)"
 		default:
 			empty = "No tasks yet."
 		}
@@ -417,6 +417,7 @@ func (m *model) focusSessionAt(i int) tea.Cmd {
 	}
 	s := m.sessions[i]
 	m.sessionID = s.ID
+	applyPermissionStance(m, s.PermissionStance)
 	if s.LatestTaskID != nil {
 		m.task = &gatewayclient.Task{ID: *s.LatestTaskID}
 	} else {

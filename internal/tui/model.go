@@ -2,6 +2,7 @@ package tui
 
 import (
 	"os"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -18,13 +19,14 @@ import (
 	"github.com/yyZe0122/yunmengze-agent/pkg/schedulerapi"
 )
 
-// execMode is the draft permission posture for the next task submission
-// (OpenCode-style Build/Plan). Persisted on the task as execution_mode.
+// execMode is the Tab posture: Plan / Agent / Auto.
+// Kernel execution_mode stays agent|plan; Auto is session permission_stance.
 type execMode string
 
 const (
 	modeAgent execMode = "agent"
 	modePlan  execMode = "plan"
+	modeAuto  execMode = "auto"
 )
 
 // listKind is a floating picker overlay kind (does not replace the timeline).
@@ -304,11 +306,52 @@ func (m *model) pickerOpen() bool {
 	return m.list != listNone || m.completer.visible
 }
 
-func (m *model) toggleDraftMode() {
+func (m *model) cycleDraftMode(delta int) {
+	order := []execMode{modePlan, modeAgent, modeAuto}
+	idx := 1
+	for i, mode := range order {
+		if m.draftMode == mode {
+			idx = i
+			break
+		}
+	}
+	idx = (idx + delta) % len(order)
+	if idx < 0 {
+		idx += len(order)
+	}
+	m.draftMode = order[idx]
+	m.applyPlaceholder()
+}
+
+func (m model) submitExecutionMode() string {
 	if m.draftMode == modePlan {
-		m.draftMode = modeAgent
-	} else {
+		return gatewayclient.ExecutionModePlan
+	}
+	return gatewayclient.ExecutionModeAgent
+}
+
+func (m model) submitPermissionStance() string {
+	switch m.draftMode {
+	case modeAuto:
+		return "auto"
+	case modePlan:
+		return "plan"
+	default:
+		return "agent"
+	}
+}
+
+func applyPermissionStance(m *model, stance string) {
+	if m == nil {
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(stance)) {
+	case "auto":
+		m.draftMode = modeAuto
+	case "plan":
 		m.draftMode = modePlan
+	default:
+		m.draftMode = modeAgent
 	}
 	m.applyPlaceholder()
 }
@@ -316,10 +359,13 @@ func (m *model) toggleDraftMode() {
 func (m *model) applyPlaceholder() {
 	m.input.PlaceholderStyle = styleMuted
 	m.input.TextStyle = styleInput
-	if m.draftMode == modePlan {
+	switch m.draftMode {
+	case modePlan:
 		m.input.Placeholder = "plan mode · read-only analysis (no edits)"
-	} else {
-		m.input.Placeholder = "agent mode · build (read+write) · message or /command"
+	case modeAuto:
+		m.input.Placeholder = "auto mode · this session pre-grants tests/git"
+	default:
+		m.input.Placeholder = "agent mode · build · /perm for tests/git"
 	}
 }
 

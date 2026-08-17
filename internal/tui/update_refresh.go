@@ -282,7 +282,7 @@ func (m model) applyCommand(msg commandDoneMsg) (tea.Model, tea.Cmd) {
 			id := msg.taskID
 			// Keep optimistic objective if we already focused this task/placeholder.
 			if m.task == nil || (m.task.ID != id && m.task.ID != "…") {
-				m.task = &gatewayclient.Task{ID: id, State: gatewayclient.TaskStateRunning, ExecutionMode: string(m.draftMode)}
+				m.task = &gatewayclient.Task{ID: id, State: gatewayclient.TaskStateRunning, ExecutionMode: m.submitExecutionMode()}
 			} else {
 				m.task.ID = id
 				if m.task.State == "" {

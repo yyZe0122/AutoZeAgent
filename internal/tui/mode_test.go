@@ -28,17 +28,27 @@ func TestTabTogglesDraftMode(t *testing.T) {
 	}
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	mm := updated.(model)
-	if mm.draftMode != modePlan {
+	if mm.draftMode != modeAuto {
 		t.Fatalf("after tab = %q", mm.draftMode)
 	}
 	box := mm.renderInputBox(80)
-	if !strings.Contains(box, "plan") {
-		t.Fatalf("input box missing plan:\n%s", box)
+	if !strings.Contains(box, "auto") {
+		t.Fatalf("input box missing auto:\n%s", box)
+	}
+	updated, _ = mm.Update(tea.KeyMsg{Type: tea.KeyTab})
+	mm = updated.(model)
+	if mm.draftMode != modePlan {
+		t.Fatalf("second tab = %q", mm.draftMode)
 	}
 	updated, _ = mm.Update(tea.KeyMsg{Type: tea.KeyTab})
 	mm = updated.(model)
 	if mm.draftMode != modeAgent {
-		t.Fatalf("toggle back = %q", mm.draftMode)
+		t.Fatalf("third tab = %q", mm.draftMode)
+	}
+	updated, _ = mm.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	mm = updated.(model)
+	if mm.draftMode != modePlan {
+		t.Fatalf("shift-tab = %q", mm.draftMode)
 	}
 }
 

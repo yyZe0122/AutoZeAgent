@@ -70,10 +70,15 @@ func (m model) renderInputBox(width int) string {
 	modeColor := colorModeAgent
 	modeLabel := "agent"
 	modeStyle := styleModeAgent
-	if m.draftMode == modePlan {
+	switch m.draftMode {
+	case modePlan:
 		modeColor = colorModePlan
 		modeLabel = "plan"
 		modeStyle = styleModePlan
+	case modeAuto:
+		modeColor = colorModeAuto
+		modeLabel = "auto"
+		modeStyle = styleModeAuto
 	}
 	busy := ""
 	if m.busy || m.runActivity() == activityActive {
@@ -95,7 +100,7 @@ func (m model) renderInputBox(width int) string {
 	rule := lipgloss.NewStyle().Foreground(modeColor).Render(strings.Repeat("─", max(1, width)))
 	meta := modeStyle.Render(modeLabel)
 	if m.sessionID == "" && m.task == nil && len(m.messages) == 0 {
-		meta += "  " + styleMuted.Render("Tab mode · type to start")
+		meta += "  " + styleMuted.Render("Tab plan/agent/auto · type to start")
 	}
 	return rule + "\n" + line + "\n" + truncate(meta, width)
 }

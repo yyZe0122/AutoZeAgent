@@ -86,12 +86,26 @@ func lastUserMessage(messages []gatewayclient.TranscriptMessage) string {
 	return ""
 }
 
+func (m model) patchStanceCmd() tea.Cmd {
+	sessionID := m.sessionID
+	if sessionID == "" || sessionID == "…" {
+		return nil
+	}
+	stance := m.submitPermissionStance()
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+		defer cancel()
+		if _, err := m.gateway.SetSessionPermissionStance(ctx, sessionID, stance); err != nil {
+			return commandDoneMsg{err: err}
+		}
+		return commandDoneMsg{}
+	}
+}
+
 func (m model) newTaskCmd(objective string) tea.Cmd {
 	objective = strings.TrimSpace(objective)
-	execMode := string(m.draftMode)
-	if execMode == "" {
-		execMode = gatewayclient.ExecutionModeAgent
-	}
+	execMode := m.submitExecutionMode()
+	stance := m.submitPermissionStance()
 	sessionID := m.sessionID
 	if sessionID == "…" {
 		sessionID = ""
@@ -106,6 +120,7 @@ func (m model) newTaskCmd(objective string) tea.Cmd {
 		req := gatewayclient.TaskSubmissionRequest{
 			Title: gatewayclient.TaskTitle(objective), Objective: objective,
 			ExecutionMode: execMode, Workspace: m.cwd,
+			PermissionStance: stance, Interactive: true,
 		}
 		if sessionID != "" {
 			req.SessionID = sessionID
@@ -122,8 +137,11 @@ func (m model) newTaskCmd(objective string) tea.Cmd {
 			sid = *submitted.Task.SessionID
 		}
 		label := "build"
-		if execMode == gatewayclient.ExecutionModePlan {
+		switch stance {
+		case "plan":
 			label = "plan (read-only)"
+		case "auto":
+			label = "auto (session pre-grant)"
 		}
 		status := fmt.Sprintf("%s · task %s", label, shortID(string(submitted.Task.ID)))
 		if sid != "" {
