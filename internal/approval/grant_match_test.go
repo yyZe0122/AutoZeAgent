@@ -6,6 +6,29 @@ import (
 	"time"
 )
 
+func TestPlanContainsHTTPGetDomainNarrowing(t *testing.T) {
+	plan := PlanDocument{Steps: []StepScope{{
+		StepID: "s1",
+		Capabilities: []CapabilityScope{{
+			Capability: "http_get", MaxDurationMillis: 30000, MaxCalls: 8,
+		}},
+	}}}
+	narrow := CapabilityScope{
+		Capability: "http_get", NetworkDomains: []string{"example.com"},
+		MaxDurationMillis: 30000, MaxCalls: 8,
+	}
+	if !planContainsScope(plan, "s1", narrow) {
+		t.Fatal("empty-domain plan scope should allow host-narrowed grant")
+	}
+	wide := CapabilityScope{
+		Capability: "http_get", NetworkDomains: []string{"a.com", "b.com"},
+		MaxDurationMillis: 30000, MaxCalls: 8,
+	}
+	if planContainsScope(plan, "s1", wide) {
+		t.Fatal("must not widen to multiple domains")
+	}
+}
+
 func TestCommandArgsMatchSchemeA(t *testing.T) {
 	tests := []struct {
 		name      string

@@ -290,3 +290,25 @@ func TestPlainTextOnReadyStillSubmits(t *testing.T) {
 		t.Fatalf("expected submit path, got %#v", done)
 	}
 }
+
+func TestPlainTextOnRunningTurnSteers(t *testing.T) {
+	task := gatewayclient.Task{ID: "task-run", Title: "old", State: gatewayclient.TaskStateRunning}
+	gw := &fakeGateway{tasks: []gatewayclient.Task{task}}
+	m := newModel(paths.ModeUser, gw)
+	m.sessionID = "sess-run"
+	m.task = &task
+	msg := m.handleLineCmd("do this instead")()
+	done, ok := msg.(commandDoneMsg)
+	if !ok {
+		t.Fatalf("msg type %T", msg)
+	}
+	if done.err != nil {
+		t.Fatalf("steer err = %v", done.err)
+	}
+	if !strings.Contains(done.status, "steering") {
+		t.Fatalf("status = %q", done.status)
+	}
+	if len(gw.steers) != 1 || gw.steers[0] != "do this instead" {
+		t.Fatalf("steers = %#v", gw.steers)
+	}
+}

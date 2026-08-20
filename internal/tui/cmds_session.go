@@ -102,6 +102,34 @@ func (m model) patchStanceCmd() tea.Cmd {
 	}
 }
 
+func (m model) canSteer() bool {
+	return m.sessionID != "" && m.sessionID != "…" && m.needsRunPoll()
+}
+
+func (m model) steerCmd(text string) tea.Cmd {
+	text = strings.TrimSpace(text)
+	sessionID := m.sessionID
+	return func() tea.Msg {
+		if text == "" {
+			return commandDoneMsg{err: fmt.Errorf("empty message")}
+		}
+		if sessionID == "" || sessionID == "…" {
+			return commandDoneMsg{err: fmt.Errorf("focus a session first")}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+		defer cancel()
+		result, err := m.gateway.SteerSession(ctx, sessionID, text)
+		if err != nil {
+			return commandDoneMsg{err: err}
+		}
+		return commandDoneMsg{
+			status:    fmt.Sprintf("steering · next step · %s", shortID(result.ItemID)),
+			sessionID: sessionID,
+			taskID:    gatewayclient.TaskID(result.TaskID),
+		}
+	}
+}
+
 func (m model) newTaskCmd(objective string) tea.Cmd {
 	objective = strings.TrimSpace(objective)
 	execMode := m.submitExecutionMode()

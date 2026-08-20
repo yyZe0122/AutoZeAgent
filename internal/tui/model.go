@@ -40,6 +40,7 @@ const (
 	listJobs
 	listSkills      // multi-select skill picker for next submit
 	listPermissions // pending tool-call permissions (ADR-043)
+	listQuestions   // pending ask_user questions (ADR-052 R4)
 )
 
 const (
@@ -107,6 +108,7 @@ type model struct {
 	skills      []gatewayclient.Skill
 	commands    []gatewayclient.ChatCommand
 	permissions []gatewayclient.Permission
+	questions   []gatewayclient.UserQuestion
 	// selectedSkillIDs is draft selection for the next task submit (kept across turns).
 	selectedSkillIDs []string
 	sessionID        gatewayclient.SessionID
@@ -144,6 +146,7 @@ type model struct {
 	lastPermPoll     time.Time
 	// autoOpenedPermList avoids re-opening the picker every poll while pending remains.
 	autoOpenedPermList bool
+	autoOpenedQList    bool
 	// permGraceUntil ignores decision keys briefly after auto-open (Crush-style).
 	permGraceUntil time.Time
 	// permCycleIdx cycles Enter: once → similar → permanent → deny.
@@ -226,6 +229,7 @@ type commandDoneMsg struct {
 	skillIDs      []string // replace selectedSkillIDs when set (toggle apply)
 	submitAfter   string   // after applying skillIDs, submit this objective (skill-as-slash)
 	permissions   []gatewayclient.Permission
+	questions     []gatewayclient.UserQuestion
 	// expandMode: "", "all", "none", "last" — applied in applyCommand for /expand
 	expandMode string
 	// journeyRows replaces optional memory journey overlay on the timeline (C4).
@@ -238,6 +242,12 @@ type permPollDoneMsg struct {
 	permissions []gatewayclient.Permission
 	err         error
 	openList    bool // true when count went 0→N and list should auto-open once
+}
+
+type questionPollDoneMsg struct {
+	questions []gatewayclient.UserQuestion
+	err       error
+	openList  bool
 }
 
 type sseEventMsg struct {

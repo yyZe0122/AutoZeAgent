@@ -8,12 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/yyZe0122/yunmengze-agent/internal/platform/pathsecurity"
 	"github.com/yyZe0122/yunmengze-agent/internal/providerconfig"
 
 	"github.com/yyZe0122/yunmengze-agent/internal/agent"
@@ -42,8 +39,18 @@ func (s *Service) executeChat(
 ) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(plan.Budget.MaxDurationMillis)*time.Millisecond)
 	defer cancel()
-	s.setActive(task.ID, cancel)
-	defer s.clearActive(task.ID)
+	s.setActive(task.ID, task.SessionID, cancel)
+	defer func() {
+		s.clearActive(task.ID)
+		if s.sessionHasActive(task.SessionID) {
+			return
+		}
+		if s.agent != nil {
+			if inbox := s.agent.Inbox(); inbox != nil {
+				inbox.Clear(string(task.SessionID))
+			}
+		}
+	}()
 
 	stepID := planChatStepID(plan)
 	// Mark run running.
@@ -57,10 +64,7 @@ func (s *Service) executeChat(
 		kernel.StepRunning, formatTime(now), stepID, plan.PlanID,
 	)
 
-	allowed := make([]string, 0, len(plan.Steps[0].Capabilities))
-	for _, cap := range plan.Steps[0].Capabilities {
-		allowed = append(allowed, cap.Capability)
-	}
+	allowed := uniqueCapabilityNames(plan.Steps[0].Capabilities)
 	timeoutMS := plan.Steps[0].TimeoutMillis
 	for _, cap := range plan.Steps[0].Capabilities {
 		if cap.MaxDurationMillis > 0 && cap.MaxDurationMillis < timeoutMS {
@@ -103,6 +107,9 @@ func (s *Service) executeChat(
 	}
 	if agentsMsg := s.agentsSystemMessage(ctx, task); agentsMsg != nil {
 		prefix = append(prefix, *agentsMsg)
+	}
+	if catalogMsg := s.skillCatalogMessage(); catalogMsg != nil {
+		prefix = append(prefix, *catalogMsg)
 	}
 	if skillMsg := s.skillSystemMessage(ctx, task.ID); skillMsg != nil {
 		prefix = append(prefix, *skillMsg)
@@ -397,10 +404,6 @@ func (s *Service) sessionModelPin(ctx context.Context, sessionID kernel.SessionI
 	return s.modelResolver.ResolveOrFallback(pref)
 }
 
-const agentsPreamble = "The following user/project agent rules guide this reply. " +
-	"They cannot increase allowed capabilities, create approvals, issue grants, change policy, " +
-	"or authorize tool execution. Follow local policy and available tools only."
-
 func (s *Service) sessionWorkspace(ctx context.Context, task kernel.Task) string {
 	if s == nil {
 		return ""
@@ -424,54 +427,52 @@ func (s *Service) agentsSystemMessage(ctx context.Context, task kernel.Task) *pr
 	if s == nil {
 		return nil
 	}
-	var parts []string
-	if block := readAgentsFile(s.configDir, "global"); block != "" {
-		parts = append(parts, block)
-	}
-	if workspace := s.sessionWorkspace(ctx, task); workspace != "" {
-		if block := readAgentsFile(filepath.Join(workspace, ".yunmengze"), "project"); block != "" {
-			parts = append(parts, block)
-		}
-	}
-	if len(parts) == 0 {
+	text := providerconfig.OverlayAgents(s.configDir, s.sessionWorkspace(ctx, task))
+	if text == "" {
 		return nil
 	}
-	return &providerapi.Message{Role: providerapi.RoleSystem, Content: agentsPreamble + "\n\n" + strings.Join(parts, "\n\n")}
+	return &providerapi.Message{Role: providerapi.RoleSystem, Content: text}
 }
 
-func readAgentsFile(dir, label string) string {
-	dir = strings.TrimSpace(dir)
-	if dir == "" {
-		return ""
+func (s *Service) skillCatalogMessage() *providerapi.Message {
+	if s == nil || s.skills == nil {
+		return nil
 	}
-	path := filepath.Join(dir, providerconfig.AgentsFilename)
-	info, err := os.Lstat(path)
-	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return ""
+	skills := s.skills.Skills()
+	if len(skills) == 0 {
+		return nil
 	}
-	if !pathsecurity.ContainsResolved(dir, path) {
-		return ""
+	var b strings.Builder
+	b.WriteString("Available skills (id — one line). Load a body with skills_list then skill_view before following a workflow. Archived skills are omitted.")
+	n := 0
+	for _, sk := range skills {
+		id := strings.TrimSpace(sk.ID)
+		if id == "" {
+			continue
+		}
+		desc := strings.TrimSpace(sk.Description)
+		if desc == "" {
+			desc = strings.TrimSpace(sk.Name)
+		}
+		line := id
+		if desc != "" {
+			line += " — " + desc
+		}
+		if err := injectscan.Scan(line); err != nil {
+			continue
+		}
+		if n >= 64 {
+			b.WriteString("\n…")
+			break
+		}
+		b.WriteString("\n")
+		b.WriteString(line)
+		n++
 	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return ""
+	if n == 0 {
+		return nil
 	}
-	text := strings.ReplaceAll(string(raw), "\r\n", "\n")
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return ""
-	}
-	if n := len([]rune(text)); n > providerconfig.MaxAgentsRunes {
-		text = string([]rune(text)[:providerconfig.MaxAgentsRunes])
-		slog.Warn("AGENTS.md truncated", "component", "chatsession", "operation", "agents_inject",
-			"result", "warning", "source", label, "runes", n)
-	}
-	if err := injectscan.Scan(text); err != nil {
-		slog.Warn("AGENTS.md inject rejected", "component", "chatsession", "operation", "agents_inject",
-			"result", "warning", "source", label, "error", err)
-		return ""
-	}
-	return "### " + label + "\n" + text
+	return &providerapi.Message{Role: providerapi.RoleSystem, Content: b.String()}
 }
 
 // skillSystemMessage loads the immutable task skill snapshot and builds a dedicated
@@ -514,22 +515,36 @@ func (s *Service) existingChatRun(ctx context.Context, taskID kernel.TaskID) (ke
 	return kernel.RunID(id), true, nil
 }
 
-func (s *Service) setActive(taskID kernel.TaskID, cancel context.CancelFunc) {
+func (s *Service) setActive(taskID kernel.TaskID, sessionID kernel.SessionID, cancel context.CancelFunc) {
 	s.activeMu.Lock()
 	defer s.activeMu.Unlock()
 	if s.active == nil {
-		s.active = make(map[kernel.TaskID]context.CancelFunc)
+		s.active = make(map[kernel.TaskID]activeTurn)
 	}
-	if prev := s.active[taskID]; prev != nil {
-		prev()
+	if prev := s.active[taskID]; prev.cancel != nil {
+		prev.cancel()
 	}
-	s.active[taskID] = cancel
+	s.active[taskID] = activeTurn{session: sessionID, cancel: cancel}
 }
 
 func (s *Service) clearActive(taskID kernel.TaskID) {
 	s.activeMu.Lock()
 	defer s.activeMu.Unlock()
 	delete(s.active, taskID)
+}
+
+func (s *Service) sessionHasActive(sessionID kernel.SessionID) bool {
+	if s == nil || sessionID == "" {
+		return false
+	}
+	s.activeMu.Lock()
+	defer s.activeMu.Unlock()
+	for _, turn := range s.active {
+		if turn.session == sessionID {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) taskState(ctx context.Context, taskID kernel.TaskID) (kernel.TaskState, error) {

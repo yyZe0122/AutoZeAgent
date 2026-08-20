@@ -161,10 +161,10 @@
         },
         "max_iterations": {
           "type": "integer",
-          "minimum": 1,
-          "maximum": 64,
-          "default": 16,
-          "description": "Agent tool-loop cap per chat run (1–64). Omit = 16."
+          "minimum": 0,
+          "maximum": 256,
+          "default": 0,
+          "description": "Agent tool-loop cap per turn (1–256). Omit or 0 = no hard cap (ADR-052)."
         },
         "permission": {
           "type": "object",

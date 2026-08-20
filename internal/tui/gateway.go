@@ -33,6 +33,7 @@ type Gateway interface {
 	SessionMessages(ctx context.Context, id gatewayclient.SessionID, limit int) ([]gatewayclient.TranscriptMessage, error)
 	TaskMessages(ctx context.Context, id gatewayclient.TaskID, limit int) ([]gatewayclient.TranscriptMessage, error)
 	CompactSession(ctx context.Context, id gatewayclient.SessionID, focus string) (gatewayclient.CompactResult, error)
+	SteerSession(ctx context.Context, id gatewayclient.SessionID, text string) (gatewayclient.SteerResult, error)
 	RewindSession(ctx context.Context, id gatewayclient.SessionID, revisionID string) (gatewayclient.RewindResult, error)
 
 	ListTasks(ctx context.Context, limit int) ([]gatewayclient.Task, error)
@@ -54,6 +55,8 @@ type Gateway interface {
 	ListPermissions(ctx context.Context, sessionID string, limit int) ([]gatewayclient.Permission, error)
 	DecidePermission(ctx context.Context, permissionID, decision string) (gatewayclient.Permission, error)
 	DecidePermissionConfirm(ctx context.Context, permissionID, decision string, confirm bool) (gatewayclient.Permission, error)
+	ListQuestions(ctx context.Context, sessionID string, limit int) ([]gatewayclient.UserQuestion, error)
+	AnswerQuestion(ctx context.Context, id, actor string, answers map[string][]string) (gatewayclient.UserQuestion, error)
 
 	ListMemory(ctx context.Context, sessionID, query, kind string, limit int) ([]gatewayclient.MemoryEntry, error)
 	ListMemoryFilter(ctx context.Context, sessionID, query, kind string, limit int, includeArchived bool) ([]gatewayclient.MemoryEntry, error)

@@ -547,7 +547,7 @@ func TestLoadChatParsesAndValidates(t *testing.T) {
 	if roots := chat.EffectiveRoots("/fallback"); len(roots) != 1 || roots[0] != "/abs/workspace" {
 		t.Fatalf("EffectiveRoots = %v", roots)
 	}
-	if !chat.CompactionEnabled() || chat.MaxIterationsOrDefault() != 16 {
+	if !chat.CompactionEnabled() || chat.MaxIterationsOrDefault() != 0 {
 		t.Fatalf("defaults: compaction=%v max_iter=%d", chat.CompactionEnabled(), chat.MaxIterationsOrDefault())
 	}
 
@@ -583,7 +583,7 @@ func TestLoadChatCompactionAndMaxIterations(t *testing.T) {
   },
   "chat": {
     "compaction": {"enabled": false},
-    "max_iterations": 16
+    "max_iterations": 32
   }
 }`
 	if err := os.WriteFile(filepath.Join(root, Filename), []byte(config), 0o600); err != nil {
@@ -596,7 +596,7 @@ func TestLoadChatCompactionAndMaxIterations(t *testing.T) {
 	if chat.CompactionEnabled() {
 		t.Fatal("expected compaction disabled")
 	}
-	if chat.MaxIterationsOrDefault() != 16 {
+	if chat.MaxIterationsOrDefault() != 32 {
 		t.Fatalf("max_iterations = %d", chat.MaxIterationsOrDefault())
 	}
 
@@ -609,7 +609,7 @@ func TestLoadChatCompactionAndMaxIterations(t *testing.T) {
       "models": {"deepseek-chat": {}}
     }
   },
-  "chat": {"max_iterations": 100}
+  "chat": {"max_iterations": 300}
 }`
 	if err := os.WriteFile(filepath.Join(root, Filename), []byte(badIter), 0o600); err != nil {
 		t.Fatal(err)

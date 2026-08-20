@@ -125,6 +125,19 @@ func (s *RecordStore) AppendAssistant(
 	})
 }
 
+func (s *RecordStore) AppendUser(ctx context.Context, runID string, message providerapi.Message) (RunRecord, error) {
+	if message.Role != providerapi.RoleUser {
+		return RunRecord{}, fmt.Errorf("%w: user record must use user role", ErrCorruptHistory)
+	}
+	if strings.TrimSpace(message.Content) == "" {
+		return RunRecord{}, fmt.Errorf("%w: user record requires content", ErrCorruptHistory)
+	}
+	return s.append(ctx, RunRecord{
+		RunID: strings.TrimSpace(runID), Type: RecordInputMessage,
+		Message: cloneMessage(message),
+	})
+}
+
 func (s *RecordStore) AppendToolResult(ctx context.Context, runID string, message providerapi.Message) (RunRecord, error) {
 	if message.Role != providerapi.RoleTool || strings.TrimSpace(message.ToolCallID) == "" {
 		return RunRecord{}, fmt.Errorf("%w: tool result requires tool role and call ID", ErrCorruptHistory)
@@ -312,14 +325,13 @@ func insertRunRecord(ctx context.Context, execer recordExecer, record RunRecord)
 }
 
 func verifyInitialPrefix(records []RunRecord, initial []providerapi.Message) error {
-	prefixLength := 0
-	for prefixLength < len(records) && records[prefixLength].Type == RecordInputMessage {
-		prefixLength++
-	}
-	if prefixLength != len(initial) {
-		return fmt.Errorf("%w: persisted input count %d differs from request count %d", ErrRecoveryConflict, prefixLength, len(initial))
+	if len(records) < len(initial) {
+		return fmt.Errorf("%w: persisted record count %d is shorter than request prefix %d", ErrRecoveryConflict, len(records), len(initial))
 	}
 	for i := range initial {
+		if records[i].Type != RecordInputMessage {
+			return fmt.Errorf("%w: persisted prefix record %d is %s, want input_message", ErrRecoveryConflict, i, records[i].Type)
+		}
 		if !messagesEqual(records[i].Message, initial[i]) {
 			return fmt.Errorf("%w: input message %d differs", ErrRecoveryConflict, i)
 		}

@@ -56,11 +56,7 @@ func (t *gitTool) Execute(ctx context.Context, raw json.RawMessage) (json.RawMes
 	result, runErr := t.runner.Run(ctx, executor.Request{
 		Command: "git", Arguments: arguments, Directory: repository, CallID: toolCallIDFromContext(ctx),
 	})
-	encoded, encodeErr := encodeResult(result)
-	if encodeErr != nil {
-		return nil, encodeErr
-	}
-	return encoded, runErr
+	return encodeProcessResult(result, runErr)
 }
 
 func (t *gitTool) parse(raw json.RawMessage) (string, []string, error) {

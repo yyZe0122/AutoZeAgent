@@ -93,7 +93,7 @@ func (r *Runner) Run(ctx context.Context, request RunRequest) (Result, error) {
 	var stepSigs []string
 	toolsDisabled := false
 	compactedTurn := request.Compacted
-	for result.Iterations < r.maxIterations {
+	for {
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
@@ -107,12 +107,13 @@ func (r *Runner) Run(ctx context.Context, request RunRequest) (Result, error) {
 				maxOutputTokens = remaining
 			}
 		}
-		// Soft landing: last iteration advertises no tools so the model must answer in text.
+		// Soft landing: configured last step advertises no tools so the model must answer in text.
 		iterTools := definitions
 		loopMsgs := messages
-		if toolsDisabled || result.Iterations+1 >= r.maxIterations {
+		capped := r.maxIterations > 0 && result.Iterations+1 >= r.maxIterations
+		if toolsDisabled || capped {
 			iterTools = nil
-			if result.Iterations+1 >= r.maxIterations && !toolsDisabled {
+			if capped && !toolsDisabled {
 				loopMsgs = append(append([]providerapi.Message(nil), messages...), providerapi.Message{
 					Role: providerapi.RoleSystem, Content: maxStepsPrompt,
 				})
@@ -136,7 +137,7 @@ func (r *Runner) Run(ctx context.Context, request RunRequest) (Result, error) {
 			messages = r.rebuildProviderView(ctx, messages, request, model)
 			compactedTurn = true
 			loopMsgs = messages
-			if toolsDisabled || result.Iterations+1 >= r.maxIterations {
+			if toolsDisabled || capped {
 				loopMsgs = append(append([]providerapi.Message(nil), messages...), providerapi.Message{
 					Role: providerapi.RoleSystem, Content: maxStepsPrompt,
 				})
@@ -215,6 +216,15 @@ func (r *Runner) Run(ctx context.Context, request RunRequest) (Result, error) {
 			if err := budgetExceeded(result.Usage, request.MaxTotalTokens, request.MaxCostMicros); err != nil {
 				return result, err
 			}
+			messages = append(messages, assistant)
+			steered, err := r.claimAndAppendStepInbox(ctx, request, &messages)
+			if err != nil {
+				return result, err
+			}
+			if steered && !capped {
+				result.Content = assistant.Content
+				continue
+			}
 			result.Content = assistant.Content
 			slog.Info("agent run completed", "component", "agent", "operation", "run", "result", "succeeded",
 				"session_id", request.SessionID, "run_id", request.RunID, "task_id", request.TaskID,
@@ -224,10 +234,17 @@ func (r *Runner) Run(ctx context.Context, request RunRequest) (Result, error) {
 			return result, nil
 		}
 
-		if err := validateToolCalls(response.ToolCalls, advertised, seenCallIDs); err != nil {
-			return result, err
+		observations, _ := classifyToolCalls(response.ToolCalls, advertised, seenCallIDs)
+		executable := make([]providerapi.ToolCall, 0, len(response.ToolCalls))
+		rejected := make([]toolCallObservation, 0)
+		for _, obs := range observations {
+			if obs.Kind == "" {
+				executable = append(executable, obs.Call)
+			} else {
+				rejected = append(rejected, obs)
+			}
 		}
-		sig := toolStepSignature(response.ToolCalls)
+		sig := toolStepSignature(executable)
 		if sig != "" {
 			stepSigs = append(stepSigs, sig)
 			if hasRepeatedToolSteps(stepSigs, loopDetectionWindowSize, loopDetectionMaxRepeats) {
@@ -239,8 +256,6 @@ func (r *Runner) Run(ctx context.Context, request RunRequest) (Result, error) {
 				// Do not execute this batch; force a text-only follow-up iteration.
 				toolsDisabled = true
 				messages = append(messages, providerapi.Message{Role: providerapi.RoleSystem, Content: loopDetectedPrompt})
-				// Roll back iteration count effect? Keep iteration; continue without tools.
-				// Drop assistant tool-call message from provider path; inject notice only.
 				continue
 			}
 		}
@@ -251,10 +266,16 @@ func (r *Runner) Run(ctx context.Context, request RunRequest) (Result, error) {
 			return result, err
 		}
 		messages = append(messages, assistant)
-		toolMsgs, toolResps, err := r.executeToolCalls(ctx, request, response.ToolCalls)
+		toolMsgs, toolResps, err := r.executeToolCalls(ctx, request, executable)
 		if err != nil {
 			return result, err
 		}
+		rejectMsgs, rejectResps, err := r.appendRejectedToolCalls(ctx, request, rejected)
+		if err != nil {
+			return result, err
+		}
+		toolMsgs = append(toolMsgs, rejectMsgs...)
+		toolResps = append(toolResps, rejectResps...)
 		result.ToolCalls = append(result.ToolCalls, toolResps...)
 		from := len(messages)
 		messages = append(messages, toolMsgs...)
@@ -264,10 +285,33 @@ func (r *Runner) Run(ctx context.Context, request RunRequest) (Result, error) {
 		if midCompact {
 			compactedTurn = true
 		}
+		if _, err := r.claimAndAppendStepInbox(ctx, request, &messages); err != nil {
+			return result, err
+		}
 	}
-	slog.Warn("agent iteration limit reached", "component", "agent", "operation", "run", "result", "failed",
-		"session_id", request.SessionID, "run_id", request.RunID, "task_id", request.TaskID,
-		"plan_id", request.PlanID, "step_id", request.StepID, "trace_id", request.TraceID,
-		"iterations", result.Iterations, "error", ErrMaxIterations)
-	return result, ErrMaxIterations
+}
+
+func (r *Runner) claimAndAppendStepInbox(ctx context.Context, request RunRequest, messages *[]providerapi.Message) (bool, error) {
+	if r == nil || r.inbox == nil || strings.TrimSpace(request.SessionID) == "" {
+		return false, nil
+	}
+	claimed := r.inbox.ClaimStep(request.SessionID)
+	if len(claimed) == 0 {
+		return false, nil
+	}
+	for _, item := range claimed {
+		msg := providerapi.Message{Role: providerapi.RoleUser, Content: item.Text}
+		if !item.Persisted {
+			if _, err := r.records.AppendUser(ctx, request.RunID, msg); err != nil {
+				return false, err
+			}
+		}
+		*messages = append(*messages, msg)
+		slog.Info("agent claimed next-step inbox",
+			"component", "agent", "operation", "inbox_claim", "result", "continued",
+			"session_id", request.SessionID, "run_id", request.RunID, "task_id", request.TaskID,
+			"inbox_id", item.ID,
+		)
+	}
+	return true, nil
 }

@@ -175,6 +175,10 @@ func (r *Runner) Run(ctx context.Context, request Request) (Result, error) {
 		result.ExitCode = command.ProcessState.ExitCode()
 	}
 	if waitErr != nil {
+		var exitErr *exec.ExitError
+		if errors.As(waitErr, &exitErr) {
+			return result, nil
+		}
 		return result, fmt.Errorf("process exited with code %d: %w", result.ExitCode, waitErr)
 	}
 	return result, nil

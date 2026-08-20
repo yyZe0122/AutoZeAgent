@@ -189,8 +189,8 @@ func (c ChatConfig) validate() error {
 			}
 		}
 	}
-	if c.MaxIterations != 0 && (c.MaxIterations < 1 || c.MaxIterations > 64) {
-		return fmt.Errorf("chat.max_iterations must be between 1 and 64 (or omit for default 16)")
+	if c.MaxIterations != 0 && (c.MaxIterations < 1 || c.MaxIterations > 256) {
+		return fmt.Errorf("chat.max_iterations must be between 1 and 256 (or omit / 0 for no hard cap)")
 	}
 	if c.Permission != nil {
 		mode := strings.ToLower(strings.TrimSpace(c.Permission.Mode))

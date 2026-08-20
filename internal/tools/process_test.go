@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -33,6 +34,42 @@ func TestProcessShellAuthorizationAndEcho(t *testing.T) {
 	}
 	if len(auth.Arguments) != 2 || auth.Arguments[0] != "-c" || auth.Arguments[1] != "echo hi" {
 		t.Fatalf("args=%v", auth.Arguments)
+	}
+}
+
+func TestProcessExecNonZeroExitIsResult(t *testing.T) {
+	root := t.TempDir()
+	guard, err := NewPathGuard([]string{root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := executor.NewRunner(executor.Config{MaxOutputBytes: 64 * 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool, err := newProcessTool(guard, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := tool.Execute(context.Background(), mustJSON(t, map[string]any{
+		"command": "/bin/sh", "arguments": []string{"-c", "echo fail-out; echo fail-err >&2; exit 7"}, "directory": root,
+	}))
+	if err != nil {
+		t.Fatalf("Execute error = %v, want nil (non-zero exit is a result)", err)
+	}
+	var payload struct {
+		ExitCode int    `json:"exit_code"`
+		Stdout   string `json:"stdout"`
+		Stderr   string `json:"stderr"`
+	}
+	if err := json.Unmarshal(out, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.ExitCode != 7 {
+		t.Fatalf("exit_code = %d, want 7; raw=%s", payload.ExitCode, out)
+	}
+	if payload.Stdout == "" || payload.Stderr == "" {
+		t.Fatalf("want stdout/stderr in result: %s", out)
 	}
 }
 

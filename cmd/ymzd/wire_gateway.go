@@ -27,6 +27,7 @@ func wireAppAndJobs(
 	chat chatStack,
 	skillCatalog *skillcatalog.Catalog,
 	layout paths.Layout,
+	workingDirectory string,
 ) (*tasksubmission.Service, *taskcontrol.Service, *skillmaintain.Service, *scheduler.Store, *app.Core, error) {
 	var chatInterrupt taskcontrol.ChatInterrupter
 	if chat.chatService != nil {
@@ -55,6 +56,12 @@ func wireAppAndJobs(
 	skillMaintain.Maintain(context.Background())
 	if err := tools.RegisterSkillTools(stack.broker, skillCatalog, skillMaintain); err != nil {
 		return nil, nil, nil, nil, nil, err
+	}
+	if chat.chatService != nil {
+		chat.chatService.SetSkills(skillCatalog)
+	}
+	if stack.taskTool != nil {
+		stack.taskTool.SetAgentsOverlay(layout.ConfigDir, workingDirectory)
 	}
 	if err := tools.RegisterSkillDraftTool(stack.broker, tools.SkillDraftAdapter{
 		Catalog: skillCatalog, Maintain: skillMaintain,
@@ -155,6 +162,18 @@ func wireGatewayAPI(
 			return gateway.SessionRewindResult{SessionID: r.SessionID, RevisionID: r.RevisionID, Path: r.Path}, nil
 		})
 	}
+	var sessionSteer gateway.SessionSteerer
+	if chat.chatService != nil {
+		sessionSteer = gateway.SessionSteerFunc(func(ctx context.Context, sessionID kernel.SessionID, text string) (gateway.SessionSteerResult, error) {
+			r, err := chat.chatService.Steer(ctx, sessionID, text)
+			if err != nil {
+				return gateway.SessionSteerResult{}, err
+			}
+			return gateway.SessionSteerResult{
+				SessionID: r.SessionID, TaskID: r.TaskID, RunID: r.RunID, ItemID: r.ItemID,
+			}, nil
+		})
+	}
 	var memoryControl gateway.MemoryControlService
 	if chat.chatService != nil && chat.memoryManager != nil {
 		memoryControl = memoryControlAdapter{chat: chat.chatService}
@@ -166,6 +185,8 @@ func wireGatewayAPI(
 		ModelConfigError: modelConfigError,
 		ModelStream:      chat.modelHub, MCP: mcpStatus, ChatCommands: chatCommandsProvider, SessionCompact: sessionCompact,
 		SessionRewind: sessionRewind,
+		SessionSteer:  sessionSteer,
+		UserQuestions: gateway.UserQuestionAdapter{Service: chat.questionService},
 		ToolPermissions: gateway.ToolPermissionAdapter{
 			Service:   chat.permService,
 			TrustPath: toolpermission.DefaultTrustPath(layout.ConfigDir),

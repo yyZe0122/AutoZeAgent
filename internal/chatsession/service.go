@@ -26,6 +26,7 @@ import (
 	"github.com/yyZe0122/yunmengze-agent/internal/providerconfig"
 	"github.com/yyZe0122/yunmengze-agent/internal/runlog"
 	"github.com/yyZe0122/yunmengze-agent/internal/sessiontodo"
+	"github.com/yyZe0122/yunmengze-agent/internal/skillcatalog"
 	"github.com/yyZe0122/yunmengze-agent/internal/version"
 	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
@@ -46,6 +47,8 @@ const (
 		"For multi-step work, keep session todos via todo_write (at most one in_progress). " +
 		"After compaction, recover paths and errors with session_search instead of relying on memory. " +
 		"For specialized workflows, call skills_list then skill_view before improvising. " +
+		"When a user decision is required, call ask_user instead of guessing. " +
+		"Use http_get for approved HTTP(S) fetches (not process_shell). " +
 		"Prefer configured mcp_* tools over process_exec/process_shell or writing a script that reimplements them."
 	chatToolProtocolAgent = "You may read and write files under the workspace. " +
 		"Edit with fs_patch and expected_sha256. Use fs_write only to create a new file. " +
@@ -120,10 +123,12 @@ func planChatStepID(plan approval.PlanDocument) kernel.StepID {
 var (
 	ErrInvalidRequest = errors.New("invalid chat request")
 	ErrUnavailable    = errors.New("chat session unavailable")
+	ErrTurnNotRunning = errors.New("no running chat turn to steer")
 )
 
 type AgentRunner interface {
 	Run(context.Context, agent.RunRequest) (agent.Result, error)
+	Inbox() *agent.Inbox
 }
 
 // Compactor optionally summarizes head messages for session compaction.
@@ -206,6 +211,8 @@ type Config struct {
 	AllowProcess bool
 	// ExtraTools are additional broker tool names (e.g. mcp_*) granted for chat runs.
 	ExtraTools []string
+	// Skills is optional; when set, Prefix includes an id + one-line catalog (ADR-052 R5).
+	Skills *skillcatalog.Catalog
 	// ContextWindow is model context length for packing; 0 = unknown.
 	ContextWindow int64
 	// MaxOutputTokens is the model output cap (maxTokens); 0 → ClampMaxOutput default.
@@ -271,6 +278,7 @@ type Service struct {
 	allowGit          bool
 	allowProcess      bool
 	extraTools        []string
+	skills            *skillcatalog.Catalog
 	contextWindow     int64
 	maxOutputTokens   int64
 	contextStore      *contextpack.Store
@@ -291,7 +299,12 @@ type Service struct {
 
 	activeMu sync.Mutex
 	// active cancels in-flight chat agent.Run by task id (concurrent turns).
-	active map[kernel.TaskID]context.CancelFunc
+	active map[kernel.TaskID]activeTurn
+}
+
+type activeTurn struct {
+	session kernel.SessionID
+	cancel  context.CancelFunc
 }
 
 type StartRequest struct {
@@ -364,6 +377,7 @@ func New(config Config) (*Service, error) {
 		chatCfg:      config.ChatConfig,
 		writeCeiling: writeCeiling, allowGit: config.AllowGit, allowProcess: config.AllowProcess,
 		extraTools:    extra,
+		skills:        config.Skills,
 		contextWindow: config.ContextWindow, maxOutputTokens: config.MaxOutputTokens,
 		contextStore: config.Context,
 		compactor:    config.Compactor, compactionEnabled: compactionEnabled,
@@ -372,7 +386,7 @@ func New(config Config) (*Service, error) {
 		stream:        config.Stream, toolCalls: config.ToolCalls, modelResolver: config.ModelResolver,
 		mainModel: strings.TrimSpace(config.MainModel),
 		audit:     auditStore, now: config.Now, onError: config.OnError,
-		active: make(map[kernel.TaskID]context.CancelFunc),
+		active: make(map[kernel.TaskID]activeTurn),
 	}, nil
 }
 
@@ -397,6 +411,13 @@ func (s *Service) SetMainModel(model string) {
 	s.mainModel = strings.TrimSpace(model)
 }
 
+func (s *Service) SetSkills(catalog *skillcatalog.Catalog) {
+	if s == nil {
+		return
+	}
+	s.skills = catalog
+}
+
 func (s *Service) compactionModel(pin string) string {
 	if m := strings.TrimSpace(pin); m != "" {
 		return m
@@ -412,10 +433,21 @@ func (s *Service) Interrupt(taskID kernel.TaskID) {
 		return
 	}
 	s.activeMu.Lock()
-	cancel := s.active[taskID]
+	turn := s.active[taskID]
 	s.activeMu.Unlock()
-	if cancel != nil {
-		cancel()
+	session := turn.session
+	if session == "" && s.repository != nil {
+		if task, err := s.repository.GetTask(context.Background(), taskID); err == nil {
+			session = task.SessionID
+		}
+	}
+	if session != "" && s.agent != nil {
+		if inbox := s.agent.Inbox(); inbox != nil {
+			inbox.Clear(string(session))
+		}
+	}
+	if turn.cancel != nil {
+		turn.cancel()
 	}
 }
 

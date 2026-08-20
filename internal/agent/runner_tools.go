@@ -60,28 +60,105 @@ func (r *Runner) executeOneToolCall(ctx context.Context, request RunRequest, cal
 		Tool: call.Name, Arguments: json.RawMessage(call.Arguments), TimeoutMillis: request.ToolTimeoutMillis,
 	})
 	if err != nil {
-		if !errors.Is(err, toolapi.ErrDenied) {
+		if isInfrastructureToolError(ctx, err) {
 			return providerapi.Message{}, toolapi.Response{}, err
 		}
 		content := toolDeniedContent(call, err)
-		toolResponse = toolapi.Response{
-			CallID: call.ID, Tool: call.Name, Output: json.RawMessage(content),
+		if !errors.Is(err, toolapi.ErrDenied) && !errors.Is(err, toolapi.ErrPermissionRequired) {
+			content = toolFailedContent(call, err)
+			if len(toolResponse.Output) > 0 {
+				if merged := mergeToolFailureOutput(toolResponse.Output, call, err); merged != "" {
+					content = merged
+				}
+			}
+			slog.Info("tool call failed; feeding result back to provider",
+				"component", "agent", "operation", "tool_failed", "result", "continued",
+				"run_id", request.RunID, "task_id", request.TaskID, "plan_id", request.PlanID,
+				"step_id", request.StepID, "trace_id", request.TraceID,
+				"tool", call.Name, "tool_call_id", call.ID, "error", err,
+			)
+		} else {
+			slog.Info("tool call denied; feeding result back to provider",
+				"component", "agent", "operation", "tool_denied", "result", "continued",
+				"run_id", request.RunID, "task_id", request.TaskID, "plan_id", request.PlanID,
+				"step_id", request.StepID, "trace_id", request.TraceID,
+				"tool", call.Name, "tool_call_id", call.ID, "error", err,
+			)
 		}
+		toolResponse.CallID = call.ID
+		toolResponse.Tool = call.Name
+		toolResponse.Output = json.RawMessage(content)
 		toolMessage := providerapi.Message{Role: providerapi.RoleTool, ToolCallID: call.ID, Content: content}
-		slog.Info("tool call denied; feeding result back to provider",
-			"component", "agent", "operation", "tool_denied", "result", "continued",
-			"run_id", request.RunID, "task_id", request.TaskID, "plan_id", request.PlanID,
-			"step_id", request.StepID, "trace_id", request.TraceID,
-			"tool", call.Name, "tool_call_id", call.ID, "error", err,
-		)
 		return toolMessage, toolResponse, nil
 	}
 	content, err := toolResultContent(toolResponse)
 	if err != nil {
-		return providerapi.Message{}, toolapi.Response{}, err
+		if isInfrastructureToolError(ctx, err) {
+			return providerapi.Message{}, toolapi.Response{}, err
+		}
+		content = toolFailedContent(call, err)
+		toolResponse.Output = json.RawMessage(content)
 	}
 	toolMessage := providerapi.Message{Role: providerapi.RoleTool, ToolCallID: call.ID, Content: content}
 	return toolMessage, toolResponse, nil
+}
+
+func (r *Runner) appendRejectedToolCalls(ctx context.Context, request RunRequest, rejected []toolCallObservation) ([]providerapi.Message, []toolapi.Response, error) {
+	if len(rejected) == 0 {
+		return nil, nil, nil
+	}
+	outMsgs := make([]providerapi.Message, 0, len(rejected))
+	outResps := make([]toolapi.Response, 0, len(rejected))
+	for _, obs := range rejected {
+		content := toolCallRejectedContent(obs)
+		toolMessage := providerapi.Message{Role: providerapi.RoleTool, ToolCallID: obs.Call.ID, Content: content}
+		toolResponse := toolapi.Response{CallID: obs.Call.ID, Tool: obs.Call.Name, Output: json.RawMessage(content)}
+		rec, err := r.records.AppendToolResult(ctx, request.RunID, toolMessage)
+		if err != nil {
+			return nil, nil, err
+		}
+		r.indexToolResult(ctx, request, obs.Call.Name, rec)
+		outMsgs = append(outMsgs, toolMessage)
+		outResps = append(outResps, toolResponse)
+		slog.Info("invalid tool call; feeding result back to provider",
+			"component", "agent", "operation", "tool_rejected", "result", "continued",
+			"run_id", request.RunID, "task_id", request.TaskID, "plan_id", request.PlanID,
+			"step_id", request.StepID, "trace_id", request.TraceID,
+			"tool", obs.Call.Name, "tool_call_id", obs.Call.ID, "kind", obs.Kind,
+		)
+	}
+	return outMsgs, outResps, nil
+}
+
+func isInfrastructureToolError(ctx context.Context, err error) bool {
+	if err == nil || ctx == nil || ctx.Err() == nil {
+		return false
+	}
+	return errors.Is(err, ctx.Err())
+}
+
+func mergeToolFailureOutput(output json.RawMessage, call providerapi.ToolCall, err error) string {
+	var payload map[string]any
+	if json.Unmarshal(output, &payload) != nil || payload == nil {
+		return ""
+	}
+	if _, ok := payload["error"]; !ok {
+		payload["error"] = "tool_failed"
+	}
+	if _, ok := payload["tool"]; !ok {
+		payload["tool"] = call.Name
+	}
+	if _, ok := payload["message"]; !ok && err != nil {
+		payload["message"] = err.Error()
+	}
+	if _, ok := payload["hint"]; !ok {
+		payload["hint"] = "Read the error and tool output. Do not claim the tool succeeded."
+	}
+	encoded, marshalErr := json.Marshal(payload)
+	if marshalErr != nil {
+		return ""
+	}
+	return string(encoded)
 }
 
 func (r *Runner) executeToolCallsSerial(ctx context.Context, request RunRequest, calls []providerapi.ToolCall) ([]providerapi.Message, []toolapi.Response, error) {

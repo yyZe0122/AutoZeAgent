@@ -12,6 +12,9 @@ import (
 func (m model) handleLineCmd(line string) tea.Cmd {
 	name, arg := parseSlash(line)
 	if name == "" {
+		if m.canSteer() {
+			return m.steerCmd(strings.TrimSpace(line))
+		}
 		return m.newTaskCmd(strings.TrimSpace(line))
 	}
 	switch name {

@@ -179,6 +179,79 @@ func TestRunnerStopsBeforeToolsWhenCostBudgetIsExceeded(t *testing.T) {
 	}
 }
 
+func TestSelectDefinitionsDedupsAllowedTools(t *testing.T) {
+	defs, advertised, err := selectDefinitions(testDefinitions(), []string{"test_read", "test_read", " test_read "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(defs) != 1 || defs[0].Name != "test_read" {
+		t.Fatalf("defs = %+v", defs)
+	}
+	if _, ok := advertised["test_read"]; !ok || len(advertised) != 1 {
+		t.Fatalf("advertised = %#v", advertised)
+	}
+}
+
+func TestRunnerFeedsFailedToolResultAndContinues(t *testing.T) {
+	store, _, _ := openAgentFixture(t)
+	provider := &sequenceProvider{responses: []providerapi.CompletionResponse{
+		{
+			ToolCalls: []providerapi.ToolCall{{ID: "call-fail", Name: "test_read", Arguments: `{}`}},
+			Usage:     providerapi.Usage{TotalTokens: 2},
+		},
+		{Content: "fixed after failure", Usage: providerapi.Usage{TotalTokens: 3}},
+	}}
+	broker := &recordingBroker{
+		definitions: testDefinitions(),
+		executeErr:  errors.New("process exited with code 1"),
+	}
+	request := testRunRequest()
+	request.AllowedTools = []string{"test_read"}
+	runner := newTestRunner(t, provider, broker, store)
+
+	result, err := runner.Run(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != "fixed after failure" || result.Iterations != 2 {
+		t.Fatalf("result = %+v", result)
+	}
+	toolMsg := provider.requests[1].Messages[len(provider.requests[1].Messages)-1]
+	if toolMsg.Role != providerapi.RoleTool || !strings.Contains(toolMsg.Content, "tool_failed") {
+		t.Fatalf("tool message = %+v", toolMsg)
+	}
+}
+
+func TestRunnerFeedsUnadvertisedToolAndContinues(t *testing.T) {
+	store, _, _ := openAgentFixture(t)
+	provider := &sequenceProvider{responses: []providerapi.CompletionResponse{
+		{
+			ToolCalls: []providerapi.ToolCall{{ID: "call-ghost", Name: "http_get", Arguments: `{"url":"https://example.com"}`}},
+			Usage:     providerapi.Usage{TotalTokens: 2},
+		},
+		{Content: "used advertised tools instead", Usage: providerapi.Usage{TotalTokens: 3}},
+	}}
+	broker := &recordingBroker{definitions: testDefinitions()}
+	request := testRunRequest()
+	request.AllowedTools = []string{"test_read"}
+	runner := newTestRunner(t, provider, broker, store)
+
+	result, err := runner.Run(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != "used advertised tools instead" {
+		t.Fatalf("result = %+v", result)
+	}
+	if broker.calls != 0 {
+		t.Fatalf("broker calls = %d, want 0", broker.calls)
+	}
+	toolMsg := provider.requests[1].Messages[len(provider.requests[1].Messages)-1]
+	if toolMsg.Role != providerapi.RoleTool || !strings.Contains(toolMsg.Content, "unadvertised_tool") {
+		t.Fatalf("tool message = %+v", toolMsg)
+	}
+}
+
 func TestRunnerFeedsDeniedToolResultAndContinues(t *testing.T) {
 	store, _, _ := openAgentFixture(t)
 	provider := &sequenceProvider{responses: []providerapi.CompletionResponse{
@@ -303,7 +376,7 @@ func TestRunnerRespectsMaxIterations(t *testing.T) {
 	request.AllowedTools = []string{"test_read"}
 	result, err := runner.Run(context.Background(), request)
 	// Soft landing: final iteration advertises no tools and returns a text stop message
-	// instead of hard-failing with ErrMaxIterations when the model only emits tool calls.
+	// instead of hard-failing when the model only emits tool calls.
 	if err != nil {
 		t.Fatalf("Run() error = %v, want nil (soft landing)", err)
 	}
@@ -318,24 +391,108 @@ func TestRunnerRespectsMaxIterations(t *testing.T) {
 	}
 }
 
-func TestRunnerStillFailsOnNonDeniedToolError(t *testing.T) {
+func TestRunnerDefaultHasNoStepCap(t *testing.T) {
+	store, db, _ := openAgentFixture(t)
+	var responses []providerapi.CompletionResponse
+	for i := 0; i < 20; i++ {
+		responses = append(responses, providerapi.CompletionResponse{
+			ToolCalls: []providerapi.ToolCall{{
+				ID: fmt.Sprintf("call-uncap-%d", i), Name: "test_read",
+				Arguments: fmt.Sprintf(`{"n":%d}`, i),
+			}},
+			Usage: providerapi.Usage{TotalTokens: 1, InputTokens: 1},
+		})
+	}
+	responses = append(responses, providerapi.CompletionResponse{Content: "done after 20 tools", Usage: providerapi.Usage{TotalTokens: 1}})
+	provider := &sequenceProvider{responses: responses}
+	broker := &recordingBroker{db: db, definitions: testDefinitions()}
+	runner := newTestRunner(t, provider, broker, store)
+	request := testRunRequest()
+	request.AllowedTools = []string{"test_read"}
+	result, err := runner.Run(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Iterations != 21 || result.Content != "done after 20 tools" {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestRunnerClaimsNextStepInboxAfterText(t *testing.T) {
+	store, _, _ := openAgentFixture(t)
+	provider := &sequenceProvider{responses: []providerapi.CompletionResponse{
+		{Content: "first answer", Usage: providerapi.Usage{TotalTokens: 1}},
+		{Content: "after steer", Usage: providerapi.Usage{TotalTokens: 1}},
+	}}
+	runner := newTestRunner(t, provider, &recordingBroker{definitions: testDefinitions()}, store)
+	request := testRunRequest()
+	request.SessionID = "session-steer"
+	request.AllowedTools = []string{"test_read"}
+	runner.Inbox().Steer(request.SessionID, "steer-1", "do this instead")
+	result, err := runner.Run(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != "after steer" || result.Iterations != 2 {
+		t.Fatalf("result = %+v", result)
+	}
+	if provider.calls != 2 {
+		t.Fatalf("provider calls = %d, want 2", provider.calls)
+	}
+	second := provider.requests[1].Messages
+	if second[len(second)-1].Role != providerapi.RoleUser || second[len(second)-1].Content != "do this instead" {
+		t.Fatalf("second request tail = %+v", second[len(second)-1])
+	}
+	if runner.Inbox().Pending(request.SessionID) {
+		t.Fatal("next-step inbox should be empty after claim")
+	}
+}
+
+func TestRunnerStillFailsOnCanceledParentContext(t *testing.T) {
 	store, _, _ := openAgentFixture(t)
 	provider := &sequenceProvider{responses: []providerapi.CompletionResponse{{
-		ToolCalls: []providerapi.ToolCall{{ID: "call-fail", Name: "test_read", Arguments: `{}`}},
+		ToolCalls: []providerapi.ToolCall{{ID: "call-cancel", Name: "test_read", Arguments: `{}`}},
 		Usage:     providerapi.Usage{TotalTokens: 2},
 	}}}
-	want := errors.New("broker internal failure")
-	broker := &recordingBroker{definitions: testDefinitions(), executeErr: want}
+	ctx, cancel := context.WithCancel(context.Background())
+	broker := &recordingBroker{definitions: testDefinitions(), executeErr: context.Canceled, onExecute: cancel}
 	request := testRunRequest()
 	request.AllowedTools = []string{"test_read"}
 	runner := newTestRunner(t, provider, broker, store)
 
-	_, err := runner.Run(context.Background(), request)
-	if !errors.Is(err, want) {
-		t.Fatalf("Run() error = %v, want %v", err, want)
+	_, err := runner.Run(ctx, request)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run() error = %v, want context.Canceled", err)
 	}
 	if provider.calls != 1 {
 		t.Fatalf("provider calls = %d, want 1", provider.calls)
+	}
+}
+
+func TestRunnerFeedsCanceledToolWhenParentStillAlive(t *testing.T) {
+	store, _, _ := openAgentFixture(t)
+	provider := &sequenceProvider{responses: []providerapi.CompletionResponse{
+		{
+			ToolCalls: []providerapi.ToolCall{{ID: "call-timeout", Name: "test_read", Arguments: `{}`}},
+			Usage:     providerapi.Usage{TotalTokens: 2},
+		},
+		{Content: "continued after tool cancel", Usage: providerapi.Usage{TotalTokens: 3}},
+	}}
+	broker := &recordingBroker{definitions: testDefinitions(), executeErr: context.DeadlineExceeded}
+	request := testRunRequest()
+	request.AllowedTools = []string{"test_read"}
+	runner := newTestRunner(t, provider, broker, store)
+
+	result, err := runner.Run(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != "continued after tool cancel" || result.Iterations != 2 {
+		t.Fatalf("result = %+v", result)
+	}
+	toolMsg := provider.requests[1].Messages[len(provider.requests[1].Messages)-1]
+	if toolMsg.Role != providerapi.RoleTool || !strings.Contains(toolMsg.Content, "tool_failed") {
+		t.Fatalf("tool message = %+v", toolMsg)
 	}
 }
 
@@ -442,6 +599,7 @@ type recordingBroker struct {
 	definitions []toolapi.Definition
 	calls       int
 	executeErr  error
+	onExecute   func()
 }
 
 func (b *recordingBroker) Definitions() []toolapi.Definition {
@@ -450,6 +608,9 @@ func (b *recordingBroker) Definitions() []toolapi.Definition {
 
 func (b *recordingBroker) Execute(_ context.Context, request toolapi.Request) (toolapi.Response, error) {
 	b.calls++
+	if b.onExecute != nil {
+		b.onExecute()
+	}
 	if b.executeErr != nil {
 		return toolapi.Response{}, b.executeErr
 	}

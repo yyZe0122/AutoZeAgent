@@ -19,6 +19,7 @@ import (
 	"github.com/yyZe0122/yunmengze-agent/internal/providerruntime"
 	"github.com/yyZe0122/yunmengze-agent/internal/sessiontodo"
 	"github.com/yyZe0122/yunmengze-agent/internal/toolpermission"
+	"github.com/yyZe0122/yunmengze-agent/internal/userquestion"
 )
 
 type chatStack struct {
@@ -31,6 +32,7 @@ type chatStack struct {
 	maxOutputTokens int64
 	chatCfg         providerconfig.ChatConfig
 	permService     *toolpermission.Service
+	questionService *userquestion.Service
 	memoryManager   *memory.Manager
 	agentRunner     *agent.Runner
 	chatService     *chatsession.Service
@@ -92,6 +94,21 @@ func wireChat(
 	}
 	out.permService = permService
 	stack.broker.SetPermission(toolpermission.NewGate(permService))
+
+	qStore, err := userquestion.NewStore(stores.database.SQL())
+	if err != nil {
+		return out, err
+	}
+	qService, err := userquestion.New(userquestion.Config{
+		Store: qStore, Events: stores.eventStore,
+	})
+	if err != nil {
+		return out, err
+	}
+	out.questionService = qService
+	if stack.askUserTools != nil {
+		stack.askUserTools.SetBackend(qService)
+	}
 
 	if out.chatCfg.MemoryEnabled() {
 		memoryStore, err := memory.NewStore(stores.database.SQL())

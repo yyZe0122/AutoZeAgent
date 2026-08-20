@@ -103,6 +103,7 @@ func helpText() string {
 	b.WriteString("\n")
 	b.WriteString(styleTitle.Render("Chat") + "\n")
 	b.WriteString("  Plain text continues the current session (or starts one).\n")
+	b.WriteString("  While a turn is running, Enter steers the next step (does not cancel tools).\n")
 	b.WriteString("  " + paintKeywords("/new") + " leaves to ready and cancels a running turn. Type to start a session. Tab sets plan|agent|auto.\n")
 	b.WriteString("  " + paintKeywords("/skills preloads instruction skills for the next submit (explicit snapshot).") + "\n")
 	b.WriteString("  Other skills: model calls skills_list then skill_view. " + paintKeywords("/<skill-id>") + " toggles preload.\n")

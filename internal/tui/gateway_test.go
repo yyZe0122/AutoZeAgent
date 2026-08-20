@@ -26,6 +26,8 @@ type fakeGateway struct {
 	controlCalls     []gatewayclient.TaskAction
 	controlErr       error
 	permissions      []gatewayclient.Permission
+	steers           []string
+	questions        []gatewayclient.UserQuestion
 }
 
 func (f *fakeGateway) StreamEvents(context.Context, uint64, func(eventapi.Envelope) error) error {
@@ -63,6 +65,11 @@ func (f *fakeGateway) SessionMessages(context.Context, gatewayclient.SessionID, 
 
 func (f *fakeGateway) CompactSession(context.Context, gatewayclient.SessionID, string) (gatewayclient.CompactResult, error) {
 	return gatewayclient.CompactResult{Source: "llm"}, nil
+}
+
+func (f *fakeGateway) SteerSession(_ context.Context, _ gatewayclient.SessionID, text string) (gatewayclient.SteerResult, error) {
+	f.steers = append(f.steers, strings.TrimSpace(text))
+	return gatewayclient.SteerResult{SessionID: "session-1", TaskID: "task-1", RunID: "run-1", ItemID: "steer-1"}, nil
 }
 
 func (f *fakeGateway) RewindSession(context.Context, gatewayclient.SessionID, string) (gatewayclient.RewindResult, error) {
@@ -188,6 +195,14 @@ func (f *fakeGateway) DecidePermission(context.Context, string, string) (gateway
 
 func (f *fakeGateway) DecidePermissionConfirm(context.Context, string, string, bool) (gatewayclient.Permission, error) {
 	return gatewayclient.Permission{}, nil
+}
+
+func (f *fakeGateway) ListQuestions(context.Context, string, int) ([]gatewayclient.UserQuestion, error) {
+	return f.questions, nil
+}
+
+func (f *fakeGateway) AnswerQuestion(_ context.Context, id, _ string, answers map[string][]string) (gatewayclient.UserQuestion, error) {
+	return gatewayclient.UserQuestion{ID: id, State: "answered", Answers: answers}, nil
 }
 
 func (f *fakeGateway) ListMemory(context.Context, string, string, string, int) ([]gatewayclient.MemoryEntry, error) {

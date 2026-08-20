@@ -109,6 +109,24 @@ type RewindResult struct {
 	Path       string `json:"path"`
 }
 
+// SteerResult is the response from POST /v1/sessions/{id}/steer.
+type SteerResult struct {
+	SessionID string `json:"session_id"`
+	TaskID    string `json:"task_id"`
+	RunID     string `json:"run_id"`
+	ItemID    string `json:"item_id"`
+}
+
+func (c *Client) SteerSession(ctx context.Context, id SessionID, text string) (SteerResult, error) {
+	var result SteerResult
+	body := map[string]string{"text": strings.TrimSpace(text)}
+	path := "/v1/sessions/" + url.PathEscape(string(id)) + "/steer"
+	if err := c.inner.DoJSON(ctx, http.MethodPost, path, body, &result); err != nil {
+		return SteerResult{}, fmt.Errorf("steer session: %w", err)
+	}
+	return result, nil
+}
+
 func (c *Client) RewindSession(ctx context.Context, id SessionID, revisionID string) (RewindResult, error) {
 	var result RewindResult
 	body := map[string]string{}

@@ -43,11 +43,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastPermPoll = time.Now()
 			autoOpen := !m.autoOpenedPermList && m.list == listNone && !m.completer.visible
 			cmds = append(cmds, m.pollPermissionsCmd(autoOpen))
+			if m.pendingPermCount == 0 {
+				qOpen := !m.autoOpenedQList && m.list == listNone && !m.completer.visible
+				cmds = append(cmds, m.pollQuestionsCmd(qOpen))
+			}
 		}
 		return m, tea.Batch(cmds...)
 
 	case permPollDoneMsg:
 		return m.applyPermPoll(msg)
+
+	case questionPollDoneMsg:
+		return m.applyQuestionPoll(msg)
 
 	case refreshDoneMsg:
 		return m.applyRefresh(msg)

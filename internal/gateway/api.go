@@ -119,6 +119,24 @@ type SessionCompactResult struct {
 	CompactionID string `json:"compaction_id,omitempty"`
 }
 
+// SessionSteerer queues next-step user text on a running turn (ADR-052 R3).
+type SessionSteerer interface {
+	Steer(ctx context.Context, sessionID kernel.SessionID, text string) (SessionSteerResult, error)
+}
+
+type SessionSteerResult struct {
+	SessionID string        `json:"session_id"`
+	TaskID    kernel.TaskID `json:"task_id"`
+	RunID     kernel.RunID  `json:"run_id"`
+	ItemID    string        `json:"item_id"`
+}
+
+type SessionSteerFunc func(ctx context.Context, sessionID kernel.SessionID, text string) (SessionSteerResult, error)
+
+func (f SessionSteerFunc) Steer(ctx context.Context, sessionID kernel.SessionID, text string) (SessionSteerResult, error) {
+	return f(ctx, sessionID, text)
+}
+
 // SessionCompactFunc adapts a function to SessionCompactor.
 type SessionCompactFunc func(ctx context.Context, sessionID kernel.SessionID, focus string) (SessionCompactResult, error)
 
@@ -166,6 +184,10 @@ type APIConfig struct {
 	SessionCompact SessionCompactor
 	// SessionRewind is optional; when set, exposes POST /v1/sessions/{id}/rewind (QG).
 	SessionRewind SessionRewinder
+	// SessionSteer is optional; when set, exposes POST /v1/sessions/{id}/steer (ADR-052 R3).
+	SessionSteer SessionSteerer
+	// UserQuestions is optional; when set, exposes GET /v1/questions and POST /v1/questions/{id}/answer (ADR-052 R4).
+	UserQuestions UserQuestionService
 	// ToolPermissions is optional; when set, exposes GET /v1/permissions and POST /v1/permissions/{id}/decide (ADR-043).
 	ToolPermissions ToolPermissionService
 	// MemoryControl is optional; when set, exposes POST /v1/memory/actions (refresh/forget/promote).
@@ -200,6 +222,38 @@ type SkillControlService interface {
 type SkillUsageView struct {
 	LastUsedAt string `json:"last_used_at,omitempty"`
 	ArchivedAt string `json:"archived_at,omitempty"`
+}
+
+// UserQuestionService lists and answers model-facing ask_user questions (ADR-052 R4).
+type UserQuestionService interface {
+	ListPending(ctx context.Context, sessionID string, limit int) ([]UserQuestionView, error)
+	Answer(ctx context.Context, id, actor string, answers map[string][]string) (UserQuestionView, error)
+}
+
+type UserQuestionOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+}
+
+type UserQuestionItem struct {
+	ID          string               `json:"id"`
+	Question    string               `json:"question"`
+	Header      string               `json:"header,omitempty"`
+	Options     []UserQuestionOption `json:"options,omitempty"`
+	MultiSelect bool                 `json:"multi_select,omitempty"`
+}
+
+type UserQuestionView struct {
+	ID         string              `json:"question_id"`
+	SessionID  string              `json:"session_id,omitempty"`
+	TaskID     string              `json:"task_id,omitempty"`
+	RunID      string              `json:"run_id,omitempty"`
+	ToolCallID string              `json:"tool_call_id,omitempty"`
+	Questions  []UserQuestionItem  `json:"questions"`
+	State      string              `json:"state"`
+	Answers    map[string][]string `json:"answers,omitempty"`
+	CreatedAt  string              `json:"created_at"`
+	DecidedAt  string              `json:"decided_at,omitempty"`
 }
 
 // ToolPermissionService lists and decides interactive tool permissions.
@@ -247,6 +301,8 @@ type API struct {
 	chatCommands     ChatCommandsProvider
 	sessionCompact   SessionCompactor
 	sessionRewind    SessionRewinder
+	sessionSteer     SessionSteerer
+	userQuestions    UserQuestionService
 	toolPermissions  ToolPermissionService
 	memoryControl    MemoryControlService
 	skillControl     SkillControlService
@@ -273,7 +329,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		modelConfig: config.ModelConfig, modelSwitcher: config.ModelSwitcher, modelConfigError: strings.TrimSpace(config.ModelConfigError),
 		modelStream: config.ModelStream,
 		mcp:         config.MCP, chatCommands: config.ChatCommands,
-		sessionCompact: config.SessionCompact, sessionRewind: config.SessionRewind,
+		sessionCompact: config.SessionCompact, sessionRewind: config.SessionRewind, sessionSteer: config.SessionSteer, userQuestions: config.UserQuestions,
 		toolPermissions: config.ToolPermissions,
 		memoryControl:   config.MemoryControl, skillControl: config.SkillControl, sessionPrefs: config.SessionPrefs,
 	}, nil
@@ -313,6 +369,10 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.handlePermissions(w, r)
 	case strings.HasSuffix(r.URL.Path, "/decide") && strings.HasPrefix(r.URL.Path, "/v1/permissions/"):
 		a.handlePermissionDecide(w, r)
+	case r.URL.Path == "/v1/questions":
+		a.handleQuestions(w, r)
+	case strings.HasSuffix(r.URL.Path, "/answer") && strings.HasPrefix(r.URL.Path, "/v1/questions/"):
+		a.handleQuestionAnswer(w, r)
 	case r.URL.Path == "/v1/health":
 		a.handleHealth(w, r)
 	case r.URL.Path == "/v1/config/model":
@@ -341,6 +401,8 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.handleSessionCompact(w, r)
 	case strings.HasSuffix(r.URL.Path, "/rewind") && strings.HasPrefix(r.URL.Path, "/v1/sessions/"):
 		a.handleSessionRewind(w, r)
+	case strings.HasSuffix(r.URL.Path, "/steer") && strings.HasPrefix(r.URL.Path, "/v1/sessions/"):
+		a.handleSessionSteer(w, r)
 	case strings.HasPrefix(r.URL.Path, "/v1/sessions/"):
 		a.handleSession(w, r)
 	case r.URL.Path == "/v1/tasks":

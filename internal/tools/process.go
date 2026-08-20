@@ -58,7 +58,7 @@ const processShellBin = "/bin/sh"
 
 func (t *processShellTool) Definition() toolapi.Definition {
 	return toolapi.Definition{
-		Name: "process_shell", Description: "Run tests or an approved /bin/sh -c script (not for find/grep). Same grant gate as process_exec (chat.permission.allow / chat.tools.process, or Tab Auto). Prefer process_exec argv when you do not need a shell. Plan and cron never receive this grant.",
+		Name: "process_shell", Description: "Run tests or an approved /bin/sh -c script (not for find/grep). Same grant gate as process_exec (chat.permission.allow / chat.tools.process, or Tab Auto). Prefer process_exec argv when you do not need a shell. Non-zero exit is a result (exit_code/stdout/stderr), not a crash — read it and fix. Command must match an issued grant or /perm similar prefix. Plan and cron never receive this grant.",
 		Risk: string(policy.RiskR2), DefaultTimeoutMillis: 30000,
 		InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false,"required":["command","directory"],"properties":{"command":{"type":"string","description":"Script passed to /bin/sh -c"},"directory":{"type":"string"},"environment":{"type":"object","additionalProperties":{"type":"string"}}}}`),
 	}
@@ -101,16 +101,12 @@ func (t *processShellTool) Execute(ctx context.Context, raw json.RawMessage) (js
 		Directory: directory, Environment: input.Environment,
 		CallID: toolCallIDFromContext(ctx),
 	})
-	encoded, encodeErr := encodeResult(result)
-	if encodeErr != nil {
-		return nil, encodeErr
-	}
-	return encoded, runErr
+	return encodeProcessResult(result, runErr)
 }
 
 func (t *processTool) Definition() toolapi.Definition {
 	return toolapi.Definition{
-		Name: "process_exec", Description: "Run tests or an approved command as argv (not a shell). Not for find/grep (use fs_glob/fs_grep). Do not reimplement a configured mcp_* tool. directory must be absolute under an approved grant; command and arguments must match the grant exactly.",
+		Name: "process_exec", Description: "Run tests or an approved command as argv (not a shell). Not for find/grep (use fs_glob/fs_grep). Do not reimplement a configured mcp_* tool. directory must be absolute under an approved grant. command/args must match an issued grant or a /perm similar prefix (e.g. go test covers go test ./pkg). Non-zero exit is a result (exit_code/stdout/stderr), not a crash — read it and fix.",
 		Risk: string(policy.RiskR2), DefaultTimeoutMillis: 30000,
 		InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false,"required":["command","directory"],"properties":{"command":{"type":"string"},"arguments":{"type":"array","items":{"type":"string"}},"directory":{"type":"string"},"environment":{"type":"object","additionalProperties":{"type":"string"}}}}`),
 	}
@@ -149,9 +145,5 @@ func (t *processTool) Execute(ctx context.Context, raw json.RawMessage) (json.Ra
 		Command: input.Command, Arguments: input.Arguments, Directory: directory, Environment: input.Environment,
 		CallID: toolCallIDFromContext(ctx),
 	})
-	encoded, encodeErr := encodeResult(result)
-	if encodeErr != nil {
-		return nil, encodeErr
-	}
-	return encoded, runErr
+	return encodeProcessResult(result, runErr)
 }

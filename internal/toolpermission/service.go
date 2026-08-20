@@ -314,6 +314,11 @@ func narrowScopeForSimilar(scope approval.CapabilityScope, req Request) approval
 	if req.Capability == "process_exec" || req.Capability == "process_shell" {
 		scope = applyProcessSimilarPrefix(scope, req)
 	}
+	if req.Capability == "http_get" {
+		if host := strings.TrimSpace(req.NetworkDomain); host != "" && len(scope.NetworkDomains) == 0 {
+			scope.NetworkDomains = []string{strings.ToLower(host)}
+		}
+	}
 	path := strings.TrimSpace(req.Path)
 	if path == "" {
 		return scope

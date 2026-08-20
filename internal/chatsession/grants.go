@@ -57,6 +57,7 @@ type grantPosture struct {
 	pregrantProc bool
 	askGit       bool
 	askProc      bool
+	cron         bool
 }
 
 func (s *Service) grantPosture(ctx context.Context, task kernel.Task) grantPosture {
@@ -76,6 +77,7 @@ func (s *Service) grantPosture(ctx context.Context, task kernel.Task) grantPostu
 	return grantPosture{
 		pregrantGit: preGit, pregrantProc: preProc,
 		askGit: agent && !cron && !preGit, askProc: agent && !cron && !preProc,
+		cron: cron,
 	}
 }
 
@@ -261,6 +263,23 @@ func (s *Service) issueChatGrants(ctx context.Context, plan approval.PlanDocumen
 	return grants, nil
 }
 
+func uniqueCapabilityNames(scopes []approval.CapabilityScope) []string {
+	seen := make(map[string]struct{}, len(scopes))
+	out := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		name := strings.TrimSpace(scope.Capability)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out
+}
+
 func (p grantPosture) shouldIssue(scope approval.CapabilityScope) bool {
 	name := scope.Capability
 	if name == "process_exec" || name == "process_shell" {
@@ -268,6 +287,9 @@ func (p grantPosture) shouldIssue(scope approval.CapabilityScope) bool {
 	}
 	if strings.HasPrefix(name, "git_") {
 		return p.pregrantGit && !scope.OneTime
+	}
+	if name == "http_get" {
+		return false
 	}
 	return !scope.OneTime
 }
@@ -311,8 +333,9 @@ func (s *Service) buildWorkspacePlan(planID kernel.PlanID, taskID kernel.TaskID,
 	caps = append(caps,
 		approval.CapabilityScope{Capability: "skills_list", MaxDurationMillis: defaultToolTimeoutMS, MaxCalls: defaultMaxCalls},
 		approval.CapabilityScope{Capability: "skill_view", MaxDurationMillis: defaultToolTimeoutMS, MaxCalls: defaultMaxCalls},
+		approval.CapabilityScope{Capability: "ask_user", MaxDurationMillis: 15 * 60 * 1000, MaxCalls: defaultMaxCalls},
 	)
-	effects = append(effects, "list and load local skill instructions")
+	effects = append(effects, "list and load local skill instructions", "ask the user multiple-choice questions")
 	if posture.pregrantGit || posture.askGit {
 		for _, name := range []string{"git_status", "git_diff", "git_add", "git_commit"} {
 			if posture.pregrantGit {
@@ -336,8 +359,18 @@ func (s *Service) buildWorkspacePlan(planID kernel.PlanID, taskID kernel.TaskID,
 		risk = policy.RiskR2
 		effects = append(effects, "use git tools under workspace roots")
 	}
-	// http_get ask scopes (network domain filled at decide via plan template with empty domains fails —
-	// http_get is not path-scoped; skip plan embed for http until domain-wildcard grants exist.
+	if kernel.NormalizeExecutionMode(string(mode)) == kernel.ExecutionModeAgent && !posture.cron {
+		caps = append(caps,
+			approval.CapabilityScope{
+				Capability: "http_get", MaxDurationMillis: defaultToolTimeoutMS, MaxCalls: 1, OneTime: true,
+			},
+			approval.CapabilityScope{
+				Capability: "http_get", MaxDurationMillis: defaultToolTimeoutMS, MaxCalls: defaultMaxCalls, OneTime: false,
+			},
+		)
+		effects = append(effects, "fetch approved http/https URLs after /perm (SSRF baseline still applies)")
+		risk = policy.RiskR2
+	}
 	// Logical sub-agent (ADR-039): both modes may spawn task; grants do not expand FS.
 	caps = append(caps, approval.CapabilityScope{
 		Capability: "task", MaxDurationMillis: defaultMaxDurationMS, MaxCalls: defaultMaxCalls,

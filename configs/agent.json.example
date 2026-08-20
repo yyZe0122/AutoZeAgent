@@ -119,7 +119,7 @@
       "process": false
     },
     "compaction": { "enabled": true },
-    "max_iterations": 16,
+    "max_iterations": 0,
     "permission": { "mode": "preauth" },
     "memory": {
       "enabled": true,

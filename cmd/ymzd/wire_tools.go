@@ -13,6 +13,7 @@ import (
 
 type taskRunnerSetter interface {
 	SetRunner(tools.SubagentRunner)
+	SetAgentsOverlay(configDir, workspace string)
 }
 
 type memoryBackendSetter interface {
@@ -23,12 +24,17 @@ type todoBackendSetter interface {
 	SetBackend(tools.TodoBackend)
 }
 
+type askUserBackendSetter interface {
+	SetBackend(tools.AskUserBackend)
+}
+
 type toolStack struct {
 	broker       *tools.Broker
 	pathGuard    *tools.PathGuard
 	taskTool     taskRunnerSetter
 	memTools     memoryBackendSetter
 	todoTools    todoBackendSetter
+	askUserTools askUserBackendSetter
 	mcpRegistry  *tools.MCPRegistry
 	mcpToolNames []string
 	chatCfg      providerconfig.ChatConfig
@@ -97,6 +103,12 @@ func wireTools(stores coreStores, layout paths.Layout, workingDirectory string) 
 		return out, err
 	}
 	out.todoTools = todoTools
+
+	askUserTools, err := tools.RegisterAskUserTool(broker, nil)
+	if err != nil {
+		return out, err
+	}
+	out.askUserTools = askUserTools
 
 	mcpConfig, err := providerconfig.LoadMCP(layout.ConfigDir)
 	if err != nil {

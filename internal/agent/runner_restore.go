@@ -43,8 +43,11 @@ func (r *Runner) restore(
 	for index, record := range records {
 		switch record.Type {
 		case RecordInputMessage:
-			if generated {
+			if generated && record.Message.Role != providerapi.RoleUser {
 				return nil, nil, result, false, fmt.Errorf("%w: input record after generated output", ErrCorruptHistory)
+			}
+			if generated && len(pending) != 0 {
+				return nil, nil, result, false, fmt.Errorf("%w: user record before prior tool results", ErrCorruptHistory)
 			}
 			messages = append(messages, cloneMessage(record.Message))
 		case RecordAssistantMessage:
@@ -58,15 +61,21 @@ func (r *Runner) restore(
 				return nil, nil, result, false, err
 			}
 			if len(record.Message.ToolCalls) == 0 {
-				if strings.TrimSpace(record.Message.Content) == "" || index != len(records)-1 {
+				if strings.TrimSpace(record.Message.Content) == "" {
 					return nil, nil, result, false, fmt.Errorf("%w: invalid final response position", ErrCorruptHistory)
 				}
 				result.Content = record.Message.Content
 				messages = append(messages, cloneMessage(record.Message))
-				return messages, seenCallIDs, result, true, nil
+				if index == len(records)-1 {
+					return messages, seenCallIDs, result, true, nil
+				}
+				continue
 			}
-			if err := validateToolCalls(record.Message.ToolCalls, advertised, seenCallIDs); err != nil {
-				return nil, nil, result, false, fmt.Errorf("%w: %v", ErrCorruptHistory, err)
+			if _, err := classifyToolCalls(record.Message.ToolCalls, advertised, seenCallIDs); err != nil {
+				// Unadvertised / invalid calls may already have observation results in history (ADR-052).
+				if !hasToolCallIDs(record.Message.ToolCalls) {
+					return nil, nil, result, false, fmt.Errorf("%w: %v", ErrCorruptHistory, err)
+				}
 			}
 			pending = append(pending[:0], record.Message.ToolCalls...)
 			messages = append(messages, cloneMessage(record.Message))
@@ -77,10 +86,10 @@ func (r *Runner) restore(
 			}
 			response, err := loadToolCall(record.Message.ToolCallID)
 			if err != nil {
-				if !errors.Is(err, ErrRecoveryBlocked) || !isDeniedToolResult(record.Message.Content) {
+				if !errors.Is(err, ErrRecoveryBlocked) || !isObservationToolResult(record.Message.Content) {
 					return nil, nil, result, false, err
 				}
-				// Recoverable deny: history is authoritative; no succeeded tool_calls row.
+				// Recoverable observation (deny/fail/unadvertised): history is authoritative.
 				response = toolapi.Response{
 					CallID: record.Message.ToolCallID, Tool: pending[0].Name,
 					Output: json.RawMessage(record.Message.Content),

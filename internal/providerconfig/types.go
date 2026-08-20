@@ -91,7 +91,7 @@ type ChatConfig struct {
 	Tools *ChatToolsConfig `json:"tools,omitempty"`
 	// Compaction controls session head summarization (ADR-041). Omit → enabled.
 	Compaction *ChatCompactionConfig `json:"compaction,omitempty"`
-	// MaxIterations caps agent tool-loop iterations per chat run (1–64). Omit → 16.
+	// MaxIterations caps agent tool-loop steps per turn (1–256). Omit / 0 → no hard cap (ADR-052).
 	MaxIterations int `json:"max_iterations,omitempty"`
 	// Permission remembers high-risk families (allow). Mode is load-only compatibility.
 	Permission *ChatPermissionConfig `json:"permission,omitempty"`
@@ -233,10 +233,10 @@ func (c ChatConfig) CompactionEnabled() bool {
 	return *c.Compaction.Enabled
 }
 
-// MaxIterationsOrDefault returns MaxIterations or 16 when unset/zero.
+// MaxIterationsOrDefault returns MaxIterations, or 0 (no hard cap) when unset.
 func (c ChatConfig) MaxIterationsOrDefault() int {
-	if c.MaxIterations == 0 {
-		return 16
+	if c.MaxIterations < 0 {
+		return 0
 	}
 	return c.MaxIterations
 }

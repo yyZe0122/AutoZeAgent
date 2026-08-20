@@ -139,3 +139,42 @@ func (m model) pollPermissionsCmd(autoOpen bool) tea.Cmd {
 		return permPollDoneMsg{permissions: items, openList: autoOpen && len(items) > 0}
 	}
 }
+
+func (m model) pollQuestionsCmd(autoOpen bool) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+		defer cancel()
+		sessionID := strings.TrimSpace(string(m.sessionID))
+		if sessionID == "…" {
+			sessionID = ""
+		}
+		items, err := m.gateway.ListQuestions(ctx, sessionID, 20)
+		if err != nil {
+			return questionPollDoneMsg{err: err}
+		}
+		return questionPollDoneMsg{questions: items, openList: autoOpen && len(items) > 0}
+	}
+}
+
+func (m model) answerQuestionCmd(id string, answers map[string][]string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+		defer cancel()
+		_, err := m.gateway.AnswerQuestion(ctx, id, "local-user", answers)
+		if err != nil {
+			return commandDoneMsg{err: err}
+		}
+		sessionID := strings.TrimSpace(string(m.sessionID))
+		if sessionID == "…" {
+			sessionID = ""
+		}
+		remaining, _ := m.gateway.ListQuestions(ctx, sessionID, 20)
+		msg := commandDoneMsg{status: "answered " + shortID(id), questions: remaining}
+		if len(remaining) == 0 {
+			msg.closeList = true
+		} else {
+			msg.openList = listQuestions
+		}
+		return msg
+	}
+}

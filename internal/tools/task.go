@@ -15,6 +15,7 @@ import (
 	"github.com/yyZe0122/yunmengze-agent/internal/agent"
 	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
 	"github.com/yyZe0122/yunmengze-agent/internal/policy"
+	"github.com/yyZe0122/yunmengze-agent/internal/providerconfig"
 	"github.com/yyZe0122/yunmengze-agent/internal/runmeta"
 	"github.com/yyZe0122/yunmengze-agent/internal/version"
 	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
@@ -34,6 +35,14 @@ func taskSystemPrompt() string {
 	return "You are a sub-agent of YunmengZe Agent " + version.Version + ". " + taskSystemPromptBody
 }
 
+func childPrefixMessages(configDir, workspace, prompt string) []providerapi.Message {
+	msgs := []providerapi.Message{{Role: providerapi.RoleSystem, Content: taskSystemPrompt()}}
+	if overlay := providerconfig.OverlayAgents(configDir, workspace); overlay != "" {
+		msgs = append(msgs, providerapi.Message{Role: providerapi.RoleSystem, Content: overlay})
+	}
+	return append(msgs, providerapi.Message{Role: providerapi.RoleUser, Content: prompt})
+}
+
 // SubagentRunner runs a child agent loop. Implemented by *agent.Runner.
 type SubagentRunner interface {
 	Run(context.Context, agent.RunRequest) (agent.Result, error)
@@ -41,18 +50,22 @@ type SubagentRunner interface {
 
 // TaskToolConfig wires the ADR-039 task builtin.
 type TaskToolConfig struct {
-	DB       *sql.DB
-	Runner   SubagentRunner
-	MaxDepth int
-	Now      func() time.Time
+	DB        *sql.DB
+	Runner    SubagentRunner
+	MaxDepth  int
+	Now       func() time.Time
+	ConfigDir string
+	Workspace string
 }
 
 type taskTool struct {
-	db       *sql.DB
-	mu       sync.RWMutex
-	runner   SubagentRunner
-	maxDepth int
-	now      func() time.Time
+	db        *sql.DB
+	mu        sync.RWMutex
+	runner    SubagentRunner
+	maxDepth  int
+	now       func() time.Time
+	configDir string
+	workspace string
 }
 
 // NewTaskTool builds the task tool. Call SetRunner after agent construction if needed.
@@ -68,7 +81,10 @@ func NewTaskTool(config TaskToolConfig) (*taskTool, error) {
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
-	return &taskTool{db: config.DB, runner: config.Runner, maxDepth: maxDepth, now: now}, nil
+	return &taskTool{
+		db: config.DB, runner: config.Runner, maxDepth: maxDepth, now: now,
+		configDir: strings.TrimSpace(config.ConfigDir), workspace: strings.TrimSpace(config.Workspace),
+	}, nil
 }
 
 // SetRunner attaches the agent runner (composition root may set after agent.New).
@@ -76,6 +92,16 @@ func (t *taskTool) SetRunner(runner SubagentRunner) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.runner = runner
+}
+
+func (t *taskTool) SetAgentsOverlay(configDir, workspace string) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.configDir = strings.TrimSpace(configDir)
+	t.workspace = strings.TrimSpace(workspace)
 }
 
 func (t *taskTool) Definition() toolapi.Definition {
@@ -142,6 +168,9 @@ func (t *taskTool) Execute(ctx context.Context, raw json.RawMessage) (json.RawMe
 	}
 
 	allowed := filterChildTools(parent.AllowedTools, input.Tools)
+	t.mu.RLock()
+	configDir, workspace := t.configDir, t.workspace
+	t.mu.RUnlock()
 	childRunID := childRunID(parent.RunID, prompt)
 	if callID := strings.TrimSpace(parent.CallID); callID != "" {
 		childRunID = childRunIDFromCall(parent.RunID, callID)
@@ -155,10 +184,7 @@ func (t *taskTool) Execute(ctx context.Context, raw json.RawMessage) (json.RawMe
 		RunID: childRunID, TaskID: parent.TaskID, SessionID: parent.SessionID,
 		PlanID: parent.PlanID, PlanHash: parent.PlanHash, StepID: parent.StepID,
 		Actor: parent.Actor, TraceID: parent.TraceID, Interactive: parent.Interactive,
-		Messages: []providerapi.Message{
-			{Role: providerapi.RoleSystem, Content: taskSystemPrompt()},
-			{Role: providerapi.RoleUser, Content: prompt},
-		},
+		Messages:           childPrefixMessages(configDir, workspace, prompt),
 		AllowedTools:       allowed,
 		CapabilityGrantIDs: parent.CapabilityGrantIDs,
 		MaxOutputTokens:    parent.MaxOutputTokens,

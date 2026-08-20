@@ -34,7 +34,7 @@ func newHTTPGetTool(maximumBytes int64) Tool {
 
 func (t *httpGetTool) Definition() toolapi.Definition {
 	return toolapi.Definition{
-		Name: "http_get", Description: "Perform an approved HTTP or HTTPS GET without redirects.",
+		Name: "http_get", Description: "HTTP/HTTPS GET without redirects. Interactive agent waits /perm (similar = that host). SSRF baseline blocks localhost/private/link-local. Plan and cron never receive this grant. Do not use process_shell to fetch URLs.",
 		Risk: string(policy.RiskR2), DefaultTimeoutMillis: 30000,
 		InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false,"required":["url"],"properties":{"url":{"type":"string"},"max_bytes":{"type":"integer","minimum":1}}}`),
 	}

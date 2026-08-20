@@ -335,6 +335,64 @@ func (a *API) handleSessionContext(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, item)
 }
 
+func (a *API) handleQuestions(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	if a.userQuestions == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"questions": []UserQuestionView{}})
+		return
+	}
+	sessionID := strings.TrimSpace(r.URL.Query().Get("session_id"))
+	limit := 50
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	items, err := a.userQuestions.ListPending(r.Context(), sessionID, limit)
+	if err != nil {
+		writeInternal(w, err)
+		return
+	}
+	if items == nil {
+		items = []UserQuestionView{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"questions": items})
+}
+
+func (a *API) handleQuestionAnswer(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if a.userQuestions == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "user questions are unavailable")
+		return
+	}
+	basePath := strings.TrimSuffix(r.URL.Path, "/answer")
+	id, ok := pathID(w, basePath, "/v1/questions/")
+	if !ok {
+		return
+	}
+	var request struct {
+		Answers map[string][]string `json:"answers"`
+		Actor   string              `json:"actor"`
+	}
+	if err := decodeJSON(w, r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	item, err := a.userQuestions.Answer(r.Context(), id, request.Actor, request.Answers)
+	if err != nil {
+		if writeApplicationError(w, err) {
+			return
+		}
+		writeInternal(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
 func (a *API) handlePermissions(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
@@ -504,6 +562,43 @@ func (a *API) handleSessionRewind(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (a *API) handleSessionSteer(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if a.sessionSteer == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "session steer is unavailable until chat is configured")
+		return
+	}
+	basePath := strings.TrimSuffix(r.URL.Path, "/steer")
+	id, ok := pathID(w, basePath, "/v1/sessions/")
+	if !ok {
+		return
+	}
+	var request struct {
+		Text string `json:"text"`
+	}
+	if err := decodeJSON(w, r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	result, err := a.sessionSteer.Steer(r.Context(), kernel.SessionID(id), request.Text)
+	if err != nil {
+		slog.Warn("session steer failed", runlog.Attrs("gateway", "steer", "failed", runlog.IDs{
+			SessionID: id,
+		}, "error", err)...)
+		if writeApplicationError(w, err) {
+			return
+		}
+		writeInternal(w, err)
+		return
+	}
+	slog.Info("session steer accepted", runlog.Attrs("gateway", "steer", "succeeded", runlog.IDs{
+		SessionID: id, TaskID: string(result.TaskID), RunID: string(result.RunID),
+	})...)
+	writeJSON(w, http.StatusAccepted, result)
 }
 
 func (a *API) handleTaskAction(w http.ResponseWriter, r *http.Request) {

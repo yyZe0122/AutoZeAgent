@@ -1,6 +1,7 @@
 // Package agent runs the provider tool loop through the mandatory Tool Broker.
+// Tool business failures are observations (ADR-052), not turn-ending errors.
 // Chat dual-track orchestration lives in chatsession (ADR-038); child Runs via
-// the task tool are ADR-039 (implementation backlog).
+// the task tool are ADR-039.
 package agent
 
 import (
@@ -18,7 +19,6 @@ var (
 	ErrInvalidRequest      = errors.New("invalid agent request")
 	ErrInvalidToolCall     = errors.New("invalid provider tool call")
 	ErrUnadvertisedTool    = errors.New("provider requested an unadvertised tool")
-	ErrMaxIterations       = errors.New("agent maximum iterations reached")
 	ErrEmptyResponse       = errors.New("provider returned no final response")
 	ErrTokenBudgetExceeded = errors.New("agent token budget exceeded")
 	ErrCostBudgetExceeded  = errors.New("agent cost budget exceeded")
@@ -46,10 +46,12 @@ type RoleEndpoint struct {
 }
 
 type Config struct {
-	Provider      StreamingProvider
-	Broker        ToolBroker
-	Records       *RecordStore
-	Model         string
+	Provider StreamingProvider
+	Broker   ToolBroker
+	Records  *RecordStore
+	Model    string
+	// MaxIterations caps tool-loop steps per turn. 0 = no hard cap (ADR-052 R2).
+	// When set, must be 1–256; the last allowed step is a text-only soft landing.
 	MaxIterations int
 	// MaxToolResultRunes caps tool/assistant Content length on provider
 	// requests only. Zero uses DefaultMaxToolResultRunes. Records stay full.
@@ -88,7 +90,10 @@ type Runner struct {
 	contextStore       *contextpack.Store
 	calibrator         *contextpack.Calibrator
 	transcript         TranscriptIndexer
+	inbox              *Inbox
 }
+
+const MaxIterationsLimit = 256
 
 type RunRequest struct {
 	RunID              string
@@ -147,11 +152,8 @@ func New(config Config) (*Runner, error) {
 		return nil, errors.New("agent model is required")
 	}
 	maxIterations := config.MaxIterations
-	if maxIterations == 0 {
-		maxIterations = 16
-	}
-	if maxIterations < 1 || maxIterations > 64 {
-		return nil, errors.New("agent maximum iterations must be between 1 and 64")
+	if maxIterations < 0 || maxIterations > MaxIterationsLimit {
+		return nil, errors.New("agent maximum iterations must be between 0 and 256 (0 = no hard cap)")
 	}
 	maxToolResultRunes := config.MaxToolResultRunes
 	if maxToolResultRunes <= 0 {
@@ -173,7 +175,16 @@ func New(config Config) (*Runner, error) {
 		model: model, maxIterations: maxIterations, maxToolResultRunes: maxToolResultRunes,
 		contextWindow: config.ContextWindow, roles: roles, stream: config.Stream,
 		contextStore: config.Context, calibrator: cal, transcript: config.Transcript,
+		inbox: NewInbox(),
 	}, nil
+}
+
+// Inbox is the process-local next-step queue (ADR-052).
+func (r *Runner) Inbox() *Inbox {
+	if r == nil {
+		return nil
+	}
+	return r.inbox
 }
 
 // SetContextWindow updates the model context length used for packing.

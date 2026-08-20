@@ -188,6 +188,12 @@ func (m model) applyCommand(msg commandDoneMsg) (tea.Model, tea.Cmd) {
 			m.autoOpenedPermList = false
 		}
 	}
+	if msg.questions != nil {
+		m.questions = msg.questions
+		if len(m.questions) == 0 {
+			m.autoOpenedQList = false
+		}
+	}
 	if msg.skillIDs != nil {
 		m.selectedSkillIDs = append([]string(nil), msg.skillIDs...)
 	}
@@ -242,6 +248,8 @@ func (m model) applyCommand(msg commandDoneMsg) (tea.Model, tea.Cmd) {
 		m.permissions = nil
 		m.pendingPermCount = 0
 		m.autoOpenedPermList = false
+		m.questions = nil
+		m.autoOpenedQList = false
 		if m.list == listPermissions {
 			m.closeList()
 		}

@@ -393,9 +393,31 @@ func planContainsScope(plan PlanDocument, stepID kernel.StepID, scope Capability
 			if slices.Equal(encoded, expected) {
 				return true
 			}
+			if httpGetDomainNarrowing(candidate, scope) {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+// httpGetDomainNarrowing allows issuing a grant whose only difference from a
+// plan http_get scope is filling empty NetworkDomains with a single host.
+func httpGetDomainNarrowing(planScope, grantScope CapabilityScope) bool {
+	if planScope.Capability != "http_get" || grantScope.Capability != "http_get" {
+		return false
+	}
+	if len(planScope.NetworkDomains) != 0 || len(grantScope.NetworkDomains) != 1 {
+		return false
+	}
+	if strings.TrimSpace(grantScope.NetworkDomains[0]) == "" {
+		return false
+	}
+	if planScope.OneTime != grantScope.OneTime || planScope.MaxCalls != grantScope.MaxCalls ||
+		planScope.MaxDurationMillis != grantScope.MaxDurationMillis {
+		return false
+	}
+	return true
 }
 
 func loadGrant(ctx context.Context, tx *sql.Tx, grantID GrantID) (CapabilityGrant, error) {

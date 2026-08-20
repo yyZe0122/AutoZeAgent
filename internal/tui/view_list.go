@@ -29,6 +29,8 @@ func (m *model) listLen() int {
 		return len(m.skills)
 	case listPermissions:
 		return len(m.permissions)
+	case listQuestions:
+		return len(m.questions)
 	default:
 		return 0
 	}
@@ -56,6 +58,12 @@ func (m *model) listTitle() string {
 			return "Permissions"
 		}
 		return fmt.Sprintf("Permissions (%d pending)", n)
+	case listQuestions:
+		n := len(m.questions)
+		if n == 0 {
+			return "Questions"
+		}
+		return fmt.Sprintf("Questions (%d pending)", n)
 	default:
 		return "Picker"
 	}
@@ -75,6 +83,8 @@ func (m *model) listHint() string {
 		return "↑↓ · Enter toggle · Esc done (applies to next submit)"
 	case listPermissions:
 		return "↑↓ · 1 once · 2 similar · 3 permanent · 4 deny · Enter cycle · Esc · /perm …"
+	case listQuestions:
+		return "↑↓ question · 1–9 option · Enter first option · Esc"
 	default:
 		return "↑↓ · Enter · Esc"
 	}
@@ -166,6 +176,20 @@ func (m *model) listLine(i int) string {
 			styleDim.Render(p.Risk),
 			styleDim.Render(hint),
 		)
+	case listQuestions:
+		if i < 0 || i >= len(m.questions) {
+			return ""
+		}
+		q := m.questions[i]
+		head := q.ID
+		if len(q.Questions) > 0 {
+			label := q.Questions[0].Question
+			if q.Questions[0].Header != "" {
+				label = q.Questions[0].Header + ": " + label
+			}
+			head = truncate(label, 56)
+		}
+		return fmt.Sprintf("%s  %s", shortID(q.ID), head)
 	default:
 		if i < 0 || i >= len(m.tasks) {
 			return ""
@@ -250,6 +274,8 @@ func renderPickerOverlay(m *model, width int) string {
 			empty = "No skills found. Add <id>/SKILL.md under config or .yunmengze/skills."
 		case listPermissions:
 			empty = "No pending permissions. (Agent mode + ungranted high-risk tools)"
+		case listQuestions:
+			empty = "No pending questions."
 		default:
 			empty = "No tasks yet."
 		}
@@ -406,9 +432,35 @@ func (m *model) listEnter() tea.Cmd {
 		m.permCycleIdx = (m.permCycleIdx + 1) % len(permCycleOrder)
 		m.busy = true
 		return m.permDecideCmd(p.ID, decision)
+	case listQuestions:
+		if m.selectedIdx < 0 || m.selectedIdx >= len(m.questions) {
+			return nil
+		}
+		return m.answerSelectedQuestion(0)
 	default:
 		return nil
 	}
+}
+
+func (m *model) answerSelectedQuestion(optionIdx int) tea.Cmd {
+	if m.selectedIdx < 0 || m.selectedIdx >= len(m.questions) {
+		return nil
+	}
+	q := m.questions[m.selectedIdx]
+	if len(q.Questions) == 0 {
+		return nil
+	}
+	item := q.Questions[0]
+	label := strings.TrimSpace(item.Question)
+	if len(item.Options) > 0 {
+		if optionIdx < 0 || optionIdx >= len(item.Options) {
+			return nil
+		}
+		label = item.Options[optionIdx].Label
+	}
+	answers := map[string][]string{item.ID: {label}}
+	m.busy = true
+	return m.answerQuestionCmd(q.ID, answers)
 }
 
 func (m *model) focusSessionAt(i int) tea.Cmd {

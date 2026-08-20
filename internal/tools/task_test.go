@@ -8,7 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"os"
+
 	"github.com/yyZe0122/yunmengze-agent/internal/agent"
+	"github.com/yyZe0122/yunmengze-agent/internal/providerconfig"
 	"github.com/yyZe0122/yunmengze-agent/internal/runmeta"
 	coresqlite "github.com/yyZe0122/yunmengze-agent/internal/store/sqlite"
 	"github.com/yyZe0122/yunmengze-agent/internal/version"
@@ -133,7 +136,61 @@ func TestTaskToolSpawnsChildRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	if state != "completed" {
-		t.Fatalf("state = %s", state)
+		t.Fatalf("child run state = %q", state)
+	}
+}
+
+func TestTaskToolInjectsAgentsOverlay(t *testing.T) {
+	ctx := context.Background()
+	database, err := coresqlite.Open(ctx, filepath.Join(t.TempDir(), "core.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	db := database.SQL()
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{"INSERT INTO sessions(session_id,state,created_at,updated_at) VALUES(?,?,?,?)", []any{"s1", "active", stamp, stamp}},
+		{"INSERT INTO tasks(task_id,session_id,title,objective,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?)", []any{"t1", "s1", "T", "O", "running", stamp, stamp}},
+		{"INSERT INTO plans(plan_id,task_id,revision,state,scope_hash,created_at,updated_at,document) VALUES(?,?,?,?,?,?,?,?)", []any{"p1", "t1", 1, "approved", "h1", stamp, stamp, `{}`}},
+		{"INSERT INTO plan_steps(step_id,plan_id,position,title,state,effect_level,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)", []any{"step1", "p1", 0, "S", "running", "R1", stamp, stamp}},
+		{"INSERT INTO runs(run_id,task_id,plan_id,state,started_at,updated_at,step_id) VALUES(?,?,?,?,?,?,?)", []any{"parent-run", "t1", "p1", "running", stamp, stamp, "step1"}},
+	} {
+		if _, err := db.Exec(q.sql, q.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := t.TempDir()
+	if err := os.WriteFile(filepath.Join(cfg, providerconfig.AgentsFilename), []byte("全局：子代理也要遵守"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stub := &stubSubagent{body: "ok"}
+	tool, err := NewTaskTool(TaskToolConfig{DB: db, Runner: stub, ConfigDir: cfg, Now: func() time.Time {
+		return time.Date(2026, 8, 17, 15, 0, 0, 0, time.UTC)
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentCtx := runmeta.With(ctx, runmeta.Context{
+		RunID: "parent-run", TaskID: "t1", SessionID: "s1", PlanID: "p1", PlanHash: "h1",
+		StepID: "step1", Actor: "agent", TraceID: "tr",
+		AllowedTools: []string{"fs_read", "task"}, Depth: 0, CallID: "call-agents",
+	})
+	args, _ := json.Marshal(map[string]any{"prompt": "do it"})
+	if _, err := tool.Execute(parentCtx, args); err != nil {
+		t.Fatal(err)
+	}
+	joined := ""
+	for _, m := range stub.last.Messages {
+		if m.Role == providerapi.RoleSystem {
+			joined += m.Content + "\n"
+		}
+	}
+	if !strings.Contains(joined, "全局：子代理也要遵守") {
+		t.Fatalf("child missing AGENTS: %q", joined)
 	}
 }
 

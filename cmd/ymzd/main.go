@@ -85,7 +85,7 @@ func run(args []string) error {
 	}
 
 	taskSubmissionService, taskControl, skillMaintain, schedulerStore, core, err := wireAppAndJobs(
-		stores, stack, chat, skillCatalog, layout,
+		stores, stack, chat, skillCatalog, layout, workingDirectory,
 	)
 	if err != nil {
 		return err

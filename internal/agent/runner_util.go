@@ -29,12 +29,15 @@ func selectDefinitions(all []toolapi.Definition, allowed []string) ([]providerap
 	definitions := make([]providerapi.ToolDefinition, 0, len(allowed))
 	for _, rawName := range allowed {
 		name := strings.TrimSpace(rawName)
+		if name == "" {
+			continue
+		}
 		definition, exists := available[name]
-		if name == "" || !exists {
+		if !exists {
 			return nil, nil, fmt.Errorf("%w: unknown allowed tool %q", ErrInvalidRequest, rawName)
 		}
 		if _, duplicate := advertised[name]; duplicate {
-			return nil, nil, fmt.Errorf("%w: duplicate allowed tool %q", ErrInvalidRequest, name)
+			continue
 		}
 		advertised[name] = struct{}{}
 		definitions = append(definitions, providerapi.ToolDefinition{
@@ -44,27 +47,59 @@ func selectDefinitions(all []toolapi.Definition, allowed []string) ([]providerap
 	return definitions, advertised, nil
 }
 
-func validateToolCalls(calls []providerapi.ToolCall, advertised, seen map[string]struct{}) error {
+// classifyToolCalls marks call IDs as seen and reports the first protocol error.
+// Agent execution treats those errors as observations (ADR-052); this helper stays
+// for tests that still assert the classification.
+func classifyToolCalls(calls []providerapi.ToolCall, advertised, seen map[string]struct{}) ([]toolCallObservation, error) {
 	batch := make(map[string]struct{}, len(calls))
+	out := make([]toolCallObservation, 0, len(calls))
+	var first error
 	for _, call := range calls {
-		if strings.TrimSpace(call.ID) == "" || strings.TrimSpace(call.Name) == "" || !json.Valid([]byte(call.Arguments)) {
-			return ErrInvalidToolCall
+		obs := inspectToolCall(call, advertised, seen, batch)
+		out = append(out, obs)
+		if obs.Kind != "" && first == nil {
+			first = obs.err()
 		}
-		if _, exists := advertised[call.Name]; !exists {
-			return fmt.Errorf("%w: %s", ErrUnadvertisedTool, call.Name)
+		if id := strings.TrimSpace(call.ID); id != "" {
+			batch[id] = struct{}{}
+			seen[id] = struct{}{}
 		}
-		if _, duplicate := seen[call.ID]; duplicate {
-			return fmt.Errorf("%w: duplicate call ID %s", ErrInvalidToolCall, call.ID)
-		}
-		if _, duplicate := batch[call.ID]; duplicate {
-			return fmt.Errorf("%w: duplicate call ID %s", ErrInvalidToolCall, call.ID)
-		}
-		batch[call.ID] = struct{}{}
 	}
-	for callID := range batch {
-		seen[callID] = struct{}{}
+	return out, first
+}
+
+type toolCallObservation struct {
+	Call providerapi.ToolCall
+	Kind string
+}
+
+func (o toolCallObservation) err() error {
+	switch o.Kind {
+	case "unadvertised_tool":
+		return fmt.Errorf("%w: %s", ErrUnadvertisedTool, o.Call.Name)
+	case "invalid_tool_call":
+		return ErrInvalidToolCall
+	default:
+		return nil
 	}
-	return nil
+}
+
+func inspectToolCall(call providerapi.ToolCall, advertised, seen, batch map[string]struct{}) toolCallObservation {
+	id := strings.TrimSpace(call.ID)
+	name := strings.TrimSpace(call.Name)
+	if id == "" || name == "" || !json.Valid([]byte(call.Arguments)) {
+		return toolCallObservation{Call: call, Kind: "invalid_tool_call"}
+	}
+	if _, exists := advertised[name]; !exists {
+		return toolCallObservation{Call: call, Kind: "unadvertised_tool"}
+	}
+	if _, duplicate := seen[id]; duplicate {
+		return toolCallObservation{Call: call, Kind: "invalid_tool_call"}
+	}
+	if _, duplicate := batch[id]; duplicate {
+		return toolCallObservation{Call: call, Kind: "invalid_tool_call"}
+	}
+	return toolCallObservation{Call: call}
 }
 
 func toolResultMatches(response toolapi.Response, content string) (bool, error) {
@@ -97,27 +132,73 @@ func toolResultContent(response toolapi.Response) (string, error) {
 }
 
 func toolDeniedContent(call providerapi.ToolCall, err error) string {
+	return toolObservationJSON("tool_denied", call, err, "Do not retry the same arguments. Fix the tool input: prefer absolute paths under configured workspace roots; relative paths are resolved against the workspace root; keep duration within the approved grant; use only allowed tools and paths.")
+}
+
+func toolFailedContent(call providerapi.ToolCall, err error) string {
+	return toolObservationJSON("tool_failed", call, err, "Read the error and tool output. Do not claim the tool succeeded. Fix the input or approach, then retry if useful.")
+}
+
+func toolCallRejectedContent(obs toolCallObservation) string {
+	kind := obs.Kind
+	if kind == "" {
+		kind = "invalid_tool_call"
+	}
+	hint := "Do not retry this call as-is. Use an advertised tool name and valid JSON arguments."
+	if kind == "unadvertised_tool" {
+		hint = "That tool is not available in this turn. Use an advertised tool or ask the user to switch mode / grant permission."
+	}
+	return toolObservationJSON(kind, obs.Call, obs.err(), hint)
+}
+
+func toolObservationJSON(kind string, call providerapi.ToolCall, err error, hint string) string {
+	message := kind
+	if err != nil {
+		message = err.Error()
+	}
 	payload := map[string]any{
-		"error":   "tool_denied",
+		"error":   kind,
 		"tool":    call.Name,
-		"message": err.Error(),
-		"hint":    "Do not retry the same arguments. Fix the tool input: prefer absolute paths under configured workspace roots; relative paths are resolved against the workspace root; keep duration within the approved grant; use only allowed tools and paths.",
+		"message": message,
+		"hint":    hint,
 	}
 	encoded, marshalErr := json.Marshal(payload)
 	if marshalErr != nil {
-		return `{"error":"tool_denied","message":"tool call denied"}`
+		return `{"error":"` + kind + `","message":"tool call failed"}`
 	}
 	return string(encoded)
 }
 
 func isDeniedToolResult(content string) bool {
+	return observationKind(content) == "tool_denied"
+}
+
+func isObservationToolResult(content string) bool {
+	switch observationKind(content) {
+	case "tool_denied", "tool_failed", "unadvertised_tool", "invalid_tool_call", "unknown_tool":
+		return true
+	default:
+		return false
+	}
+}
+
+func observationKind(content string) string {
 	var payload struct {
 		Error string `json:"error"`
 	}
 	if err := json.Unmarshal([]byte(content), &payload); err != nil {
-		return false
+		return ""
 	}
-	return payload.Error == "tool_denied"
+	return payload.Error
+}
+
+func hasToolCallIDs(calls []providerapi.ToolCall) bool {
+	for _, call := range calls {
+		if strings.TrimSpace(call.ID) == "" {
+			return false
+		}
+	}
+	return len(calls) > 0
 }
 
 func addUsage(total *providerapi.Usage, next providerapi.Usage) {

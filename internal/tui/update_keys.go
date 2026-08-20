@@ -25,6 +25,12 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.permDecideCmd(p.ID, decision)
 		}
 	}
+	if m.list == listQuestions && msg.Type == tea.KeyRunes && len(msg.Runes) == 1 {
+		r := msg.Runes[0]
+		if r >= '1' && r <= '9' {
+			return m, m.answerSelectedQuestion(int(r - '1'))
+		}
+	}
 
 	switch msg.Type {
 	case tea.KeyCtrlC:
@@ -287,7 +293,9 @@ func (m *model) optimisticNew(line string) (tea.Cmd, bool) {
 		CreatedAt: now,
 	})
 	m.timeline = buildChatTimeline(m.messages, m.task, m.plan, m.runs)
-	if m.sessionID != "" {
+	if m.canSteer() {
+		m.statusMsg = "steering…"
+	} else if m.sessionID != "" {
 		m.statusMsg = "sending…"
 	} else {
 		m.statusMsg = "starting session…"

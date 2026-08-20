@@ -33,6 +33,63 @@ type permissionListResponse struct {
 }
 
 // ListPermissions returns pending tool permissions (optional session filter).
+type UserQuestionOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+}
+
+type UserQuestionItem struct {
+	ID          string               `json:"id"`
+	Question    string               `json:"question"`
+	Header      string               `json:"header,omitempty"`
+	Options     []UserQuestionOption `json:"options,omitempty"`
+	MultiSelect bool                 `json:"multi_select,omitempty"`
+}
+
+type UserQuestion struct {
+	ID        string              `json:"question_id"`
+	SessionID string              `json:"session_id,omitempty"`
+	TaskID    string              `json:"task_id,omitempty"`
+	RunID     string              `json:"run_id,omitempty"`
+	Questions []UserQuestionItem  `json:"questions"`
+	State     string              `json:"state"`
+	Answers   map[string][]string `json:"answers,omitempty"`
+	CreatedAt string              `json:"created_at"`
+}
+
+type questionListResponse struct {
+	Questions []UserQuestion `json:"questions"`
+}
+
+func (c *Client) ListQuestions(ctx context.Context, sessionID string, limit int) ([]UserQuestion, error) {
+	path := "/v1/questions"
+	q := url.Values{}
+	if s := strings.TrimSpace(sessionID); s != "" {
+		q.Set("session_id", s)
+	}
+	if limit > 0 {
+		q.Set("limit", fmt.Sprintf("%d", limit))
+	}
+	if enc := q.Encode(); enc != "" {
+		path += "?" + enc
+	}
+	var response questionListResponse
+	if err := c.inner.DoJSON(ctx, http.MethodGet, path, nil, &response); err != nil {
+		return nil, fmt.Errorf("list questions: %w", err)
+	}
+	return response.Questions, nil
+}
+
+func (c *Client) AnswerQuestion(ctx context.Context, id, actor string, answers map[string][]string) (UserQuestion, error) {
+	var result UserQuestion
+	body := map[string]any{"answers": answers, "actor": strings.TrimSpace(actor)}
+	path := "/v1/questions/" + url.PathEscape(strings.TrimSpace(id)) + "/answer"
+	if err := c.inner.DoJSON(ctx, http.MethodPost, path, body, &result); err != nil {
+		return UserQuestion{}, fmt.Errorf("answer question: %w", err)
+	}
+	return result, nil
+}
+
 func (c *Client) ListPermissions(ctx context.Context, sessionID string, limit int) ([]Permission, error) {
 	path := "/v1/permissions"
 	q := url.Values{}

@@ -152,7 +152,29 @@ func (m *model) shouldPollPermissions() bool {
 	if m.needsRunPoll() {
 		return true
 	}
-	return m.pendingPermCount > 0
+	return m.pendingPermCount > 0 || len(m.questions) > 0
+}
+
+func (m model) applyQuestionPoll(msg questionPollDoneMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		return m, nil
+	}
+	prev := len(m.questions)
+	m.questions = msg.questions
+	if len(m.questions) == 0 {
+		m.autoOpenedQList = false
+		if m.list == listQuestions {
+			m.closeList()
+		}
+	} else if msg.openList && prev == 0 && m.list == listNone && m.pendingPermCount == 0 {
+		m.openList(listQuestions)
+		m.autoOpenedQList = true
+		m.statusMsg = fmt.Sprintf("%d question(s) · 1–9 pick option · Enter first option · Esc", len(m.questions))
+	} else if m.list == listQuestions && m.selectedIdx >= len(m.questions) && len(m.questions) > 0 {
+		m.selectedIdx = len(m.questions) - 1
+	}
+	m.layout()
+	return m, nil
 }
 
 func (m model) applySSE(envelope eventapi.Envelope) (tea.Model, tea.Cmd) {
@@ -167,6 +189,16 @@ func (m model) applySSE(envelope eventapi.Envelope) (tea.Model, tea.Cmd) {
 		}
 		autoOpen := !m.autoOpenedPermList && m.list == listNone && !m.completer.visible
 		return m, m.pollPermissionsCmd(autoOpen)
+	}
+	if strings.HasPrefix(typ, "question.") {
+		if m.sessionID == "" || m.sessionID == "…" {
+			return m, nil
+		}
+		if m.pendingPermCount > 0 || m.list == listPermissions {
+			return m, nil
+		}
+		autoOpen := !m.autoOpenedQList && m.list == listNone && !m.completer.visible
+		return m, m.pollQuestionsCmd(autoOpen)
 	}
 	var kind refreshKind
 	switch {

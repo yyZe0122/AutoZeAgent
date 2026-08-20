@@ -2,6 +2,7 @@ package chatsession
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/yyZe0122/yunmengze-agent/internal/kernel"
 	"github.com/yyZe0122/yunmengze-agent/internal/providerconfig"
+	"github.com/yyZe0122/yunmengze-agent/internal/skillcatalog"
 	storesqlite "github.com/yyZe0122/yunmengze-agent/internal/store/sqlite"
 	"github.com/yyZe0122/yunmengze-agent/pkg/providerapi"
 )
@@ -23,6 +25,14 @@ type fakeAgent struct {
 	mu      sync.Mutex
 	request agent.RunRequest
 	done    chan struct{}
+	inbox   *agent.Inbox
+}
+
+func (f *fakeAgent) Inbox() *agent.Inbox {
+	if f.inbox == nil {
+		f.inbox = agent.NewInbox()
+	}
+	return f.inbox
 }
 
 func (f *fakeAgent) Run(_ context.Context, request agent.RunRequest) (agent.Result, error) {
@@ -36,6 +46,14 @@ func (f *fakeAgent) Run(_ context.Context, request agent.RunRequest) (agent.Resu
 // blockingAgent waits until ctx is canceled (ControlTask interrupt path).
 type blockingAgent struct {
 	started chan struct{}
+	inbox   *agent.Inbox
+}
+
+func (b *blockingAgent) Inbox() *agent.Inbox {
+	if b.inbox == nil {
+		b.inbox = agent.NewInbox()
+	}
+	return b.inbox
 }
 
 func (b *blockingAgent) Run(ctx context.Context, _ agent.RunRequest) (agent.Result, error) {
@@ -245,6 +263,83 @@ func TestStartChatInjectsAgentsMarkdown(t *testing.T) {
 	}
 	if !strings.Contains(joined, "YunmengZe Agent") || !strings.Contains(joined, "No vision") {
 		t.Fatalf("identity missing: %q", joined)
+	}
+}
+
+func TestStartChatInjectsSkillCatalog(t *testing.T) {
+	ctx := context.Background()
+	database, err := storesqlite.Open(ctx, t.TempDir()+"/core.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	db := database.SQL()
+	repo, err := kernel.NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvals, err := approval.NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queries, err := corequery.New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	root := t.TempDir()
+	skillDir := filepath.Join(root, "go-test")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: Go tests\ndescription: run package tests\n---\ngo test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cat, diags := skillcatalog.Discover([]skillcatalog.Root{{Path: root, Source: skillcatalog.SourceUser}})
+	if len(diags) > 0 {
+		t.Fatalf("discover: %v", diags)
+	}
+	session, err := repo.CreateSession(ctx, "session-catalog", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := repo.CreateTaskWithSkillSnapshot(ctx, "task-catalog", session.ID, "hi", "hi", nil, "", kernel.ExecutionModeAgent, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeAgent{done: make(chan struct{})}
+	svc, err := New(Config{
+		DB: db, Repository: repo, Approvals: approvals, Agent: fake, Transcript: queries,
+		WorkspaceRoots: []string{t.TempDir()}, Skills: cat, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.StartChat(ctx, StartRequest{Task: task, Actor: "test", UserText: "hi"}); err != nil {
+		t.Fatalf("StartChat: %v", err)
+	}
+	select {
+	case <-fake.done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("agent.Run not called")
+	}
+	fake.mu.Lock()
+	req := fake.request
+	fake.mu.Unlock()
+	joined := ""
+	for _, m := range req.Messages {
+		if m.Role == providerapi.RoleSystem {
+			joined += m.Content + "\n"
+		}
+	}
+	if !strings.Contains(joined, "go-test") || !strings.Contains(joined, "run package tests") {
+		t.Fatalf("skill catalog missing: %q", joined)
+	}
+	if !containsTool(req.AllowedTools, "http_get") {
+		t.Fatalf("agent must advertise http_get: %v", req.AllowedTools)
+	}
+	if n := countTool(req.AllowedTools, "http_get"); n != 1 {
+		t.Fatalf("http_get advertised %d times: %v", n, req.AllowedTools)
 	}
 }
 
@@ -577,6 +672,17 @@ func TestInterruptCancelsActiveChatRun(t *testing.T) {
 		t.Fatal("agent did not start")
 	}
 
+	steered, err := svc.Steer(ctx, session.ID, "change direction")
+	if err != nil {
+		t.Fatalf("Steer while running: %v", err)
+	}
+	if steered.TaskID != task.ID || steered.RunID != result.RunID {
+		t.Fatalf("steer ids = %+v", steered)
+	}
+	if !blocker.Inbox().Pending(string(session.ID)) {
+		t.Fatal("steer should sit in inbox until claimed or cancelled")
+	}
+
 	// Simulate ControlTask cancel: transition task then interrupt chat.
 	task, err = repo.GetTask(ctx, task.ID)
 	if err != nil {
@@ -589,6 +695,7 @@ func TestInterruptCancelsActiveChatRun(t *testing.T) {
 	if cancelled.State != kernel.TaskCancelled {
 		t.Fatalf("task state = %s", cancelled.State)
 	}
+
 	svc.Interrupt(task.ID)
 
 	deadline := time.Now().Add(3 * time.Second)
@@ -612,6 +719,9 @@ func TestInterruptCancelsActiveChatRun(t *testing.T) {
 	}
 	if got.State != kernel.TaskCancelled {
 		t.Fatalf("task state after interrupt = %s, want cancelled", got.State)
+	}
+	if blocker.Inbox().Pending(string(session.ID)) {
+		t.Fatal("cancel must clear next-step inbox so the next turn cannot replay steer")
 	}
 }
 
@@ -751,13 +861,13 @@ func TestStartChatPlanModeReadOnlyGrants(t *testing.T) {
 	fake.mu.Unlock()
 	for _, name := range req.AllowedTools {
 		switch name {
-		case "fs_read", "fs_list", "fs_stat", "fs_glob", "fs_grep", "task", "memory_search", "session_search", "skills_list", "skill_view", "todo_list", "todo_write":
+		case "fs_read", "fs_list", "fs_stat", "fs_glob", "fs_grep", "task", "memory_search", "session_search", "skills_list", "skill_view", "todo_list", "todo_write", "ask_user":
 		default:
 			t.Fatalf("plan mode must not allow %q; tools=%v", name, req.AllowedTools)
 		}
 	}
-	if len(req.AllowedTools) != 12 {
-		t.Fatalf("plan tools = %v, want read/list/stat/glob/grep/skills_list/skill_view/task/memory_search/session_search/todo_list/todo_write", req.AllowedTools)
+	if len(req.AllowedTools) != 13 {
+		t.Fatalf("plan tools = %v, want read/list/stat/glob/grep/skills_list/skill_view/task/memory_search/session_search/todo_list/todo_write/ask_user", req.AllowedTools)
 	}
 	if len(req.Messages) < 1 || req.Messages[0].Role != providerapi.RoleSystem {
 		t.Fatalf("messages = %#v", req.Messages)
@@ -920,7 +1030,7 @@ func TestStartChatCronNeverGetsProcessGrant(t *testing.T) {
 	tools := fake.request.AllowedTools
 	fake.mu.Unlock()
 	for _, name := range tools {
-		if name == "process_exec" || name == "process_shell" {
+		if name == "process_exec" || name == "process_shell" || name == "http_get" {
 			t.Fatalf("cron must not grant %s: %v", name, tools)
 		}
 	}
@@ -979,7 +1089,7 @@ func TestStartChatAgentModeWriteGrants(t *testing.T) {
 		"fs_write": true, "fs_patch": true, "fs_mkdir": true,
 		"task": true, "memory_search": true, "memory_write": true,
 		"memory_promote": true, "session_search": true, "skill_draft": true,
-		"skills_list": true, "skill_view": true,
+		"skills_list": true, "skill_view": true, "ask_user": true, "http_get": true,
 	}
 	got := map[string]bool{}
 	for _, name := range req.AllowedTools {
@@ -1172,6 +1282,15 @@ func TestStartChatAgentEmbedsProcessWithoutPregrant(t *testing.T) {
 	if !containsTool(tools, "process_exec") || !containsTool(tools, "process_shell") {
 		t.Fatalf("agent must embed process tools for /perm: %v", tools)
 	}
+	if n := countTool(tools, "process_exec"); n != 1 {
+		t.Fatalf("process_exec advertised %d times, want 1: %v", n, tools)
+	}
+	if n := countTool(tools, "process_shell"); n != 1 {
+		t.Fatalf("process_shell advertised %d times, want 1: %v", n, tools)
+	}
+	if n := countTool(tools, "git_status"); n != 1 {
+		t.Fatalf("git_status advertised %d times, want 1: %v", n, tools)
+	}
 	if len(grants["process_exec"]) != 0 || len(grants["process_shell"]) != 0 {
 		t.Fatalf("agent must not pre-issue process grants: %v", grants)
 	}
@@ -1244,11 +1363,54 @@ func TestStartChatAutoPregrantsProcess(t *testing.T) {
 	}
 }
 
+func TestSteerIdleSessionFails(t *testing.T) {
+	ctx := context.Background()
+	database, err := storesqlite.Open(ctx, t.TempDir()+"/core.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	db := database.SQL()
+	repo, err := kernel.NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvals, err := approval.NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queries, err := corequery.New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	session, err := repo.CreateSession(ctx, "session-idle-steer", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err := New(Config{
+		DB: db, Repository: repo, Approvals: approvals, Agent: &fakeAgent{done: make(chan struct{})}, Transcript: queries,
+		WorkspaceRoots: []string{t.TempDir()}, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.Steer(ctx, session.ID, "hello")
+	if err == nil || (!errors.Is(err, ErrTurnNotRunning) && !strings.Contains(err.Error(), "no running")) {
+		t.Fatalf("idle steer err = %v", err)
+	}
+}
+
 func containsTool(tools []string, name string) bool {
+	return countTool(tools, name) > 0
+}
+
+func countTool(tools []string, name string) int {
+	n := 0
 	for _, item := range tools {
 		if item == name {
-			return true
+			n++
 		}
 	}
-	return false
+	return n
 }
