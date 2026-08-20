@@ -2,7 +2,7 @@
 
 Numbered ADRs plus the `core.db` map. Catalog: [`docs/README.md`](../README.md).
 
-Living status / backlog (only): [`docs/backlog/current.md`](../backlog/current.md). **当前线 v0.3.0**（TUI `/new` + 划选）。Phase Q + Q-harden = v0.2.8。Phase R（ADR-052）R1–R5 已落地。下一优先：O5–O6 / H2 / M*（等用户再提）。  
+Living status / backlog (only): [`docs/backlog/current.md`](../backlog/current.md). **当前线 v0.3.1**（harness R1–R5 + Tab Auto + 产品 README）。Phase Q + Q-harden = v0.2.8。下一优先：O5–O6 / H2 / M*（等用户再提）。  
 Agent/contributor entry: [`AGENTS.md`](../../AGENTS.md).  
 Database map: [`database.md`](database.md).
 

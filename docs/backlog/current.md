@@ -7,7 +7,7 @@
 ## 现状
 
 生产形态稳定：`ymzd` + CLI·TUI（`ymz`）+ `core.db`。设计知识库：`docs/wiki/`。  
-当前发布线：**v0.3.0**（TUI `/new` 离焦 + 划选复制）。v0.2.8 = Phase Q 编码循环 + Q-harden。
+当前发布线：**v0.3.1**（编码循环 harness + Tab Auto + 产品 README）。v0.3.0 = TUI `/new` 离焦 + 划选。v0.2.8 = Phase Q 编码循环 + Q-harden。
 
 | 对标 | 契约重叠（粗） | 说明 |
 | --- | --- | --- |
@@ -20,7 +20,7 @@
 | Hermes 消息网关 | ~0% | 仅本机 UDS/loopback；**暂不上**飞书/微信（本机编码/定时为主） |
 
 **产品焦点：** 本机编码循环质量（工具观察 + turn/step/inbox + TUI 跟手）+ 简单任务 + 定时任务。通道/SDK 是添头。  
-**下一优先：** O5–O6 / H2 / M* **等用户再提**，不插队。Phase Q + Q-harden = **v0.2.8**。TUI `/new` + 划选 = **v0.3.0**。Phase R = **unreleased**（ADR-052）。
+**下一优先：** O5–O6 / H2 / M* **等用户再提**，不插队。Phase Q + Q-harden = **v0.2.8**。TUI `/new` + 划选 = **v0.3.0**。Phase R + Tab Auto + 产品 README = **v0.3.1**（ADR-052）。
 
 ## 原则（不变）
 
@@ -51,8 +51,9 @@
 | **Q** | QA–QH 编码循环：ContextView · 文件工具 · `process_shell` · session todo · L3 tool 索引 · rewind · TUI Esc/`/undo` | **v0.2.8**（ADR-051 · migration 026） |
 | **Q-harden** | 单 packer（热路径仅 L1）· through 滑窗保 tail · 真 model id · todo 留 Ephemeral · HistoryBudget≤usable · 短编码 prompt | **v0.2.8** |
 | **TUI leave** | `/new` 离焦 ready + cancel 本轮；无焦点丢 stream/refresh/perm SSE；去 bubblezone 划选复制；窄屏不 inflate | **v0.3.0** |
-| **Tab stance** | Tab Plan→Agent→Auto；内核仍 agent\|plan；交互 Agent `/perm`；Auto = session 预授 process+git；`permission.allow` OR `tools.*` | **unreleased** |
-| **R** | 观察合同 · turn/step/inbox · steer · `ask_user` · Prefix 技能目录 · agent `http_get`（plan/cron 不广告） | **unreleased**（ADR-052 · migration 027） |
+| **Tab stance** | Tab Plan→Agent→Auto；内核仍 agent\|plan；交互 Agent `/perm`；Auto = session 预授 process+git；`permission.allow` OR `tools.*` | **v0.3.1** |
+| **R** | 观察合同 · turn/step/inbox · steer · `ask_user` · Prefix 技能目录 · agent `http_get`（plan/cron 不广告） | **v0.3.1**（ADR-052 · migration 027） |
+| **README** | 产品向 README + `README.zh.md`；删过时架构 SVG | **v0.3.1** |
 
 同包大文件拆分已落地（`tui/cmds_*`+`update_*`、`kernel/repository_*`、`tools/fs_*`、`cmd/ymzd/wire_*`）。再拆触发：新 slash / 新聚合 SQL / `ymzd` 接线难 review → 同包再拆。
 
