@@ -1,61 +1,27 @@
 # YunmengZe Agent
 
+本地终端里的编码智能体：失败是观察，TUI 为主。
+
+[English](README.md) | [简体中文](README.zh.md)
+
 [![Go](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go)](https://go.dev/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-alpha-orange.svg)](#status)
 
-Local-first automation agent in Go: durable tasks, dual-track chat (**agent** R/W · **plan** read-only), Tool Broker effects, single SQLite.
-
-本地优先的 Go 自动化智能体：持久任务、双轨会话、受控工具、单库 `core.db`。
+The open-source **local coding agent** for your terminal. A fail-as-observation harness, a Crush-style TUI, and typed tools — not a background job runner with a chat bolted on.
 
 > **Alpha** — review config, workspace roots, and permissions before privileged use.  
 > **Alpha** — 接触重要数据或高权限凭据前，请先核对配置与权限边界。
 
-## Quick start
-
-```bash
-# 1) Install (pick one)
-brew install --cask yyZe0122/tap/ymz          # macOS / Linux
-# scoop bucket add ymz https://github.com/yyZe0122/scoop-bucket && scoop install ymz   # Windows
-
-# 2) API key (recommended)
-#    edit ~/.yunmengze/env  →  DEEPSEEK1_API_KEY=sk-...
-#    or: export DEEPSEEK1_API_KEY=...
-
-# 3) Validate + open TUI (auto-starts daemon)
-ymz config validate --mode user
-ymz
-```
-
-Leave the TUI with `/quit` — **daemon keeps running**. Stop it with `ymz stop`.
-
-```text
-ymzd     long-running daemon
-ymz      CLI + TUI (TUI is primary)
-core.db  single SQLite source of truth
-```
-
-![Architecture](docs/assets/architecture.svg)
-
 ## Features
 
-| | |
-| --- | --- |
-| **Dual-track chat** | **agent** = build with workspace tools · **plan** = same loop, read-only |
-| **Tool Broker** | Only effect path: Policy → Approval → Grant → path limits → Audit |
-| **Local daemon** | Unique per mode; TUI/`run` auto-ensure; `ymz start\|stop\|restart\|status` |
-| **Multi-provider** | Nested catalog per supplier; select `providerId/modelId…` (OpenCode-style) |
-| **Hot-reload** | Main provider stack (~0.5s) while daemon runs — [ADR-048](docs/wiki/adr/048-provider-config-hot-reload.md) |
-| **OpenCode import** | `ymz config import-opencode` → `agent.local.json` (MCP local+remote, `chat.commands`, compaction; warn+drop plugins/LSP) |
-| **Memory · skills · cron · MCP** | In-process memory (`default_ttl` + expired soft-archive), skill drafts + Hermes `skills_list`/`skill_view` + unused archive ([ADR-050](docs/wiki/adr/050-in-process-self-improvement.md)), `AGENTS.md` rules, chat-native jobs, stdio/remote MCP via Broker |
-| **Slash templates** | `chat.commands` → `/<cmd> [args]` expands `$ARGUMENTS` (instruction only; no grants) |
-| **Session model** | `/model prefer` stores preference; chat runs resolve **job pin → prefer → main** (global `/model` unchanged) |
-
-Docs: [`docs/README.md`](docs/README.md) · wiki: [`docs/wiki/`](docs/wiki/) · backlog: [`docs/backlog/current.md`](docs/backlog/current.md) · releases: [`docs/history/changelog/`](docs/history/changelog/)
+- **Coding loop** — tool failures and non-zero exits come back as JSON observations; the turn continues. Steer mid-turn with Enter. Failures are not a dead run.
+- **Plan · Agent · Auto** — Tab cycles **plan** (read-only) → **agent** (writes; `/perm` for tests/git) → **auto** (this session pre-grants process + git).
+- **TUI-first** — bubbles, live markdown, foldable thinking/tools, drag-select copy. CLI is for scripts.
+- **Your models** — OpenAI / Anthropic / Gemini / OpenAI-compatible. `ymz config import-opencode` maps an existing OpenCode config.
+- **Local and bounded** — one daemon, one SQLite `core.db`. Tools only run through the Broker: Policy → Grant → path limits → Audit. No yolo.
 
 ## Install
-
-### Package managers (recommended)
 
 **macOS / Linux** ([Homebrew](https://brew.sh)):
 
@@ -74,30 +40,27 @@ ymz version
 
 Taps update on each GitHub Release.
 
-### Fallback installers
+<details>
+<summary>Fallback installers and from source</summary>
 
-Pin Pre-release tags (or omit `YMZ_VERSION` when a non-prerelease `latest` exists).
+Pin a release tag with `YMZ_VERSION`, or omit it when a non-prerelease `latest` exists.
 
 **Windows** → `%LOCALAPPDATA%\Programs\YunmengZe\bin` + user PATH:
 
 ```powershell
-$env:YMZ_VERSION = 'v0.2.8'
 irm "https://raw.githubusercontent.com/yyZe0122/YunmengZe-Agent/main/packaging/scripts/install.ps1" | iex
 ```
 
 **Linux / macOS** → `~/.local/bin`:
 
 ```bash
-export YMZ_VERSION=v0.2.8
 curl -fsSL "https://raw.githubusercontent.com/yyZe0122/YunmengZe-Agent/main/packaging/scripts/install-user.sh" | sh
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Optional: `YMZ_INSTALL_DIR`, `YMZ_REPOSITORY`. Manual zip/tar: put `ymz` / `ymzd` on PATH (`ymz_{version}_{os}_{arch}`).
+Optional: `YMZ_INSTALL_DIR`, `YMZ_REPOSITORY`, `YMZ_VERSION`. Manual zip/tar: put `ymz` / `ymzd` on PATH.
 
-### From source
-
-Go **1.26+**, pure Go SQLite (`CGO_ENABLED=0`).
+**From source** — Go **1.26+**, pure Go SQLite (`CGO_ENABLED=0`):
 
 ```bash
 make all && make install    # check + build + ~/.local/bin
@@ -108,44 +71,85 @@ make all && make install    # check + build + ~/.local/bin
 .\scripts\dev.ps1 -Action install
 ```
 
-Systemd / publish: [`docs/release.md`](docs/release.md), [`packaging/install/systemd.md`](packaging/install/systemd.md).
+Systemd / publish: [`docs/release.md`](docs/release.md).
+
+</details>
+
+## Quick start
+
+```bash
+# 1) API key (recommended)
+#    edit ~/.yunmengze/env  →  DEEPSEEK1_API_KEY=sk-...
+#    or: export DEEPSEEK1_API_KEY=...
+
+# 2) Validate + open TUI (auto-starts the daemon)
+ymz config validate --mode user
+ymz
+```
+
+Leave the TUI with `/quit` — **the daemon keeps running**. Stop it with `ymz stop`.
+
+## Coding loop
+
+One user message is a **turn**. Each model request plus the tools it called is a **step**. Failures feed the model; they do not kill the turn.
+
+```mermaid
+flowchart LR
+  You[You · TUI] --> Submit[Submit or Steer]
+  Submit --> Pack[ContextView]
+  Pack --> Step[step: model + tools]
+  Step -->|ok or tool JSON error| Next{more tools or inbox?}
+  Next -->|yes| Step
+  Next -->|model stops, inbox empty| Done[turn ends]
+  Perm["/perm · ask_user"] -.-> Step
+```
+
+| What happened | Loop |
+| --- | --- |
+| Tool succeeded | JSON in, continue |
+| Policy / human deny, or CLI with no wait | `tool_denied` JSON, continue |
+| Business failure — missing file, patch miss, non-zero exit, timeout | error JSON, **continue** |
+| Unadvertised or invalid tool call | observation JSON, continue |
+| Parent context cancelled, or DB cannot persist | cancel / fail the turn |
+
+While a turn is running, **Enter steers the next step** (does not cancel in-flight tools). Esc or `/new` cancels the turn. The model can pause on `ask_user`; CLI and cron never wait.
+
+Packing is a single `ContextView` (prefix + summary + tail + ephemeral todos). Details: [ADR-051](docs/wiki/adr/051-coding-loop-contextview.md) · [ADR-052](docs/wiki/adr/052-coding-loop-harness.md).
+
+## TUI
+
+`ymz` opens the TUI (and starts the daemon if needed). Transcript is bubbles, not a log dump. Live replies stay unfolded and pin to the bottom; thinking and long tool results fold.
+
+| Input | Behavior |
+| --- | --- |
+| **Tab** · **Shift+Tab** | Cycle **plan** (RO) → **agent** (R/W, `/perm` for tests/git) → **auto** (this session pre-grants process+git) |
+| Plain text | Submit. **While a turn is running, Enter steers** |
+| `/new` | Leave to ready; cancels a running turn |
+| `/perm` | once · similar · permanent · deny |
+| `/undo` · **Esc Esc** | Rewind last agent file write |
+| `/compact` · `/model` · `/skills` | Context, global/session model, skill preload |
+| `/cron` · `/memory` · `/journey` | Jobs, facts, memory+skill timeline |
+| **e** / **E** / **c** | Expand last fold · expand all · collapse |
+| Drag-select | Copy transcript text |
+| **Esc** | Close overlay; running turn → cancel |
+| `/quit` | Exit TUI (`/q` `/exit`; daemon stays up) |
+
+`/help` lists the rest. Slash priority: built-in → `chat.commands` → skill id.
 
 ## Configure
 
-Config lives under a **flat home root** (not project cwd). Installers seed templates when missing.
-
-| Mode | Path |
-| --- | --- |
-| **user** (all OS) | **`~/.yunmengze/`** — Windows: `%USERPROFILE%\.yunmengze\` |
-| system | Linux `/etc/yunmengze` · Win `%ProgramData%\YunmengZe\config` |
+Config lives under a **flat home root** (not the project cwd). User mode on every OS: **`~/.yunmengze/`** (`YMZ_HOME` overrides). Windows: `%USERPROFILE%\.yunmengze\`.
 
 ```text
 ~/.yunmengze/
   agent.json          # or agent.local.json (wins)
   env                 # optional KEY=value (does not override process env)
+  AGENTS.md           # user rules (seeded if missing)
   core.db
   logs/  run/  skills/
 ```
 
-Override root: `YMZ_HOME=/abs/path`.
-
-### API key (any one)
-
-1. `{env:DEEPSEEK1_API_KEY}` + system env or `~/.yunmengze/env` (**recommended**)  
-2. `{file:path}` relative to ConfigDir  
-3. Literal `"apiKey": "sk-..."` in JSON (local only; mode `600`)
-
-```bash
-ymz paths user
-ymz config validate --mode user
-# Optional: map OpenCode config → agent.local.json (warnings for plugins/LSP/oauth MCP)
-ymz config import-opencode              # default ~/.config/opencode/opencode.json
-ymz config import-opencode ./opencode.json --dry-run
-```
-
-### Minimal provider config
-
-Templates use two sample suppliers: **`deepseek1`** (official bare model ids) and **`deepseek2`** (gateway / nested wire ids). Active selection below is `deepseek1`.
+Put the API key in `~/.yunmengze/env` or the process environment, then reference `{env:VAR}` in JSON. `{file:path}` and a literal `"apiKey"` (mode `600`, local only) also work.
 
 ```json
 {
@@ -164,119 +168,50 @@ Templates use two sample suppliers: **`deepseek1`** (official bare model ids) an
           "contextWindow": 65536
         }
       }
-    },
-    "deepseek2": {
-      "type": "openai-compatible",
-      "options": {
-        "baseURL": "https://llm.example.com/v1",
-        "apiKey": "{env:DEEPSEEK2_API_KEY}"
-      },
-      "models": {
-        "deepseek/deepseek-v4-flash": {
-          "name": "Nested wire id → select deepseek2/deepseek/deepseek-v4-flash"
-        },
-        "flash": {
-          "name": "Short key + id override → select deepseek2/flash",
-          "id": "deepseek/deepseek-v4-flash"
-        }
-      }
     }
   }
 }
 ```
 
-- Selection is **`providerId/modelId…`** (first `/` only; model segment may contain `/`). Catalog keys match that segment; optional `models.<key>.id` overrides the wire/API id (OpenCode-style).  
-- Example: `deepseek1/deepseek-chat` wires `deepseek-chat`; `deepseek2/deepseek/deepseek-v4-flash` wires `deepseek/deepseek-v4-flash`.  
-- `maxTokens` = output cap; `contextWindow` = packing / UI pressure ([ADR-041](docs/wiki/adr/041-context-packing-and-pressure.md)).  
-- Optional role map `models.subagent` / `models.compact` ([ADR-045](docs/wiki/adr/045-model-roles.md)). No `models.vision` (rejected at load). `/model` only switches **global main**.  
-- Optional `chat` (workspace, tools, permission, memory, **commands**): full example [`configs/agent.json.example`](configs/agent.json.example) · wire formats [`docs/wiki/provider-protocols.md`](docs/wiki/provider-protocols.md).  
-- User rules: `~/.yunmengze/AGENTS.md` (seeded if missing; do not overwrite existing). Project `.yunmengze/AGENTS.md` is appended when present. Instruction only — no grants.  
-- Optional `mcp.servers`: stdio (`command`) or remote (`type`/`url`/`headers`) — [ADR-040](docs/wiki/adr/040-mcp-tool-broker.md).
+- Selection is `providerId/modelId…` (first `/` only; the model segment may contain `/`).
+- `maxTokens` = output cap; `contextWindow` = packing / UI pressure.
+- Optional `chat` (workspace, tools, permission, memory, slash templates): [`configs/agent.json.example`](configs/agent.json.example).
+- User rules: `~/.yunmengze/AGENTS.md`; project `.yunmengze/AGENTS.md` is appended when present. Instruction text only — no grants.
+- `ymz config import-opencode` maps OpenCode config → `agent.local.json` (MCP, `chat.commands`, compaction; warns and drops plugins/LSP).
 
-### Hot-reload
-
-While the daemon is up, edits to `agent.json` / `agent.local.json` / `env` rebuild the **main** provider client (~0.5s). In-flight turns keep the old client.
-
-| Reloads live | Needs `ymz restart` |
-| --- | --- |
-| model, baseURL, protocol, literal / `{file:}` key | `chat.*`, MCP, `models.subagent\|compact` |
-| `{env:VAR}` when process VAR is still empty | process env already set; or daemon started without agent |
-
-Details: [ADR-048](docs/wiki/adr/048-provider-config-hot-reload.md).
-
-## Run
+While the daemon is up, edits to `agent.json` / `agent.local.json` / `env` rebuild the **main** provider (~0.5s). `chat.*`, MCP, and role maps need `ymz restart`.
 
 ```bash
-ymz                 # TUI (auto-starts daemon)
-ymz start           # daemon only
-ymz status          # JSON
-ymz restart         # stop + start
-ymz stop            # shut down daemon
-# long form: ymz daemon start|stop|restart|status
-```
-
-`health` / most CLI subcommands need a **running** daemon; only TUI and `run` call ensure.
-
-### TUI
-
-Chat transcript uses **rounded bubbles** (user / assistant / thinking / tool), not a log dump. Assistant replies with markdown markers render via **glamour** (streaming is throttled; unclosed fences stay plain). **Live replies stay unfolded** and pin to the bottom while streaming; thinking / long tool results still fold. Foldable blocks: `/expand` or keys **`e`** (last) · **`E`** (all) · **`c`** (collapse). Drag-select in the transcript to copy. Header and `/status` show the daemon version.
-
-| Input | Behavior |
-| --- | --- |
-| **Tab** · **Shift+Tab** | Cycle **plan** (RO) → **agent** (R/W, `/perm` for tests/git) → **auto** (this session pre-grants process+git); Tab also completes slash |
-| Plain text | Submit on current mode / session. **While a turn is running, Enter steers the next step** (does not cancel tools) |
-| `/help` | Slash list + keys |
-| `/new` · `/sessions` · `/tasks` | `/new` leaves to ready and cancels a running turn; type to start; list sessions; list / focus tasks |
-| `/back` · `/clear` | Session list (`/clear` aliases `/back`) |
-| `/model` | Switch **global** main (`/model provider/model`); `/model prefer [ref]` session prefer (next chat run) |
-| `/skills` · `/<skill-id>` | Multi-select preload, or skill-as-slash (instruction only). Model otherwise uses `skills_list` → `skill_view`. `/skills apply\|reject <id>` · `/skills archived` |
-| `/<cmd> [args]` | `chat.commands` template slash (`$ARGUMENTS`); priority: built-in → commands → skill |
-| `/compact` · `/perm` | Context compact; tool permission (H4 may hint prior once/similar). Model `ask_user` opens a question card (1–9); `/perm` wins if both pending |
-| `/undo` | Rewind last agent file write (`POST /v1/sessions/{id}/rewind`; Esc Esc) |
-| `/memory` · `/refresh-memory` | Facts (`/memory archived` · `forget\|promote <id>`); rebuild frozen inject |
-| `/expand` · `/journey` | Fold/expand; prepend memory and/or skill-event timeline (`/journey skills`) |
-| `/cron` | Jobs on focused session |
-| `/pause` · `/resume` · `/cancel` · `/stop` | Task control (`/stop` = `/cancel`) |
-| `/status` · `/retry` · `/theme` | Health + **version** + window pressure + Compacted · resubmit last user message · day/night theme |
-| `/quit` | Exit TUI (`/q` `/exit`; daemon stays up) |
-| **Esc** | Close overlay; if a turn is running → cancel; Esc Esc → `/undo` |
-| **e** / **E** / **c** | Expand last foldable (incl. unified diffs) · expand all · collapse (empty input) |
-
-### CLI (scripts)
-
-```bash
-ymz version
-ymz tui --mode user
 ymz paths user
-ymz health --mode user
-ymz run --mode user --execution-mode plan "Report workspace status without changing files."
-ymz task status TASK_ID --mode user
-ymz task pause|resume|cancel TASK_ID --mode user
-ymz logs --tail 200 --run RUN_ID --session SESSION_ID --task TASK_ID
-ymz job list --mode user
-ymz job create --session SESSION_ID --name NAME --title TITLE --every 1h "objective"
-ymz job status|pause|resume|cancel JOB_ID --mode user
-ymz db check --mode user
+ymz config validate --mode user
 ```
 
-Prefer TUI `/cron` to create jobs. Logs: `YMZ_LOG_LEVEL=debug` · [ADR-047](docs/wiki/adr/047-structured-logging-and-debug-chain.md).
+## CLI
+
+Scripts and automation. **No `/perm` wait** — high-risk tools deny immediately.
+
+```bash
+ymz run --execution-mode plan "Report workspace status without changing files."
+ymz task status|pause|resume|cancel TASK_ID
+ymz job list
+ymz job create --session SESSION_ID --name NAME --title TITLE --every 1h "objective"
+ymz logs --tail 200 --run RUN_ID
+ymz start | status | restart | stop
+```
+
+Prefer TUI `/cron` to create jobs. Logs: `YMZ_LOG_LEVEL=debug`.
 
 ## Architecture
 
 ```text
-User → CLI / TUI → local Gateway → ymzd
-         → chatsession · agent · tool broker · skills · jobs
-         → providers · core.db
+ymz  (TUI · CLI)  ──►  local Gateway  ──►  ymzd
+                                            chatsession → harness → Tool Broker
+                                            core.db
 ```
 
-| Piece | Role |
-| --- | --- |
-| CLI · TUI | Gateway clients only — no tools, providers, or grants |
-| Gateway | HTTP/UDS adapter; no tool execution, no model calls |
-| Tool Broker | Sole model-requested effect path |
-| Jobs | Fixed-interval chat submits ([ADR-042](docs/wiki/adr/042-chat-native-jobs.md)) |
+Gateway does not execute tools, call providers, or issue grants. Memory, skills, MCP, and cron jobs are **in-process** on the same daemon — not a product surface of their own.
 
-Start: [`docs/README.md`](docs/README.md) · [`docs/wiki/README.md`](docs/wiki/README.md).
+Design wiki: [`docs/wiki/`](docs/wiki/) (start at [ADR-038](docs/wiki/adr/038-session-chat-boundary.md), [051](docs/wiki/adr/051-coding-loop-contextview.md), [052](docs/wiki/adr/052-coding-loop-harness.md)). Catalog: [`docs/README.md`](docs/README.md).
 
 ## Development
 
@@ -295,8 +230,8 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md), [`AGENTS.md`](AGENTS.md). Vulns: [`SEC
 ## Security
 
 - Do not commit secrets, `agent.local.json`, `*.db`, logs, sockets, or `bin/` / `dist/`.
-- Least privilege: workspace roots, `chat.tools`, service accounts.
-- Grants and the Tool Broker are security boundaries, not optional UI.
+- Least privilege: workspace roots, `chat.tools` / `chat.permission.allow`, service accounts.
+- Grants and the Tool Broker are security boundaries, not optional UI. There is no yolo flag.
 - Back up `core.db` before upgrades on important installs.
 - Review remote install scripts before piping to a shell.
 
@@ -308,6 +243,8 @@ Details: [`SECURITY.md`](SECURITY.md), [threat model ADR-008](docs/wiki/adr/008-
 
 ## Status
 
-Alpha. Production shape is the three-piece stack above. Phase Q coding loop + Q-harden shipped in **v0.2.8**. Remaining tails (O5–O6 / H2 / M*) in [`docs/backlog/current.md`](docs/backlog/current.md).
+Alpha. Focus is the **coding loop and TUI**. Cron, MCP, and memory are supporting pieces — not the headline.
+
+Current line: **v0.3.1** (coding-loop harness + Tab Auto + product README). Optional tails (compat API, messaging channels) live in [`docs/backlog/current.md`](docs/backlog/current.md).
 
 Release checklist: [`docs/release.md`](docs/release.md).

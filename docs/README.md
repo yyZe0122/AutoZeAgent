@@ -10,7 +10,7 @@ Catalog for YunmengZe Agent docs. Start here.
 
 Ops (not a box): [`release.md`](release.md) — only publish runbook.
 
-User install/run: [`README.md`](../README.md). Agent constraints: [`AGENTS.md`](../AGENTS.md). PR norms: [`CONTRIBUTING.md`](../CONTRIBUTING.md).
+User install/run: [`README.md`](../README.md) · [`README.zh.md`](../README.zh.md). Agent constraints: [`AGENTS.md`](../AGENTS.md). PR norms: [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 
 ## Wiki
 
@@ -36,5 +36,5 @@ Write `history/changelog/vX.Y.Z.md` before publish. Tag name must match the file
 
 - New architecture decision → numbered ADR under `wiki/adr/` + update `wiki/README.md`.
 - New / changed live table → update `wiki/database.md`; SQL in `migrations/core/` stays the source of truth.
-- User-facing behavior → also update root `README.md`.
+- User-facing behavior → also update root `README.md` and `README.zh.md`.
 - Missing ADR numbers are historical gaps — do not recreate.

@@ -35,7 +35,7 @@ make build
 4. Use explicit errors and deterministic recovery behavior.
 5. Add a numbered ADR under `docs/wiki/adr/` for a significant architectural decision; update `docs/wiki/README.md` index when adding one. Schema change: also update `docs/wiki/database.md`. Same-package file splits (no new import graph) do **not** need a new ADR — update the existing ADR’s layout note and `docs/backlog/current.md`.
 6. Keep living status / optional tails only in `docs/backlog/current.md` — do not create parallel optimization notes. Large files: split in-package when a new slash / aggregate SQL / `ymzd` wire is hard to review; do not add packages or frameworks. Catalog: `docs/README.md`.
-7. Update public documentation (especially `README.md` dual-track / `chat` / TUI) and configuration examples when user-facing behavior changes.
+7. Update public documentation (root `README.md` / `README.zh.md` — coding loop, TUI, `chat`) and configuration examples when user-facing behavior changes.
 8. Do not edit generated or runtime files unless the change specifically concerns their generator or format.
 
 ## Code style
