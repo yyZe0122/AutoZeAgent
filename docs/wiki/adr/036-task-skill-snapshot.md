@@ -52,7 +52,7 @@ Agent 与 plan 都获得只读工具（Risk R0，不扩 grant）：
 
 `chatsession` 在调用 Provider 前从 Core 数据库读取 Task Skill 快照，并把非空 `Instructions` 加入**独立的** system message（在模式 system prompt 之后、user 消息之前）。该 message 明确：Skill 只能指导本轮回复，不能增加允许的 capability、创建 Approval、发行 Grant、改变 Policy 或授权工具执行。本地 Policy / Grant / Tool Broker 仍为强校验；Skill 内容不能扩大它们。
 
-注入只读快照，**从不**在运行时重新读取 `SKILL.md`。空选择不注入额外 system message；模型应 `skills_list` 再 `skill_view`。
+注入只读快照，**从不**在运行时重新读取 `SKILL.md`。空选择不注入额外 system message；模型应 `skills_list` 再 `skill_view`。Prefix 另注入活跃技能 **目录**（id + 一句话；归档隐藏；`injectscan` 跳过脏项），正文仍不进 Prefix（ADR-052 R5）。
 
 主路径为 TUI `/skills` 显式预载 + 模型 list/view。草稿 apply 不影响已创建 Task 快照（ADR-050）。CLI `skills list` / `run --skill` **未实现**（可选尾巴，见 `docs/backlog/current.md`）。
 

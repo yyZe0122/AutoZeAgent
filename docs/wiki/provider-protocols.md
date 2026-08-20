@@ -65,6 +65,10 @@ Header/env values support `{env:VAR}` / `{file:…}`. Gateway MCP status never r
 | API | `GET /v1/config/commands` → `{commands:[{id,description,template}]}` |
 | Reload | Not hot-reloaded (`chat.*`); `ymz restart` after edit |
 
+### Chat loop cap (`chat.max_iterations`, ADR-052)
+
+Omit or `0` = no hard step cap (Esc / 30min / token / loop-detect). `1`–`256` = last step is a text-only soft landing. Default is no hard cap.
+
 ## API keys (choose any; nothing is forced)
 
 `options.apiKey` supports three forms:

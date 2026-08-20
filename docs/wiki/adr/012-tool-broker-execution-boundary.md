@@ -2,7 +2,7 @@
 
 - 状态：Accepted
 - 日期：2026-07-13
-- 更新：2026-08-13（`fs.go` 同包拆 `fs_{read,write,search}.go`；仍仅经 Broker）
+- 更新：2026-08-17（ADR-052 R1：非零退出是结果；Agent 把工具业务失败回灌模型）
 
 ## 背景
 
@@ -12,7 +12,7 @@ YunmengZe 允许 Agent Runner（经 chatsession）和模型 Tool Call 提出工�
 
 ### 唯一组合入口
 
-Core 中所有内置工具只通过 `internal/tools.RegisterBuiltins` 创建并注册到 Tool Broker。文件、进程、Git 和 HTTP 工具的构造函数保持包内不可见，外部包不能取得内置 Tool 实例后直接调用 `Execute`。文件工具实现同包切开为 `fs.go`（分发）+ `fs_{read,write,search}.go`，仍在 `tools` 包内，不单独成包。
+Core 中所有内置工具只通过 `internal/tools.RegisterBuiltins` 创建并注册到 Tool Broker。文件、进程、Git 和 HTTP 工具的构造函数保持包内不可见，外部包不能取得内置 Tool 实例后直接调用 `Execute`。文件工具实现同包切开为 `fs.go`（分发）+ `fs_{read,write,search,edit}.go`，仍在 `tools` 包内，不单独成包。
 
 低层进程执行器位于 `internal/tools/internal/executor`。Go 的嵌套 `internal` 导入规则在编译期禁止 Gateway、Agent 和其它 Core 包导入该执行器。`RegisterBuiltins` 接收公开的 `ExecutorConfig`，但具体 Runner 只在 tools 包内部创建和持有。
 
@@ -35,6 +35,8 @@ Tool Broker 必须在调用 Tool 的 `Execute` 之前完成以下操作：
 6. 成功写入 `started` Audit；如果审计写入失败，则不得执行 Tool。
 
 Grant 在执行前消耗。工具启动失败、返回非零退出码或被取消时不返还次数，避免相同授权被并发或重试重复使用。
+
+`process_exec` / `process_shell` / `git_*` 的 **非零退出是工具结果**（`exit_code` / stdout / stderr），不是 Broker `error`。启动失败（找不到二进制、坏工作目录）由工具编成观察 JSON 后仍返回 `output` 且 `error==nil`，除非父 ctx 已取消。Broker 仍把真正的执行错误标 `failed`/`timed_out`/`cancelled`；Agent（ADR-052）把这些（除父 ctx 取消）编成 tool 消息继续循环。
 
 ### 输出与失败
 
@@ -81,3 +83,4 @@ HTTP 当前限制审批域名，不等同于完整 SSRF 防护。后续还需要
 - Session chat 预授权（ADR-038）仍走本链路，仅改变 Grant 如何签发，不改变执行校验。
 - PathGuard 为共享可扩展根（ADR-046）：session workspace `AddRoot`；与 grant Paths 对齐；`allow_all` 关闭根限制时仍做路径解析。
 - 只读并行不放宽 Policy/Grant；仅重叠无副作用 IO。
+- 编码循环观察合同见 ADR-052；Broker 仍是唯一副作用入口。

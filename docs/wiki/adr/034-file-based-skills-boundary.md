@@ -30,7 +30,7 @@ Skill 是指令内容，不是授权来源。frontmatter 和正文不能创建 A
 
 ### TUI 选择（skill-as-slash）
 
-- `/skills`：多选，挂到下次 submit 的 `skill_ids`（显式快照，ADR-036）。其余由模型 `skills_list` → `skill_view`。
+- `/skills`：多选，挂到下次 submit 的 `skill_ids`（显式快照，ADR-036）。Prefix 注入技能目录（id + 一句话；ADR-052 R5）；正文由模型 `skills_list` → `skill_view`。
 - `/skills apply|reject <id>`：人工落地或丢弃 `SKILL.md.draft`（ADR-050）；`/skills archived` 列软归档。
 - `/<skill-id>`：切换该 skill；`/<skill-id> text`：确保选中后提交 text。
 - 斜杠优先级：内置（`/model`、`/help` 等）→ `chat.commands` → skill id。

@@ -12,7 +12,7 @@ sessions → tasks → runs → tool_calls
                 ↘ task_skill_snapshots
 jobs → job_runs / job_leases
 memory_entries (+ FTS) · transcript_search (+ FTS)
-tool_permission_requests · context_snapshots · session_compactions
+tool_permission_requests · user_questions · context_snapshots · session_compactions
 skill_usage · skill_events
 session_todos · edit_revisions
 events (append-only) · audit_log · artifacts · agent_run_records
@@ -33,6 +33,7 @@ Daemon is the only lifecycle owner. Components must not close the shared `*sql.D
 | `task_skill_snapshots` | Explicit preload; immutable | [036](adr/036-task-skill-snapshot.md) | 010 |
 | `jobs` / `job_runs` / `job_leases` | Chat-native cron; H7 `model_ref` | [042](adr/042-chat-native-jobs.md) | 012 + 017 + 021 + 024 |
 | `tool_permission_requests` | once / similar / permanent / deny | [043](adr/043-tool-call-permission-interaction.md) | 018 + 025 |
+| `user_questions` | `ask_user` pending / answered / unavailable / cancelled | [052](adr/052-coding-loop-harness.md) | 027 |
 | `context_snapshots` / `session_compactions` | Window pressure; no transcript delete；`through_message_id` + model 由 ADR-051 写满 | [041](adr/041-context-packing-and-pressure.md) / [051](adr/051-coding-loop-contextview.md) | 016 |
 | `session_todos` | 会话 Todo（非 `tasks`） | [051](adr/051-coding-loop-contextview.md) | 026 |
 | `edit_revisions` | 本 agent 写文件检查点 | [051](adr/051-coding-loop-contextview.md) | 026 |

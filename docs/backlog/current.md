@@ -1,6 +1,6 @@
 # YunmengZe Agent 当前状态
 
-更新：2026-08-17（**Tab 三档** Plan / Agent / Auto · 交互 Agent 可 `/perm` · `permission.allow`）
+更新：2026-08-17（**Phase R** 编码循环 harness · **R1–R5 已关闭**）
 
 **本文件是唯一活着的优化/backlog 文档。** 只写未完成与暂缓项；已落地细节见 ADR（`docs/wiki/adr/`）、[`docs/wiki/database.md`](../wiki/database.md)、changelog 与 git。目录：[`docs/README.md`](../README.md)。
 
@@ -19,14 +19,14 @@
 | Hermes 自进化 | ~40% | H3 草稿+人工 apply；H4 习惯提示；H5-skill 软归档（ADR-050）；无自动 apply / yolo |
 | Hermes 消息网关 | ~0% | 仅本机 UDS/loopback；**暂不上**飞书/微信（本机编码/定时为主） |
 
-**产品焦点：** 本机编码循环质量（工具调用 + 上下文压缩 + TUI 跟手）+ 简单任务 + 定时任务。通道/SDK 是添头。  
-**下一优先：** O5–O6 / H2 / M* **等用户再提**，不插队。Phase Q（QA–QH）+ Q-harden = **v0.2.8**。TUI `/new` + 划选 = **v0.3.0**。
+**产品焦点：** 本机编码循环质量（工具观察 + turn/step/inbox + TUI 跟手）+ 简单任务 + 定时任务。通道/SDK 是添头。  
+**下一优先：** O5–O6 / H2 / M* **等用户再提**，不插队。Phase Q + Q-harden = **v0.2.8**。TUI `/new` + 划选 = **v0.3.0**。Phase R = **unreleased**（ADR-052）。
 
 ## 原则（不变）
 
 - 三件套：daemon + CLI·TUI + `core.db`。不恢复 Module Runtime、多 DB、交互 **Planner**（plan-step 整单审批轨）。
 - 工具副作用只经 Tool Broker；Policy → Approval → Capability Grant → containment → 限流 → Audit。
-- Skill 仅指令文本，不扩大授权；`skill_ids` 仅显式预载（TUI/job）；模型经 `skills_list` → `skill_view` 按需加载（ADR-036）。用户规则：`<ConfigDir>/AGENTS.md` + 可选项目 `.yunmengze/AGENTS.md`。
+- Skill 仅指令文本，不扩大授权；`skill_ids` 仅显式预载（TUI/job）；Prefix 注入技能目录（id+一句话）；正文仍 `skills_list` → `skill_view`（ADR-036 / 052）。用户规则：`<ConfigDir>/AGENTS.md` + 可选项目 `.yunmengze/AGENTS.md`（子代理同样继承）。
 - plan 永远只读；高风险工具仅 agent。TUI Tab **Plan → Agent → Auto**：Agent 未预授则 `/perm`；Auto 为本 session 预授 process+git（切走结束）。记住放行：`chat.permission.allow` 或 `chat.tools.*`（OR）。cron / CLI 永不 wait。见 ADR-038 / 043 / 046。
 - 会话记忆为 in-process MemoryManager（ADR-044），非独立 Memory 进程。
 - **客户端分层（ADR-018/022）：** 业务用例只在 daemon；Gateway 仅 HTTP 适配；CLI 与 TUI 经 `gatewayclient` 并列，TUI **不** exec CLI、**不** import tools/providers/agent。
@@ -52,6 +52,7 @@
 | **Q-harden** | 单 packer（热路径仅 L1）· through 滑窗保 tail · 真 model id · todo 留 Ephemeral · HistoryBudget≤usable · 短编码 prompt | **v0.2.8** |
 | **TUI leave** | `/new` 离焦 ready + cancel 本轮；无焦点丢 stream/refresh/perm SSE；去 bubblezone 划选复制；窄屏不 inflate | **v0.3.0** |
 | **Tab stance** | Tab Plan→Agent→Auto；内核仍 agent\|plan；交互 Agent `/perm`；Auto = session 预授 process+git；`permission.allow` OR `tools.*` | **unreleased** |
+| **R** | 观察合同 · turn/step/inbox · steer · `ask_user` · Prefix 技能目录 · agent `http_get`（plan/cron 不广告） | **unreleased**（ADR-052 · migration 027） |
 
 同包大文件拆分已落地（`tui/cmds_*`+`update_*`、`kernel/repository_*`、`tools/fs_*`、`cmd/ymzd/wire_*`）。再拆触发：新 slash / 新聚合 SQL / `ymzd` 接线难 review → 同包再拆。
 
@@ -66,6 +67,7 @@ Phase 1：O1–O4 ✅ ──► O5–O6（用户再提）
 Phase 2：C1–C4 + UX-A/B ✅ · T8 live MD ✅
 Phase 3：H* 已落地 ✅（除 H2）
 Phase Q：编码循环 QA–QH + Q-harden ✅（v0.2.8；细节 ADR-051）
+Phase R：harness 循环语义（ADR-052）✅
 H2 / O5–O6 / M* ── 用户再提（不插队）
 ```
 

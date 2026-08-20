@@ -2,6 +2,7 @@
 
 - 状态：Accepted
 - 日期：2026-07-13
+- 更新：2026-08-17（登记 `question.*`；ADR-052 R4）
 - 更新：2026-08-12（登记 `permission.*` 事件类型）
 
 ## 决策
@@ -20,5 +21,7 @@ Upcaster 必须输出合法 JSON。转换只作用于投递副本，不改变事
 | --- | --- | --- |
 | `permission.pending` | `toolpermission` | 交互 tool-call 挂起（ADR-043）；schema_version=1 |
 | `permission.decided` | `toolpermission` | 用户 decide 之后；schema_version=1 |
+| `question.pending` | `userquestion` | 模型 `ask_user` 挂起（ADR-052 R4）；schema_version=1 |
+| `question.answered` | `userquestion` | 用户作答或系统标 unavailable 之后；schema_version=1 |
 
 上述类型无 upcast 链时按 v1 原样投递。TUI/Gateway SSE 消费者按 `event_type` 前缀分支即可。

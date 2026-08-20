@@ -70,14 +70,14 @@
   "workspace": { "default": "client_cwd" },
   "allow_write": true,
   "compaction": { "enabled": true },
-  "max_iterations": 16
+  "max_iterations": 0
 }
 ```
 
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
 | `compaction.enabled` | `true`（省略整块或字段时） | `false` 时仅 L1–L3，不调 LLM 摘要、不写入新 `session_compactions`；已有摘要仍可被加载；`ForceCompact` 也拒绝 |
-| `max_iterations` | `16` | 每 chat run 的 agent tool 循环上限，范围 1–64 |
+| `max_iterations` | `0`（不硬顶） | 每 turn 的 agent step 上限；1–256 时最后一步 soft-landing；省略 / 0 = 只靠 Esc / 30min / token / loop-detect（ADR-052） |
 
 `contextWindow` 仍在 **model** 配置上（非 `chat`）。
 
@@ -93,7 +93,7 @@
 - 长会话由 token 预算驱动，而非仅消息条数。
 - TUI 可展示 window pressure；CLI/客户端可读 context API 与 `/compact`。
 - 摘要默认开；可用 `chat.compaction.enabled=false` 关闭额外 provider 调用。
-- 循环上限由 `chat.max_iterations` 配置，与窗压独立。
+- 循环上限由 `chat.max_iterations` 配置（默认不硬顶，ADR-052），与窗压独立。
 - Anti-thrash 限制自动 LLM 摘要刷爆；手动 compact 仍可用。
 
 Phase Q（ADR-051）把叠在一起的三条 pack 管线收成单 `ContextView.Build`：装配在 `executeChat` 且 pin 之后；`through_message_id` + 真 model 写入 `session_compactions`；CJK 启发式（CJK rune ≈ 1 token，其余 /4）；退役 `RunRequest.History`。TUI 分页仍走 ASC `SessionTranscript`，packing 用 `SessionTranscriptTail`。旧行 `through_message_id=''` 回退 keep-2-turns。Q-harden：热路径不再对整份 view 跑 L2/L3；through 滑出 Tail 窗时保留整段 tail。
@@ -103,4 +103,4 @@ Phase Q（ADR-051）把叠在一起的三条 pack 管线收成单 `ContextView.B
 - 实现：`internal/contextpack`、`internal/agent/runner.go`、`internal/chatsession`、`internal/corequery`、`providerconfig.ChatConfig`、migration 016、TUI `/compact`。
 - Provider 字段：`docs/wiki/provider-protocols.md`（`contextWindow`）。
 - 交互 tool permission：ADR-043；记忆 `on_pre_compress`：ADR-044。
-- 编码循环合同：ADR-051。
+- 编码循环装配：ADR-051。循环语义（观察 / turn·step·inbox / `max_iterations`）：ADR-052。

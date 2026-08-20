@@ -89,4 +89,5 @@ QB 内部禁止拆开发布：只合 QB2 或只改消息序、保留 `History`�
 
 - 切片摘要：[`docs/backlog/current.md`](../../backlog/current.md) Phase Q（已关闭）
 - ADR-041 装配/窗压；ADR-044 记忆与 L3；ADR-038 chat；ADR-022 corequery；ADR-045 模型 pin
+- 循环语义（失败回灌 / turn·step·inbox）见 [ADR-052](052-coding-loop-harness.md)；本 ADR 只管装配。
 - 实现：`internal/contextpack`、`internal/chatsession`、`internal/agent`、`internal/corequery`、`internal/sessiontodo`、`internal/editrev`

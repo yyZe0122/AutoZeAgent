@@ -2,7 +2,7 @@
 
 Numbered ADRs plus the `core.db` map. Catalog: [`docs/README.md`](../README.md).
 
-Living status / backlog (only): [`docs/backlog/current.md`](../backlog/current.md). **当前线 v0.3.0**（TUI `/new` + 划选）。Phase Q + Q-harden = v0.2.8。下一优先：O5–O6 / H2 / M*（等用户再提）。  
+Living status / backlog (only): [`docs/backlog/current.md`](../backlog/current.md). **当前线 v0.3.0**（TUI `/new` + 划选）。Phase Q + Q-harden = v0.2.8。Phase R（ADR-052）R1–R5 已落地。下一优先：O5–O6 / H2 / M*（等用户再提）。  
 Agent/contributor entry: [`AGENTS.md`](../../AGENTS.md).  
 Database map: [`database.md`](database.md).
 
@@ -39,6 +39,7 @@ Do **not** restore deleted pieces: Module Runtime/Supervisor, out-of-process Mem
 | 17 | [048](adr/048-provider-config-hot-reload.md) | Provider config watch + main-stack hot-reload |
 | 18 | [050](adr/050-in-process-self-improvement.md) | In-process skill draft / habit hint / skill usage (H3/H4/H5-skill) |
 | 19 | [051](adr/051-coding-loop-contextview.md) | Phase Q ContextView + coding-loop contract (QB–QH) |
+| 20 | [052](adr/052-coding-loop-harness.md) | Phase R turn/step/next-step inbox + observation contract |
 
 Also: O3 `chat.commands` (ADR-038 / [provider-protocols](provider-protocols.md)); O4/H7 run resolve (`internal/modelresolve`, ADR-045：job pin → prefer → main).
 
@@ -92,6 +93,7 @@ Provider wire formats: [`provider-protocols.md`](provider-protocols.md).
 | 048 | Provider config hot-reload | Main stack only; no late-bind chat |
 | 050 | In-process self-improvement | H3 skill draft+apply; H4 habit hint; H5-skill last-used/archive; ≠ Evolution |
 | 051 | Coding-loop ContextView | Single `Build`; retire `History`; todo / L3 / checkpoint boundaries |
+| 052 | Coding-loop harness | Observation contract; turn/step/next-step inbox; steer / ask_user（R1–R5 已落地） |
 
 Missing numbers (002, 005, 014–015, 019–021, 025, …) are **historical gaps**, not missing files to recreate.
 

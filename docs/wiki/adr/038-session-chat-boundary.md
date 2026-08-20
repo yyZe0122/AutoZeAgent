@@ -2,7 +2,7 @@
 
 - 状态：Accepted
 - 日期：2026-07-30
-- 更新：2026-08-14（Prefix 注入 `internal/version` + 诚实角色：无 vision；`/model` 只切 main）
+- 更新：2026-08-17（ADR-052：`AllowedTools` 按名 unique；ask 姿态 once+session scope 仍可双写 plan）
 
 ## 背景
 
@@ -44,7 +44,7 @@
   "allow_write": true,
   "tools": { "git": false, "process": false },
   "compaction": { "enabled": true },
-  "max_iterations": 16,
+  "max_iterations": 0,
   "permission": { "allow": [] }
 }
 ```
@@ -74,11 +74,12 @@
 
 - Gateway 不执行 tool、不调 provider、不发 grant；
 - 任务状态机：`created → running → (paused) → completed|failed|cancelled`；无 Planner 遗留态；
-- Skill 与 `chat.commands` 仅指令文本，不扩大授权；TUI 可 `/skills`、`/skills apply|reject`、`/<skill-id>` 或 `/<command>` 显式使用（草稿见 ADR-050）。模型经 `skills_list` / `skill_view` 按需加载（ADR-036）。
-- 可选用户规则：`<ConfigDir>/AGENTS.md`（EnsureConfig 缺则种子）始终注入；`<workspace>/.yunmengze/AGENTS.md` 存在则追加。经 `injectscan`；不扩 grant。
-- Prefix：短身份（`YunmengZe Agent <version>` + 模式 + 三角色 + 无 vision + `/model` 只切 main）+ 共用工具协议。pin 之后另插一条 `<env>`（当前 model / workspace / UTC date）。用户/项目 `AGENTS.md` 仍是后面独立 system（preamble：不扩授权）。子代理 prompt 只带版本，不带 env。
+- Skill 与 `chat.commands` 仅指令文本，不扩大授权；TUI 可 `/skills`、`/skills apply|reject`、`/<skill-id>` 或 `/<command>` 显式使用（草稿见 ADR-050）。Prefix 注入技能目录（id+一句话）；正文仍 `skills_list` / `skill_view`（ADR-036 / 052）。
+- 可选用户规则：`<ConfigDir>/AGENTS.md`（EnsureConfig 缺则种子）始终注入；`<workspace>/.yunmengze/AGENTS.md` 存在则追加。经 `injectscan`；不扩 grant。子代理继承同一套 overlay。
+- Prefix：短身份（`YunmengZe Agent <version>` + 模式 + 三角色 + 无 vision + `/model` 只切 main）+ 共用工具协议。pin 之后另插一条 `<env>`（当前 model / workspace / UTC date）。用户/项目 `AGENTS.md` 仍是后面独立 system（preamble：不扩授权）。循环语义见 ADR-052。
 
 ## 结果
 
 - Tab 语义对齐 OpenCode；单一 chat 编排器；
+- `AllowedTools` 按名 unique；工具业务失败回灌模型（ADR-052）；运行中回车 = steer；`ask_user` 问题卡（perm 优先）；Prefix 含技能目录；交互 agent 广告 `http_get` 不预发（plan/cron 不广告）；
 - 定时 Job 见 ADR-042。

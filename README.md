@@ -224,14 +224,14 @@ Chat transcript uses **rounded bubbles** (user / assistant / thinking / tool), n
 | Input | Behavior |
 | --- | --- |
 | **Tab** · **Shift+Tab** | Cycle **plan** (RO) → **agent** (R/W, `/perm` for tests/git) → **auto** (this session pre-grants process+git); Tab also completes slash |
-| Plain text | Submit on current mode / session |
+| Plain text | Submit on current mode / session. **While a turn is running, Enter steers the next step** (does not cancel tools) |
 | `/help` | Slash list + keys |
 | `/new` · `/sessions` · `/tasks` | `/new` leaves to ready and cancels a running turn; type to start; list sessions; list / focus tasks |
 | `/back` · `/clear` | Session list (`/clear` aliases `/back`) |
 | `/model` | Switch **global** main (`/model provider/model`); `/model prefer [ref]` session prefer (next chat run) |
 | `/skills` · `/<skill-id>` | Multi-select preload, or skill-as-slash (instruction only). Model otherwise uses `skills_list` → `skill_view`. `/skills apply\|reject <id>` · `/skills archived` |
 | `/<cmd> [args]` | `chat.commands` template slash (`$ARGUMENTS`); priority: built-in → commands → skill |
-| `/compact` · `/perm` | Context compact; tool permission (H4 may hint prior once/similar) |
+| `/compact` · `/perm` | Context compact; tool permission (H4 may hint prior once/similar). Model `ask_user` opens a question card (1–9); `/perm` wins if both pending |
 | `/undo` | Rewind last agent file write (`POST /v1/sessions/{id}/rewind`; Esc Esc) |
 | `/memory` · `/refresh-memory` | Facts (`/memory archived` · `forget\|promote <id>`); rebuild frozen inject |
 | `/expand` · `/journey` | Fold/expand; prepend memory and/or skill-event timeline (`/journey skills`) |
